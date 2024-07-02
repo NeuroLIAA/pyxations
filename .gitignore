@@ -1,0 +1,5 @@
+# Ignore all derivatives
+example_dataset_derivatives/
+
+# Ignore Remodnav events detection folder
+misc_funtions/Remodnav_detection/
