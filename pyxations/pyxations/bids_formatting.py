@@ -108,6 +108,10 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
     # Convert EDF to ASCII
     ascii_file_path = convert_edf_to_ascii(edf_file_path,derivatives_folder)
 
+    #Check if files already exist:
+    if os.path.exists(os.path.join(derivatives_folder, 'header.hdf5')) and os.path.exists(os.path.join(derivatives_folder, 'msg.hdf5')) and os.path.exists(os.path.join(derivatives_folder, 'calib.hdf5')) and os.path.exists(os.path.join(derivatives_folder, 'samples.hdf5')):
+        return
+
     # ===== READ IN FILES ===== #
     # Read in EyeLink file
     
@@ -208,17 +212,18 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
     df_sacc = pd.read_csv(ascii_file_path, skiprows=i_not_esacc, header=None, sep='\s+', usecols=range(1, 11),
                           low_memory=False,dtype = {5: str, 6: str, 7: str, 8: str})
     df_sacc.columns = ['eye', 'tStart', 'tEnd', 'duration', 'xStart', 'yStart', 'xEnd', 'yEnd', 'ampDeg', 'vPeak']
-    
-    # Remove rows which have a '.' in 'xStart', 'yStart', 'xEnd' or 'yEnd' because those are saccades that were not fully detected
-    df_sacc = df_sacc[~df_sacc['xStart'].str.contains('.')]
-    df_sacc = df_sacc[~df_sacc['yStart'].str.contains('.')]
-    df_sacc = df_sacc[~df_sacc['xEnd'].str.contains('.')]
-    df_sacc = df_sacc[~df_sacc['yEnd'].str.contains('.')]
+
+    # Remove rows which don't have a digit in the xStart, yStart, xEnd, yEnd columns
+    filtering = df_sacc['xStart'].apply(lambda x: not any(char.isdigit() for char in x)) | df_sacc['yStart'].apply(lambda x: not any(char.isdigit() for char in x)) | df_sacc['xEnd'].apply(lambda x: not any(char.isdigit() for char in x)) | df_sacc['yEnd'].apply(lambda x: not any(char.isdigit() for char in x))
+    df_sacc = df_sacc[~filtering]
+
 
     df_sacc['xStart'] = pd.to_numeric(df_sacc['xStart'], errors='raise')
     df_sacc['yStart'] = pd.to_numeric(df_sacc['yStart'], errors='raise')
     df_sacc['xEnd'] = pd.to_numeric(df_sacc['xEnd'], errors='raise')
     df_sacc['yEnd'] = pd.to_numeric(df_sacc['yEnd'], errors='raise')
+
+
 
     # Blinks
     print('Parsing blinks...')

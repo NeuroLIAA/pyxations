@@ -74,6 +74,10 @@ class RemodnavDetection(EyeMovementDetection):
         ValueError
             If Remodnav detection fails.
         """
+        out_folder = os.path.join(self.session_folder_path, out_folder)
+        # Move eye data, detections file and image to subject results directory
+        os.makedirs(out_folder, exist_ok=True)
+
         samples = pd.read_hdf(path_or_buf=os.path.join(self.session_folder_path, 'samples.hdf5'))
         
         times = np.arange(stop=len(samples) / sfreq, step=1/sfreq)
@@ -109,8 +113,8 @@ class RemodnavDetection(EyeMovementDetection):
                         f'--max-pso-duration {max_pso_dur} --min-fixation-duration {min_fix_dur} --max-vel {sac_max_vel}'
             failed = os.system(command)
 
-            # Delete eye data file
-            os.remove(eye_samples_fname)
+            # Move et data file
+            os.replace(eye_samples_fname, os.path.join(out_folder, eye_samples_fname))
 
             # Raise error if events detection with Remodnav failed
             if failed:
@@ -119,14 +123,12 @@ class RemodnavDetection(EyeMovementDetection):
             # Read results file with detections
             sac_fix = pd.read_csv(results_fname, sep='\t')
 
-            # Move eye data, detections file and image to subject results directory
-            os.makedirs(out_folder, exist_ok=True)
-            # Move et data file
-            os.replace(eye_samples_fname, out_folder + eye_samples_fname)
+
+
             # Move results file
-            os.replace(results_fname, out_folder + results_fname)
+            os.replace(results_fname, os.path.join(out_folder,results_fname))
             # Move results image
-            os.replace(image_fname, out_folder + image_fname)
+            os.replace(image_fname, os.path.join(out_folder, image_fname))
 
             # Get saccades and fixations
             saccades_eye_all = copy.copy(sac_fix.loc[(sac_fix['label'] == 'SACC') | (sac_fix['label'] == 'ISAC')])
