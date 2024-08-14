@@ -199,14 +199,16 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
     print('Parsing saccades...')
     i_not_esacc = np.nonzero(lineType != 'ESACC')[0]
     df_sacc = pd.read_csv(ascii_file_path, skiprows=i_not_esacc, header=None, sep='\s+', usecols=range(1, 11),
-                          low_memory=False)
+                          low_memory=False,dtype = {5: str, 6: str, 7: str, 8: str})
     df_sacc.columns = ['eye', 'tStart', 'tEnd', 'duration', 'xStart', 'yStart', 'xEnd', 'yEnd', 'ampDeg', 'vPeak']
     
-    # If there are "." values in xStart, yStart or xEnd, yEnd, it means that the saccade was not detected, and it should be removed.
+    # Remove rows which have a '.' in 'xStart', 'yStart', 'xEnd' or 'yEnd'
+
     df_sacc = df_sacc[~df_sacc['xStart'].str.contains('.')]
     df_sacc = df_sacc[~df_sacc['yStart'].str.contains('.')]
     df_sacc = df_sacc[~df_sacc['xEnd'].str.contains('.')]
     df_sacc = df_sacc[~df_sacc['yEnd'].str.contains('.')]
+
     df_sacc['xStart'] = pd.to_numeric(df_sacc['xStart'], errors='raise')
     df_sacc['yStart'] = pd.to_numeric(df_sacc['yStart'], errors='raise')
     df_sacc['xEnd'] = pd.to_numeric(df_sacc['xEnd'], errors='raise')
@@ -288,9 +290,10 @@ def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords):
         # Filter out non-session folders
         sessions_folders = [folder for folder in sessions_folders if folder.startswith("ses-")]
         for session in os.listdir(os.path.join(bids_dataset_folder, subject)):
-            for file in os.listdir(os.path.join(bids_dataset_folder, subject, session,'ET')):
+            eye_tracking_data_path = os.path.join(bids_dataset_folder, subject, session, 'ET')
+            for file in os.listdir(eye_tracking_data_path):
                 if file.lower().endswith(".edf"):
-                    edf_file_path = os.path.join(bids_dataset_folder, subject, session, file)
+                    edf_file_path = os.path.join(eye_tracking_data_path, file)
                     derivatives_folder_path = os.path.join(derivatives_folder, subject, session)
                     os.makedirs(derivatives_folder_path, exist_ok=True)
                     parse_edf_eyelink(edf_file_path, msg_keywords, derivatives_folder_path)
