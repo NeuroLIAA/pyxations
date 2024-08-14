@@ -172,6 +172,13 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
     print('Parsing calibration...')
     iCal = np.nonzero(lineType!='Calibration')[0]
     dfCalib = pd.read_csv(ascii_file_path,skiprows=iCal,names=np.arange(9))
+    # Get the first column (which is of type string) and see which row contains the string 'GAZE_COORDS'
+    i_gaze_coords = dfCalib[0].str.contains('GAZE_COORDS')
+    # Get the first row that matches the condition
+    i_gaze_coords = i_gaze_coords[i_gaze_coords].index[0]
+    # Grab the value of that row in the first column, turn it into a string and split it by spaces, then get the 5th and 6th elements, which are the screen resolution
+    screen_res = dfCalib.iloc[i_gaze_coords][0].split()[5:7]
+    dfHeader.loc[len(dfHeader.index)] = "** SCREEN SIZE: "+ " ".join(screen_res)
 
 
 
@@ -202,8 +209,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
                           low_memory=False,dtype = {5: str, 6: str, 7: str, 8: str})
     df_sacc.columns = ['eye', 'tStart', 'tEnd', 'duration', 'xStart', 'yStart', 'xEnd', 'yEnd', 'ampDeg', 'vPeak']
     
-    # Remove rows which have a '.' in 'xStart', 'yStart', 'xEnd' or 'yEnd'
-
+    # Remove rows which have a '.' in 'xStart', 'yStart', 'xEnd' or 'yEnd' because those are saccades that were not fully detected
     df_sacc = df_sacc[~df_sacc['xStart'].str.contains('.')]
     df_sacc = df_sacc[~df_sacc['yStart'].str.contains('.')]
     df_sacc = df_sacc[~df_sacc['xEnd'].str.contains('.')]
