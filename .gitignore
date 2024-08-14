@@ -9,3 +9,5 @@ misc_functions/Remodnav_detection/*
 
 # Ignore virtual environment folder
 vend/
+
+.pytest_cache/

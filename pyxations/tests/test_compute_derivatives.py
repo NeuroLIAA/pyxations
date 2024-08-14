@@ -1,5 +1,5 @@
 import unittest
-from pyxations.bids_formatting import compute_derivatives_for_dataset
+from pyxations import compute_derivatives_for_dataset
 import os
 
 class TestComputeDerivatives(unittest.TestCase):

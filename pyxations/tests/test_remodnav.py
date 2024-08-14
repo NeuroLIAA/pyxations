@@ -1,6 +1,6 @@
 import unittest
 import os
-from pyxations.eye_movement_detection import RemodnavDetection
+from pyxations import RemodnavDetection
 
 class TestRemodnav(unittest.TestCase):
     def test_remodnav(self):

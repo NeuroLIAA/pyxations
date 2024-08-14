@@ -1,5 +1,5 @@
 import unittest
-from pyxations.bids_formatting import dataset_to_bids
+from pyxations import dataset_to_bids
 import os
 
 class TestDatasetToBids(unittest.TestCase):
