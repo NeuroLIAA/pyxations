@@ -70,7 +70,7 @@ def get_timestamps_from_messages(user_messages:pd.DataFrame, messages: list[str]
 
     return timestamps
 
-def split_into_trials(samples:pd.Dataframe,ordered_trials_ids:list, user_messages:pd.Dataframe=None,start_msgs: list[str]=None, end_msgs: list[str]=None,duration: float=None, start_times: list[float]=None, end_times: list[float]=None):
+def split_into_trials(data:pd.Dataframe,ordered_trials_ids:list, user_messages:pd.Dataframe=None,start_msgs: list[str]=None, end_msgs: list[str]=None,duration: float=None, start_times: list[float]=None, end_times: list[float]=None):
     """
     There are three ways of splitting the samples into trials:
     1) Using the start and end messages.
@@ -78,8 +78,7 @@ def split_into_trials(samples:pd.Dataframe,ordered_trials_ids:list, user_message
     3) Using the start and end times.
 
     Parameters:
-    samples (pd.DataFrame): DataFrame containing samples data with the following columns:
-                             'tSample', 'x', 'y', 'trial'.
+    data (pd.DataFrame): DataFrame that must contain either the 'tSample' column or the 'tStart' and 'tEnd' columns.
     ordered_trials_ids (list): List of ordered trial ids.
     user_messages (pd.DataFrame): DataFrame containing user messages data with the following columns:
                                   'time', 'text'.
@@ -126,10 +125,16 @@ def split_into_trials(samples:pd.Dataframe,ordered_trials_ids:list, user_message
         raise ValueError("The amount of computed trials is {} while the amount of ordered trial ids is {}.".format(len(start_times), len(ordered_trials_ids)))
 
     # Create a list of trial ids for each sample
-    samples['trial'] = [np.nan] * len(samples)
+    data['trial'] = [np.nan] * len(data)
 
     # Divide in trials according to start_times and end_times
-    for i in range(len(start_times)):
-        samples.loc[(samples['tSample'] >= start_times[i]) & (samples['tSample'] <= end_times[i]), 'trial'] = ordered_trials_ids[i]
+    if 'tSample' in data.columns:
+        for i in range(len(start_times)):
+            data.loc[(data['tSample'] >= start_times[i]) & (data['tSample'] <= end_times[i]), 'trial'] = ordered_trials_ids[i]
+    elif 'tStart' in data.columns and 'tEnd' in data.columns:
+        for i in range(len(start_times)):
+            data.loc[(data['tStart'] >= start_times[i]) & (data['tEnd'] <= end_times[i]), 'trial'] = ordered_trials_ids[i]
+    else:
+        raise ValueError("The DataFrame must contain either the 'tSample' column or the 'tStart' and 'tEnd' columns.")
 
-    return samples
+    return data
