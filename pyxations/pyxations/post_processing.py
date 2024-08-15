@@ -4,15 +4,6 @@ import numpy as np
 import pandas as pd
 from os import path
 
-def load_derivative(path_to_file:str):
-    if path.exists(path_to_file):
-        file = pd.read_hdf(path_or_buf=path_to_file)
-    else:
-        raise FileNotFoundError(f'File {path_to_file} not found')
-    return file
-
-
-
 class PostProcessing:
     def __init__(self, session_folder_path):
         self.session_folder_path = session_folder_path
