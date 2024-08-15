@@ -3,35 +3,33 @@ import matplotlib.image as mpimg
 import matplotlib.colors as mplcolors
 import numpy as np
 import pandas as pd
-from . import saccades_direction
 from os import path
 
 class Visualization():
     def __init__(self, session_folder_path):
         self.session_folder_path = session_folder_path
 
-
-    def load_derivative(self, file_name:str):
-        path_to_file = path.join(self.session_folder_path, file_name)
-        if path.exists(path_to_file):
-            file = pd.read_hdf(path_or_buf=path_to_file)
-        else:
-            raise FileNotFoundError(f'File {path_to_file} not found')
-        return file
-
-    def scanpath(self,tmin:float, tmax:float, img_path:str=None, 
+    def scanpath(self,fixations:pd.DataFrame,tmin:float, tmax:float, img_path:str=None, saccades:pd.DataFrame=None, samples:pd.DataFrame=None,
              screen_res_x:int=1920, screen_res_y:int=1080):
         """
         Plots the scanpath, including fixations, saccades, and optionally an image background and gaze samples.
 
         Parameters
         ----------
+        fixations : pd.DataFrame
+            DataFrame containing fixation data with the following columns:
         tmin : float
             The minimum time for filtering the data.
         tmax : float
             The maximum time for filtering the data.
         img_path : str, optional
             Path to an image file to be used as a background (default is None).
+        saccades : pd.DataFrame, optional
+            DataFrame containing saccade data with the following columns:
+            'tStart', 'tEnd', 'ampDeg', 'vPeak', 'xStart', 'xEnd', 'yStart', 'yEnd'.
+        samples : pd.DataFrame, optional
+            DataFrame containing gaze samples data with the following columns:
+            'tSample', 'LX', 'LY', 'RX', 'RY'.
         screen_res_x : int, optional
             Horizontal resolution of the screen in pixels (default is 1920).
         screen_res_y : int, optional
@@ -48,15 +46,7 @@ class Visualization():
         samples : pd.DataFrame
             The filtered samples DataFrame.
         """
-        fixations = self.load_derivative('fix.hdf5')
-        try:
-            samples = self.load_derivative('samples.hdf5')
-        except:
-            samples = None
-        try:
-            saccades = self.load_derivative('sacc.hdf5')
-        except:
-            saccades = None
+
 
 
         #----- Filter saccades, fixations and samples to defined time interval -----#
@@ -154,131 +144,90 @@ class Visualization():
 
         
 
-    @staticmethod
-    def duration(axs=None):
-        def decorator(func):
-            def wrapper(*args, **kwargs):
-                fixations = func(*args, **kwargs)
-                ax = axs
-                print('Plotting fixation duration histogram')
 
-                if ax is None:
-                    fig, ax = plt.subplots()
+    def duration(self,fixations:pd.DataFrame,axs=None):
+        ax = axs
+        print('Plotting fixation duration histogram')
 
-                ax.hist(fixations['duration'], bins=100, edgecolor='black', linewidth=1.2, density=True)
-                ax.set_title('Fixation duration')
-                ax.set_xlabel('Time (ms)')
-                ax.set_ylabel('Density')
+        if ax is None:
+            fig, ax = plt.subplots()
 
-                return fixations
-            return wrapper
-        return decorator
-
-    @staticmethod
-    def amplitude(axs=None):
-        def decorator(func):
-            def wrapper(*args, **kwargs):
-                saccades = func(*args, **kwargs)
-
-                print('Plotting saccades amplitude histogram')
-                ax = axs
-                if ax is None:
-                    fig, ax = plt.subplots()
-
-                saccades_amp = saccades['ampDeg']
-                ax.hist(saccades_amp, bins=100, range=(0, 20), edgecolor='black', linewidth=1.2, density=True)
-                ax.set_title('Saccades amplitude')
-                ax.set_xlabel('Amplitude (deg)')
-                ax.set_ylabel('Density')
-
-                return saccades
-            return wrapper
-        return decorator
-
-    @staticmethod
-    def direction(axs=None,figs=None):
-        def decorator(func):
-            def wrapper(*args, **kwargs):
-                saccades = func(*args, **kwargs)
-
-                print('Plotting saccades direction histogram')
-                ax = axs
-                if ax is None:
-                    fig = plt.figure()
-                    ax = plt.subplot(polar=True)
-                else:
-                    ax.set_axis_off()
-                    ax = figs.add_subplot(2, 2, 3, projection='polar')
+        ax.hist(fixations['duration'], bins=100, edgecolor='black', linewidth=1.2, density=True)
+        ax.set_title('Fixation duration')
+        ax.set_xlabel('Time (ms)')
+        ax.set_ylabel('Density')
 
 
-                # Add degrees and direction columns to saccades df
-                saccades = saccades_direction(saccades=saccades)
+    def amplitude(self,saccades:pd.DataFrame,axs=None):
+        print('Plotting saccades amplitude histogram')
+        ax = axs
+        if ax is None:
+            fig, ax = plt.subplots()
 
-                # Convert from deg to rad
-                saccades_rad = saccades['deg'] * np.pi / 180 
+        saccades_amp = saccades['ampDeg']
+        ax.hist(saccades_amp, bins=100, range=(0, 20), edgecolor='black', linewidth=1.2, density=True)
+        ax.set_title('Saccades amplitude')
+        ax.set_xlabel('Amplitude (deg)')
+        ax.set_ylabel('Density')
 
-                n_bins = 24
-                ang_hist, bin_edges = np.histogram(saccades_rad, bins=24, density=True)
-                bin_centers = [np.mean((bin_edges[i], bin_edges[i+1])) for i in range(len(bin_edges) - 1)]
 
-                bars = ax.bar(bin_centers, ang_hist, width=2*np.pi/n_bins, bottom=0.0, alpha=0.4, edgecolor='black')
-                ax.set_title('Saccades direction')
-                ax.set_yticklabels([])
+    def direction(self,saccades:pd.DataFrame,axs=None,figs=None):
+        print('Plotting saccades direction histogram')
+        ax = axs
+        if ax is None:
+            fig = plt.figure()
+            ax = plt.subplot(polar=True)
+        else:
+            ax.set_axis_off()
+            ax = figs.add_subplot(2, 2, 3, projection='polar')
+        if 'deg' not in saccades.columns or 'dir' not in saccades.columns:
+            raise ValueError('Compute saccades direction first by using saccades_direction function from the PostProcessing module.')
+        # Convert from deg to rad
+        saccades_rad = saccades['deg'] * np.pi / 180 
 
-                for r, bar in zip(ang_hist, bars):
-                    bar.set_facecolor(plt.cm.Blues(r / np.max(ang_hist)))
+        n_bins = 24
+        ang_hist, bin_edges = np.histogram(saccades_rad, bins=24, density=True)
+        bin_centers = [np.mean((bin_edges[i], bin_edges[i+1])) for i in range(len(bin_edges) - 1)]
 
-                return saccades
-            return wrapper
-        return decorator
+        bars = ax.bar(bin_centers, ang_hist, width=2*np.pi/n_bins, bottom=0.0, alpha=0.4, edgecolor='black')
+        ax.set_title('Saccades direction')
+        ax.set_yticklabels([])
 
-    @staticmethod
-    def main_sequence(axs=None, hline=None):
-        def decorator(func):
-            def wrapper(*args, **kwargs):
-                saccades = func(*args, **kwargs)
+        for r, bar in zip(ang_hist, bars):
+            bar.set_facecolor(plt.cm.Blues(r / np.max(ang_hist)))
 
-                print('Plotting main sequence')
-                ax = axs
-                if ax is None:
-                    fig, ax = plt.subplots()
 
-                saccades_peack_vel = saccades['vPeak']
-                saccades_amp = saccades['ampDeg']
+    def main_sequence(self,saccades:pd.DataFrame,axs=None, hline=None):
+        print('Plotting main sequence')
+        ax = axs
+        if ax is None:
+            fig, ax = plt.subplots()
 
-                ax.plot(saccades_amp, saccades_peack_vel, '.', alpha=0.1, markersize=2)
-                ax.set_xlim(0.01)
-                if hline:
-                    ax.hlines(y=hline, xmin=ax.get_xlim()[0], xmax=ax.get_xlim()[1], colors='grey', linestyles='--', label=hline)
-                    ax.legend()
-                ax.set_yscale('log')
-                ax.set_xscale('log')
-                ax.set_title('Main sequence')
-                ax.set_xlabel('Amplitude (deg)')
-                ax.set_ylabel('Peak velocity (deg)')
-                ax.grid()
+        saccades_peack_vel = saccades['vPeak']
+        saccades_amp = saccades['ampDeg']
 
-                return saccades
-            return wrapper
-        return decorator
+        ax.plot(saccades_amp, saccades_peack_vel, '.', alpha=0.1, markersize=2)
+        ax.set_xlim(0.01)
+        if hline:
+            ax.hlines(y=hline, xmin=ax.get_xlim()[0], xmax=ax.get_xlim()[1], colors='grey', linestyles='--', label=hline)
+            ax.legend()
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax.set_title('Main sequence')
+        ax.set_xlabel('Amplitude (deg)')
+        ax.set_ylabel('Peak velocity (deg)')
+        ax.grid()
 
-    def plot_multipanel(self):
+
+    def plot_multipanel(self,fixations:pd.DataFrame,saccades:pd.DataFrame):
         plt.rcParams.update({'font.size': 12})
         fig, axs = plt.subplots(2, 2, figsize=(12, 7))
         
-        # Load fixations and apply the duration decorator
-        decorated_load_fixations = self.duration(axs=axs[0, 0])(self.load_derivative)
-        decorated_load_fixations("fix.hdf5")
 
-        # Apply main sequence decorator
-        main_sequence = self.main_sequence(axs=axs[1, 1])(self.load_derivative)
-
-        # Apply direction decorator
-        direction = self.direction(axs=axs[1, 0],figs=fig)(main_sequence)
-
-        # Apply amplitude decorator
-        amplitude = self.amplitude(axs=axs[0, 1])(direction)
-        amplitude("sacc.hdf5")
+        self.duration(fixations,axs=axs[0, 0])
+        self.main_sequence(saccades,axs=axs[1, 1])
+        self.direction(saccades,axs=axs[1, 0],figs=fig)
+        self.amplitude(saccades,axs=axs[0, 1])
 
         fig.tight_layout()
         plt.savefig(path.join(self.session_folder_path, 'multipanel.png'))

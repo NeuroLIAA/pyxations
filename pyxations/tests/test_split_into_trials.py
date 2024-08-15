@@ -1,5 +1,5 @@
 import unittest
-from pyxations import split_into_trials
+from pyxations import PostProcessing
 
 class TestSplitIntoTrials(unittest.TestCase):
     def test_split_into_trials(self):

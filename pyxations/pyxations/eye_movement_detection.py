@@ -82,7 +82,7 @@ class RemodnavDetection(EyeMovementDetection):
         
         times = np.arange(stop=len(samples) / sfreq, step=1/sfreq)
 
-        # Dictionaries to store fixations and saccades dataframes from each eye
+        # Dictionaries to store fixations and saccades DataFrames from each eye
         fixations = {}
         saccades = {}
 
