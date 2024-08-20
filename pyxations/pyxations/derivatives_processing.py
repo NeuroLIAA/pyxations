@@ -3,7 +3,9 @@ import pandas as pd
 from . import Visualization, PostProcessing
 from collections import defaultdict
 
-def process_derivatives(derivatives_folder_path:str,ordered_trials_ids:dict,start_msgs: list[str],end_msgs: list[str]):
+detection_algorithm_folder = "eyelink_events"
+
+def process_derivatives(derivatives_folder_path:str,start_msgs: list[str],end_msgs: list[str]):
     subjects = os.listdir(derivatives_folder_path)
     for subject in subjects:
         sessions = os.listdir(os.path.join(derivatives_folder_path,subject))
@@ -13,13 +15,13 @@ def process_derivatives(derivatives_folder_path:str,ordered_trials_ids:dict,star
             # Here you could perform eye movement detection and then load the resulting saccades and fixations
             sacc_filename = "sacc.hdf5"
             fix_filename = "fix.hdf5"
-            saccades = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, sacc_filename))
-            fixations = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, fix_filename))  
+            saccades = pd.read_hdf(path_or_buf=os.path.join(session_folder_path,detection_algorithm_folder, sacc_filename))
+            fixations = pd.read_hdf(path_or_buf=os.path.join(session_folder_path,detection_algorithm_folder, fix_filename))  
             user_messages = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, "msg.hdf5"))                 
-            visualization = Visualization(session_folder_path)
-            post_processing = PostProcessing(session_folder_path)
+            visualization = Visualization(session_folder_path,"eyelink")
+            post_processing = PostProcessing(session_folder_path,"eyelink")
             saccades = post_processing.saccades_direction(saccades, sacc_filename)
-            saccades = post_processing.split_into_trials(saccades,sacc_filename,ordered_trials_ids[subject][session],user_messages,start_msgs,end_msgs)
+            saccades = post_processing.split_into_trials(saccades,sacc_filename,user_messages=user_messages,start_msgs=start_msgs,end_msgs=end_msgs)
             visualization.plot_multipanel(fixations, saccades)
             visualization.scanpath(fixations=fixations,tmin=samples['tSample'][100000], tmax=samples['tSample'][110000], img_path=None, saccades=saccades, samples=samples)
 
@@ -27,9 +29,9 @@ def process_derivatives(derivatives_folder_path:str,ordered_trials_ids:dict,star
 
 def get_ordered_trials_from_psycopy_logs(dataset_folder_path:str):
     #TODO: Implement this function
-    dict_ordered_trials = defaultdict(lambda: defaultdict(list))
+    dict_trial_labels = defaultdict(lambda: defaultdict(list))
     subjects = os.listdir(dataset_folder_path)
     for subject in subjects:
         sessions = os.listdir(os.path.join(dataset_folder_path,subject))
         for session in sessions:
-            dict_ordered_trials[subject][session] = []
+            dict_trial_labels[subject][session] = []

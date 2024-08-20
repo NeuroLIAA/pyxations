@@ -4,28 +4,29 @@ import math
 import os
 import copy
 from tqdm import tqdm
+from abc import ABC, abstractmethod
 
-class EyeMovementDetection():
-    def __init__(self, session_folder_path):
-        self.session_folder_path = session_folder_path
+class EyeMovementDetection(ABC):
 
+    @abstractmethod
     def detect_eye_movements(self,*args,**kwargs):
         pass
-    
+    @abstractmethod
     def save_eye_movements(self,fixations,saccades,times):
-        #TODO: Implement save_eye_movements method, following the guidelines from the eyelink ascii parser.
         pass
 
 
 class RemodnavDetection(EyeMovementDetection):
     def __init__(self, session_folder_path):
-        super().__init__(session_folder_path)
+        self.session_folder_path = session_folder_path
+        self.out_folder = 'remodnav_events/'
     
+    #TODO: Implement save_eye_movements method for remodnav, following the guidelines from the eyelink ascii parser.
     def detect_eye_movements(self,min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05, 
                                  sac_max_vel:float=1000., fix_max_amp:float=1.5, sac_time_thresh:float=0.002,
                                  drop_fix_from_blink:bool=True, sfreq:float=1000,
                                  screen_size:float=38., screen_resolution:int=1920, screen_distance:float=60,
-                                 out_fname:str='events', out_folder:str='Remodnav_detection/'):
+                                 out_fname:str='events'):
         
         """
         Detects fixations and saccades from eye-tracking data for both left and right eyes using REMoDNaV, a velocity based eye movement event detection algorithm 
@@ -74,7 +75,7 @@ class RemodnavDetection(EyeMovementDetection):
         ValueError
             If Remodnav detection fails.
         """
-        out_folder = os.path.join(self.session_folder_path, out_folder)
+        out_folder = os.path.join(self.session_folder_path, self.out_folder)
         # Move eye data, detections file and image to subject results directory
         os.makedirs(out_folder, exist_ok=True)
 

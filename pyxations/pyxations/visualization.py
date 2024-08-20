@@ -6,8 +6,9 @@ import pandas as pd
 from os import path
 
 class Visualization():
-    def __init__(self, session_folder_path):
+    def __init__(self, session_folder_path,events_detection_algorithm):
         self.session_folder_path = session_folder_path
+        self.events_detection_folder = events_detection_algorithm+'_events'
 
     def scanpath(self,fixations:pd.DataFrame,tmin:float, tmax:float, img_path:str=None, saccades:pd.DataFrame=None, samples:pd.DataFrame=None,
              screen_res_x:int=1920, screen_res_y:int=1080):
@@ -140,7 +141,7 @@ class Visualization():
             ax_gaze.set_xlabel('Time [s]')
         # Save figure as "scanpath.png"
         plt.tight_layout()
-        fig.savefig(path.join(self.session_folder_path, 'scanpath.png'))
+        fig.savefig(path.join(self.session_folder_path,self.events_detection_folder, 'scanpath.png'))
 
         
 
@@ -230,5 +231,5 @@ class Visualization():
         self.amplitude(saccades,axs=axs[0, 1])
 
         fig.tight_layout()
-        plt.savefig(path.join(self.session_folder_path, 'multipanel.png'))
+        plt.savefig(path.join(self.session_folder_path,self.events_detection_folder, 'multipanel.png'))
 

@@ -1,8 +1,8 @@
 import unittest
 from pyxations import PostProcessing
 
-class TestSplitIntoTrials(unittest.TestCase):
-    def test_split_into_trials(self):
+class TestBadSamples(unittest.TestCase):
+    def test_bad_samples(self):
 
         # TODO
         

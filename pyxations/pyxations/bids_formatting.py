@@ -54,7 +54,8 @@ def dataset_to_bids(folder_path, files_folder_path, dataset_name, session_substr
 def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id,tag):
     session_folder_path = os.path.join(bids_folder_path, "sub-" + subject_id, "ses-" + session_id,tag)
     os.makedirs(session_folder_path, exist_ok=True)
-    shutil.move(file_path, session_folder_path)
+    if not os.path.exists(os.path.join(session_folder_path, os.path.basename(file_path))):
+        shutil.move(file_path, session_folder_path)
     
 
 def convert_edf_to_ascii(edf_file_path, output_dir):
@@ -170,12 +171,14 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
     dfHeader = pd.read_csv(ascii_file_path,skiprows=np.nonzero(lineType!='HEADER')[0],header=None,sep='\s+')
     # Merge columns into single strings
     dfHeader = dfHeader.apply(lambda x: ' '.join(x.dropna().astype(str)), axis=1)
+    dfHeader["Line_number"] = np.nonzero(lineType=='HEADER')[0]
 
 
     # Import Calibration
     print('Parsing calibration...')
     iCal = np.nonzero(lineType!='Calibration')[0]
     dfCalib = pd.read_csv(ascii_file_path,skiprows=iCal,names=np.arange(9))
+    dfCalib["Line_number"] = np.nonzero(lineType=='Calibration')[0]
     # Get the first column (which is of type string) and see which row contains the string 'GAZE_COORDS'
     i_gaze_coords = dfCalib[0].str.contains('GAZE_COORDS')
     # Get the first row that matches the condition
@@ -198,6 +201,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
         t_msg.append(int(info[1]))
         txt_msg.append(' '.join(info[2:]))
     dfMsg = pd.DataFrame({'time': t_msg, 'text': txt_msg})
+    dfMsg["Line_number"] = i_msg
 
     # Import Fixations
     print('Parsing fixations...')
@@ -205,6 +209,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
     df_fix = pd.read_csv(ascii_file_path, skiprows=i_not_efix, header=None, sep='\s+', usecols=range(1, 8),
                          low_memory=False)
     df_fix.columns = ['eye', 'tStart', 'tEnd', 'duration', 'xAvg', 'yAvg', 'pupilAvg']
+    df_fix["Line_number"] = np.nonzero(lineType=='EFIX')[0]
 
     # Saccades
     print('Parsing saccades...')
@@ -212,11 +217,10 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
     df_sacc = pd.read_csv(ascii_file_path, skiprows=i_not_esacc, header=None, sep='\s+', usecols=range(1, 11),
                           low_memory=False,dtype = {5: str, 6: str, 7: str, 8: str})
     df_sacc.columns = ['eye', 'tStart', 'tEnd', 'duration', 'xStart', 'yStart', 'xEnd', 'yEnd', 'ampDeg', 'vPeak']
-
+    df_sacc["Line_number"] = np.nonzero(lineType=='ESACC')[0]
     # Remove rows which don't have a digit in the xStart, yStart, xEnd, yEnd columns
     filtering = df_sacc['xStart'].apply(lambda x: not any(char.isdigit() for char in x)) | df_sacc['yStart'].apply(lambda x: not any(char.isdigit() for char in x)) | df_sacc['xEnd'].apply(lambda x: not any(char.isdigit() for char in x)) | df_sacc['yEnd'].apply(lambda x: not any(char.isdigit() for char in x))
     df_sacc = df_sacc[~filtering]
-
 
     df_sacc['xStart'] = pd.to_numeric(df_sacc['xStart'], errors='raise')
     df_sacc['yStart'] = pd.to_numeric(df_sacc['yStart'], errors='raise')
@@ -233,6 +237,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
         df_blink = pd.read_csv(ascii_file_path, skiprows=i_not_eblink, header=None, sep='\s+', usecols=range(1, 5),
                                low_memory=False)
         df_blink.columns = ['eye', 'tStart', 'tEnd', 'duration']
+    df_blink["Line_number"] = np.nonzero(lineType=='EBLINK')[0]
 
     # determine sample columns based on eyes recorded in file
     eyes_in_file = np.unique(df_fix.eye)
@@ -258,18 +263,18 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
             dfSamples['%cX' % eye] = np.nan
             dfSamples['%cY' % eye] = np.nan
             dfSamples['%cPupil' % eye] = np.nan
-
+    dfSamples["Line_number"] = np.nonzero(lineType=='SAMPLE')[0]
     dict_events = {'fix': df_fix, 'sacc': df_sacc, 'blink': df_blink}
     if not keep_ascii:
         os.remove(ascii_file_path)
 
     # Save the 5 data structures in HDF5 file each, in the derivatives folder
-    dfHeader.to_hdf(os.path.join(derivatives_folder, 'header.hdf5'), key='dfHeader', mode='w')
-    dfMsg.to_hdf(os.path.join(derivatives_folder, 'msg.hdf5'), key='dfMsg', mode='w')
-    dfCalib.to_hdf(os.path.join(derivatives_folder, 'calib.hdf5'), key='dfCalib', mode='w')
-    dfSamples.to_hdf(os.path.join(derivatives_folder, 'samples.hdf5'), key='dfSamples', mode='w')
+    dfHeader.to_hdf(os.path.join(derivatives_folder, 'header.hdf5'), key='header', mode='w')
+    dfMsg.to_hdf(os.path.join(derivatives_folder, 'msg.hdf5'), key='msg', mode='w')
+    dfCalib.to_hdf(os.path.join(derivatives_folder, 'calib.hdf5'), key='calib', mode='w')
+    dfSamples.to_hdf(os.path.join(derivatives_folder, 'samples.hdf5'), key='samples', mode='w')
     for key, value in dict_events.items():
-        value.to_hdf(os.path.join(derivatives_folder, key + '.hdf5'), key=key, mode='w')
+        value.to_hdf(os.path.join(derivatives_folder,"eyelink_events", key + '.hdf5'), key=key, mode='w')
 
 
 def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords):
@@ -306,5 +311,5 @@ def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords):
                 if file.lower().endswith(".edf"):
                     edf_file_path = os.path.join(eye_tracking_data_path, file)
                     derivatives_folder_path = os.path.join(derivatives_folder, subject, session)
-                    os.makedirs(derivatives_folder_path, exist_ok=True)
+                    os.makedirs(os.path.join(derivatives_folder_path,'eyelink_events'), exist_ok=True)
                     parse_edf_eyelink(edf_file_path, msg_keywords, derivatives_folder_path)
