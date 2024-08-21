@@ -21,7 +21,7 @@ class TestMultipanel(unittest.TestCase):
         visualization.plot_multipanel(fixations, saccades)
 
         # Assert that the file multipanel.png was created
-        self.assertTrue(os.path.exists(os.path.join(path_to_session,'eyelink_events', "multipanel.png")))
+        self.assertTrue(os.path.exists(os.path.join(path_to_session,'eyelink_events','plots', "multipanel.png")))
 
 
 if __name__ == "__main__":

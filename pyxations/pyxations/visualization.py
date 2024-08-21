@@ -3,14 +3,15 @@ import matplotlib.image as mpimg
 import matplotlib.colors as mplcolors
 import numpy as np
 import pandas as pd
-from os import path
+from os import path, makedirs
 
 class Visualization():
     def __init__(self, session_folder_path,events_detection_algorithm):
         self.session_folder_path = session_folder_path
         self.events_detection_folder = events_detection_algorithm+'_events'
+        makedirs(path.join(self.session_folder_path,self.events_detection_folder,'plots'), exist_ok=True)
 
-    def scanpath(self,fixations:pd.DataFrame,tmin:float, tmax:float, img_path:str=None, saccades:pd.DataFrame=None, samples:pd.DataFrame=None,
+    def scanpath(self,fixations:pd.DataFrame,trial_index:int=None,trial_label:str=None,tmin:int=None, tmax:int=None, img_path:str=None, saccades:pd.DataFrame=None, samples:pd.DataFrame=None,
              screen_res_x:int=1920, screen_res_y:int=1080):
         """
         Plots the scanpath, including fixations, saccades, and optionally an image background and gaze samples.
@@ -19,12 +20,17 @@ class Visualization():
         ----------
         fixations : pd.DataFrame
             DataFrame containing fixation data with the following columns:
-        tmin : float
+            'tStart', 'tEnd', 'duration', 'xAvg', 'yAvg'.
+        trial_index : int, optional
+            Index of the trial.
+        trial_label : str, optional
+            Label of the trial.
+        tmin : int, optional
             The minimum time for filtering the data.
-        tmax : float
+        tmax : int, optional
             The maximum time for filtering the data.
         img_path : str, optional
-            Path to an image file to be used as a background (default is None).
+            Path to an image file to be used as a background.
         saccades : pd.DataFrame, optional
             DataFrame containing saccade data with the following columns:
             'tStart', 'tEnd', 'ampDeg', 'vPeak', 'xStart', 'xEnd', 'yStart', 'yEnd'.
@@ -36,27 +42,36 @@ class Visualization():
         screen_res_y : int, optional
             Vertical resolution of the screen in pixels (default is 1080).
 
-        Returns
-        -------
-        fig : matplotlib.figure.Figure
-            The figure object containing the plot.
-        fixations : pd.DataFrame
-            The filtered fixations DataFrame.
-        saccades : pd.DataFrame
-            The filtered saccades DataFrame.
-        samples : pd.DataFrame
-            The filtered samples DataFrame.
+        Either trial_index or trial_label or tmix and tmax must be provided.
+
         """
 
-
+        #----- Check if trial_index or trial_label or tmix and tmax are provided -----#
+        if trial_index is None and trial_label is None and (tmin is None or tmax is None):
+            raise ValueError('Either trial_index or trial_label or tmix and tmax must be provided.')
 
         #----- Filter saccades, fixations and samples to defined time interval -----#
-        fixations = fixations.loc[(fixations['tStart'] >= tmin) & (fixations['tStart'] <= tmax)].reset_index(drop=True)
-        if type(saccades) == pd.DataFrame:
-            saccades = saccades.loc[(saccades['tStart'] >= tmin) & (saccades['tStart'] <= tmax)]
-        if type(samples) == pd.DataFrame:
-            samples = samples.loc[(samples['tSample'] >= tmin) & (samples['tSample'] <= tmax)]
+        if not tmax is None and not tmin is None:
+            fixations = fixations.loc[(fixations['tStart'] >= tmin) & (fixations['tStart'] <= tmax)].reset_index(drop=True)
+            if type(saccades) == pd.DataFrame:
+                saccades = saccades.loc[(saccades['tStart'] >= tmin) & (saccades['tStart'] <= tmax)].reset_index(drop=True)
+            if type(samples) == pd.DataFrame:
+                samples = samples.loc[(samples['tSample'] >= tmin) & (samples['tSample'] <= tmax)].reset_index(drop=True)
+        
+        #----- Filter saccades, fixations and samples to defined trial -----#
+        if not trial_index is None:
+            fixations = fixations.loc[fixations['trial_number'] == trial_index].reset_index(drop=True)
+            if type(saccades) == pd.DataFrame:
+                saccades = saccades.loc[saccades['trial_number'] == trial_index].reset_index(drop=True)
+            if type(samples) == pd.DataFrame:
+                samples = samples.loc[samples['trial_number'] == trial_index].reset_index(drop=True)
 
+        if not trial_label is None:
+            fixations = fixations.loc[fixations['trial_label'] == trial_label].reset_index(drop=True)
+            if type(saccades) == pd.DataFrame:
+                saccades = saccades.loc[saccades['trial_label'] == trial_label].reset_index(drop=True)
+            if type(samples) == pd.DataFrame:
+                samples = samples.loc[samples['trial_label'] == trial_label].reset_index(drop=True)
 
         #----- Define figure and axes -----#
         if type(samples) == pd.DataFrame:
@@ -65,8 +80,7 @@ class Visualization():
             ax_gaze = axs[1]
         else:
             fig, ax_main = plt.subplots(figsize=(10, 6))
-        
-        fig.suptitle(f'Scanpath tmin:{tmin} - tmax:{tmax}')
+
         ax_main.set_xlim(0, screen_res_x)
         ax_main.set_ylim(0, screen_res_y)
 
@@ -139,9 +153,13 @@ class Visualization():
             plt.legend(by_label.values(), by_label.keys(),  loc='center left', bbox_to_anchor=(1, 0.5))
             ax_gaze.set_ylabel('Gaze')
             ax_gaze.set_xlabel('Time [s]')
-        # Save figure as "scanpath.png"
         plt.tight_layout()
-        fig.savefig(path.join(self.session_folder_path,self.events_detection_folder, 'scanpath.png'))
+        # Save figure as "scanpatg_{trial_index}_{trial_label}_{tmin}_{tmax}.png", but only if trial_index or trial_label or tmix and tmax are provided
+        
+        scanpath_file_name = 'scanpath' + f'_{trial_index}'*(trial_index is not None) + f'_{trial_label}'*(trial_label is not None) + f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) + '.png'
+
+
+        fig.savefig(path.join(self.session_folder_path,self.events_detection_folder,'plots', scanpath_file_name))
 
         
 
@@ -231,5 +249,5 @@ class Visualization():
         self.amplitude(saccades,axs=axs[0, 1])
 
         fig.tight_layout()
-        plt.savefig(path.join(self.session_folder_path,self.events_detection_folder, 'multipanel.png'))
+        plt.savefig(path.join(self.session_folder_path,self.events_detection_folder,'plots','multipanel.png'))
 

@@ -29,7 +29,7 @@ class TestScanpath(unittest.TestCase):
         visualization.scanpath(fixations=fixations,tmin=samples['tSample'][100000], tmax=samples['tSample'][110000], img_path=img_path, saccades=saccades, samples=samples)
 
         # Assert that the file multipanel.png was created
-        self.assertTrue(os.path.exists(os.path.join(path_to_session,'eyelink_events', "scanpath.png")))
+        self.assertTrue(os.path.exists(os.path.join(path_to_session,'eyelink_events','plots', "scanpath_2495518_2508948.png")))
 
 
 if __name__ == "__main__":

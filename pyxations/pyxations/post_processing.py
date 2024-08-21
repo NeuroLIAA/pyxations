@@ -59,13 +59,6 @@ class PostProcessing:
                     - 'dir': The direction of each saccade ('right', 'left', 'up', 'down').
         """
 
-        # Fill '.' values with 0
-        # This should't be happening. There must be an error in parsing the edf because no saccade should have missing data in the start or end coordinates
-        saccades[['xStart', 'xEnd', 'yStart', 'yEnd']] = saccades[['xStart', 'xEnd', 'yStart', 'yEnd']].replace('.', 0)
-
-        # Convert start and end columns to float
-        saccades[['xStart', 'xEnd', 'yStart', 'yEnd']] = saccades[['xStart', 'xEnd', 'yStart', 'yEnd']].astype(float)
-
         # Saccades amplitude in x and y
         x_dif = saccades['xEnd'] - saccades['xStart']
         y_dif = saccades['yEnd'] - saccades['yStart']
@@ -98,7 +91,7 @@ class PostProcessing:
         messages (list[str]): List of strings to identify the messages.
 
         Returns:
-        list[float]: List of timestamps for the messages.
+        list[int]: List of timestamps for the messages.
         """
         
         # Get the timestamps for the messages
@@ -106,7 +99,7 @@ class PostProcessing:
 
         return timestamps
 
-    def split_into_trials(self,data:pd.DataFrame,filename:str,trial_labels:list[str] = None, user_messages:pd.DataFrame=None,start_msgs: list[str]=None, end_msgs: list[str]=None,duration: float=None, start_times: list[float]=None, end_times: list[float]=None):
+    def split_into_trials(self,data:pd.DataFrame,filename:str,trial_labels:list[str] = None, user_messages:pd.DataFrame=None,start_msgs: list[str]=None, end_msgs: list[str]=None,duration: float=None, start_times: list[int]=None, end_times: list[int]=None):
         """
         There are three ways of splitting the samples into trials:
         1) Using the start and end messages.
@@ -120,9 +113,9 @@ class PostProcessing:
                                     'time', 'text'.
         start_msgs (list[str]): List of strings to identify the start of a trial.
         end_msgs (list[str]): List of strings to identify the end of a trial.
-        duration (float): Duration of each trial.
-        start_times (list[float]): List of start times for each trial.
-        end_times (list[float]): List of end times for each trial.
+        duration (float): Duration of each trial in seconds.
+        start_times (list[int]): List of start times for each trial.
+        end_times (list[int]): List of end times for each trial.
 
         In every case the time is measured based on the sample rate of the eye tracker.
 
@@ -131,7 +124,7 @@ class PostProcessing:
                     - 'trial': The trial id for each sample.
         """
 
-
+        # TODO: Turn duration (in seconds) to duration (in samples) using the sample rate of the eye tracker
         # If start_msgs and end_msgs are provided, use them to split the samples
         if start_msgs is not None and end_msgs is not None and user_messages is not None:
             # Get the start and end times for each trial

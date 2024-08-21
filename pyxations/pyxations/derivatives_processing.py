@@ -22,8 +22,11 @@ def process_derivatives(derivatives_folder_path:str,start_msgs: list[str],end_ms
             post_processing = PostProcessing(session_folder_path,"eyelink")
             saccades = post_processing.saccades_direction(saccades, sacc_filename)
             saccades = post_processing.split_into_trials(saccades,sacc_filename,user_messages=user_messages,start_msgs=start_msgs,end_msgs=end_msgs)
+            fixations = post_processing.split_into_trials(fixations,fix_filename,user_messages=user_messages,start_msgs=start_msgs,end_msgs=end_msgs)
+            samples = post_processing.split_into_trials(samples,"samples.hdf5",user_messages=user_messages,start_msgs=start_msgs,end_msgs=end_msgs)
+            unique_trials = fixations['trial_number'].unique()
             visualization.plot_multipanel(fixations, saccades)
-            visualization.scanpath(fixations=fixations,tmin=samples['tSample'][100000], tmax=samples['tSample'][110000], img_path=None, saccades=saccades, samples=samples)
+            map(lambda trial: visualization.scanpath(fixations=fixations,trial_index=trial,saccades=saccades,samples=samples),unique_trials)
 
 
 
