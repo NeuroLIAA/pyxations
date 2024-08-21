@@ -3,10 +3,12 @@ import pandas as pd
 from . import Visualization, PostProcessing
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
+import logging
 
 detection_algorithm_folder = "eyelink_events"
 
 def process_session(session_folder_path, start_msgs, end_msgs):
+    
     samples = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, "samples.hdf5"))
     sacc_filename = "sacc.hdf5"
     fix_filename = "fix.hdf5"
@@ -16,11 +18,23 @@ def process_session(session_folder_path, start_msgs, end_msgs):
     visualization = Visualization(session_folder_path, "eyelink")
     post_processing = PostProcessing(session_folder_path, "eyelink")
 
+    samples = post_processing.bad_samples(samples,1080,1920)
     saccades = post_processing.saccades_direction(saccades)
     saccades = post_processing.split_into_trials(saccades, sacc_filename, user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
     fixations = post_processing.split_into_trials(fixations, fix_filename, user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
     samples = post_processing.split_into_trials(samples, "samples.hdf5", user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
     unique_trials = fixations[fixations['trial_number'] != -1]['trial_number'].unique()
+    bad_samples = samples[(samples['trial_number'] != -1) & (samples['bad'] == True)][['trial_number','bad']].groupby('trial_number').size()
+
+    subject = os.path.basename(os.path.dirname(session_folder_path))
+    session = os.path.basename(session_folder_path)
+    derivatives_folder_path = os.path.dirname(os.path.dirname(session_folder_path))
+    log_file = os.path.join(derivatives_folder_path,'derivatives_processing.log') 
+    logging.basicConfig(filename=log_file,level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    if not bad_samples.empty:
+        for trial in bad_samples.index:
+            logging.info(f"Subject {subject} in session {session} has {bad_samples[trial]} bad samples in trial {trial}.")
+    
 
     visualization.plot_multipanel(fixations, saccades)
     for trial in unique_trials:

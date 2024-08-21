@@ -12,7 +12,7 @@ class Visualization():
         self.events_detection_folder = events_detection_algorithm+'_events'
         makedirs(path.join(self.session_folder_path,self.events_detection_folder,'plots'), exist_ok=True)
         derivatives_folder_path = path.dirname(path.dirname(self.session_folder_path))
-        log_file = path.join(derivatives_folder_path,'visualization.log') 
+        log_file = path.join(derivatives_folder_path,'derivatives_processing.log') 
         logging.basicConfig(filename=log_file,level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
     def scanpath(self,fixations:pd.DataFrame,trial_index:int=None,trial_label:str=None,tmin:int=None, tmax:int=None, img_path:str=None, saccades:pd.DataFrame=None, samples:pd.DataFrame=None,
