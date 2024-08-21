@@ -11,7 +11,8 @@ class EyeMovementDetection(ABC):
     @abstractmethod
     def detect_eye_movements(self,*args,**kwargs):
         pass
-    @abstractmethod
+    
+    # TODO: Ensure that the method is implemented in all subclasses before converting it to an abstract method
     def save_eye_movements(self,fixations,saccades,times):
         pass
 

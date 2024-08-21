@@ -1,5 +1,9 @@
 from setuptools import setup, find_packages
 
+def read_requirements(filename):
+    with open(filename, 'r') as file:
+        return file.read().splitlines()
+
 setup(
     name="pyxations",
     version="0.1.0",
@@ -15,4 +19,5 @@ setup(
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.10',
+    install_requires=read_requirements('requirements.txt')
 )
