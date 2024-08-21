@@ -3,7 +3,7 @@ import shutil
 import subprocess
 import numpy as np
 import pandas as pd
-
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 
 def dataset_to_bids(folder_path, files_folder_path, dataset_name, session_substrings=2):
@@ -277,39 +277,31 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,derivatives_folder,keep_ascii=
         value.to_hdf(os.path.join(derivatives_folder,"eyelink_events", key + '.hdf5'), key=key, mode='w')
 
 
+def process_edf_file(edf_file_path, msg_keywords, derivatives_folder_path):
+    parse_edf_eyelink(edf_file_path, msg_keywords, derivatives_folder_path)
+
+def process_session(bids_dataset_folder, subject, session, msg_keywords, derivatives_folder):
+    eye_tracking_data_path = os.path.join(bids_dataset_folder, subject, session, 'ET')
+    edf_files = [file for file in os.listdir(eye_tracking_data_path) if file.lower().endswith(".edf")]
+    
+    with ThreadPoolExecutor() as executor:
+        for file in edf_files:
+            edf_file_path = os.path.join(eye_tracking_data_path, file)
+            derivatives_folder_path = os.path.join(derivatives_folder, subject, session)
+            os.makedirs(os.path.join(derivatives_folder_path, 'eyelink_events'), exist_ok=True)
+            executor.submit(process_edf_file, edf_file_path, msg_keywords, derivatives_folder_path)
+
+def process_subject(bids_dataset_folder, subject, msg_keywords, derivatives_folder):
+    sessions_folders = [folder for folder in os.listdir(os.path.join(bids_dataset_folder, subject)) if folder.startswith("ses-")]
+    for session in sessions_folders:
+        process_session(bids_dataset_folder, subject, session, msg_keywords, derivatives_folder)
+
 def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords):
-    """
-    Compute derivatives for a dataset.
-
-    Args:
-        dataset_folder (str): Path to the folder containing the dataset.
-        msg_keywords (list of str): List of strings representing keywords to filter MSG lines. Leave empty if no
-            filtering is required.
-        derivatives_folder (str): Path to the folder to save the derivatives.
-
-    Returns:
-        None
-    """
     derivatives_folder = bids_dataset_folder + "_derivatives"
-    # Create the derivatives folder
     os.makedirs(derivatives_folder, exist_ok=True)
 
-    # List of folders in bids_dataset_folder
-    bids_folders = os.listdir(bids_dataset_folder)
-    # Filter out non-subject folders
-    bids_folders = [folder for folder in bids_folders if folder.startswith("sub-")]
+    bids_folders = [folder for folder in os.listdir(bids_dataset_folder) if folder.startswith("sub-")]
 
-    # Compute derivatives for each EDF file in the dataset
-    for subject in bids_folders:
-        # List of folders in subject folder
-        sessions_folders = os.listdir(os.path.join(bids_dataset_folder, subject))
-        # Filter out non-session folders
-        sessions_folders = [folder for folder in sessions_folders if folder.startswith("ses-")]
-        for session in os.listdir(os.path.join(bids_dataset_folder, subject)):
-            eye_tracking_data_path = os.path.join(bids_dataset_folder, subject, session, 'ET')
-            for file in os.listdir(eye_tracking_data_path):
-                if file.lower().endswith(".edf"):
-                    edf_file_path = os.path.join(eye_tracking_data_path, file)
-                    derivatives_folder_path = os.path.join(derivatives_folder, subject, session)
-                    os.makedirs(os.path.join(derivatives_folder_path,'eyelink_events'), exist_ok=True)
-                    parse_edf_eyelink(edf_file_path, msg_keywords, derivatives_folder_path)
+    with ProcessPoolExecutor() as executor:
+        for subject in bids_folders:
+            executor.submit(process_subject, bids_dataset_folder, subject, msg_keywords, derivatives_folder)
