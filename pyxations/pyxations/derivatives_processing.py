@@ -27,6 +27,16 @@ def process_session(session_folder_path, start_msgs, end_msgs):
         visualization.scanpath(fixations=fixations, trial_index=trial, saccades=saccades, samples=samples)
 
 def process_derivatives(derivatives_folder_path: str, start_msgs: list[str], end_msgs: list[str]):
+    '''
+    Process all the sessions for all the subjects in the derivatives folder.
+    This will add the direction of the saccades and split the data into trials (for fixations, saccades and samples).
+    It will also plot a scanpath for each trial and the multipanel.
+
+    Parameters:
+    derivatives_folder_path (str): Path to the derivatives folder.
+    start_msgs (list[str]): List of strings to identify the start of the stimuli.
+    end_msgs (list[str]): List of strings to identify the end of the stimuli.
+    '''
 
     subjects = [subject for subject in os.listdir(derivatives_folder_path) if os.path.isdir(os.path.join(derivatives_folder_path, subject))]
 

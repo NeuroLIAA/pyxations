@@ -303,6 +303,13 @@ def process_subject(bids_dataset_folder, subject, msg_keywords, derivatives_fold
         process_session(bids_dataset_folder, subject, session, msg_keywords, derivatives_folder)
 
 def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords):
+    '''
+    Generate the derivatives for a BIDS dataset.
+
+    Args:
+        bids_dataset_folder (str): Path to the BIDS dataset folder.
+        msg_keywords (list of str): List of strings representing keywords to filter MSG lines. For example: 'trial_start', 'trial_end'.
+    '''
     derivatives_folder = bids_dataset_folder + "_derivatives"
     os.makedirs(derivatives_folder, exist_ok=True)
 
