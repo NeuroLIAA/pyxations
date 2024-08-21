@@ -4,12 +4,16 @@ import matplotlib.colors as mplcolors
 import numpy as np
 import pandas as pd
 from os import path, makedirs
+import logging
 
 class Visualization():
     def __init__(self, session_folder_path,events_detection_algorithm):
         self.session_folder_path = session_folder_path
         self.events_detection_folder = events_detection_algorithm+'_events'
         makedirs(path.join(self.session_folder_path,self.events_detection_folder,'plots'), exist_ok=True)
+        derivatives_folder_path = path.dirname(path.dirname(self.session_folder_path))
+        log_file = path.join(derivatives_folder_path,'visualization.log') 
+        logging.basicConfig(filename=log_file,level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
     def scanpath(self,fixations:pd.DataFrame,trial_index:int=None,trial_label:str=None,tmin:int=None, tmax:int=None, img_path:str=None, saccades:pd.DataFrame=None, samples:pd.DataFrame=None,
              screen_res_x:int=1920, screen_res_y:int=1080):
@@ -49,6 +53,8 @@ class Visualization():
         #----- Check if trial_index or trial_label or tmix and tmax are provided -----#
         if trial_index is None and trial_label is None and (tmin is None or tmax is None):
             raise ValueError('Either trial_index or trial_label or tmix and tmax must be provided.')
+        scanpath_file_name = 'scanpath' + f'_{trial_index}'*(trial_index is not None) + f'_{trial_label}'*(trial_label is not None) + f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) + '.png'
+        file_path = path.join(self.session_folder_path,self.events_detection_folder,'plots', scanpath_file_name)
 
         #----- Filter saccades, fixations and samples to defined time interval -----#
         if not tmax is None and not tmin is None:
@@ -96,6 +102,7 @@ class Visualization():
         fix_num = fixations.index + 1
         bounds = np.linspace(1, fix_num[-1] + 1, fix_num[-1] + 1)
         norm = mplcolors.BoundaryNorm(bounds, cmap.N)
+
         
         # Plot
         ax_main.scatter(fixations['xAvg'], fixations['yAvg'], c=fix_num, s=sizes, cmap=cmap, norm=norm, alpha=0.5, zorder=2)
@@ -153,20 +160,13 @@ class Visualization():
             plt.legend(by_label.values(), by_label.keys(),  loc='center left', bbox_to_anchor=(1, 0.5))
             ax_gaze.set_ylabel('Gaze')
             ax_gaze.set_xlabel('Time [s]')
-        plt.tight_layout()
-        # Save figure as "scanpatg_{trial_index}_{trial_label}_{tmin}_{tmax}.png", but only if trial_index or trial_label or tmix and tmax are provided
-        
-        scanpath_file_name = 'scanpath' + f'_{trial_index}'*(trial_index is not None) + f'_{trial_label}'*(trial_label is not None) + f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) + '.png'
-
-
-        fig.savefig(path.join(self.session_folder_path,self.events_detection_folder,'plots', scanpath_file_name))
-
-        
+        plt.tight_layout()  
+        fig.savefig(file_path)
 
 
     def duration(self,fixations:pd.DataFrame,axs=None):
         ax = axs
-        print('Plotting fixation duration histogram')
+
 
         if ax is None:
             fig, ax = plt.subplots()
@@ -178,7 +178,7 @@ class Visualization():
 
 
     def amplitude(self,saccades:pd.DataFrame,axs=None):
-        print('Plotting saccades amplitude histogram')
+
         ax = axs
         if ax is None:
             fig, ax = plt.subplots()
@@ -191,7 +191,7 @@ class Visualization():
 
 
     def direction(self,saccades:pd.DataFrame,axs=None,figs=None):
-        print('Plotting saccades direction histogram')
+
         ax = axs
         if ax is None:
             fig = plt.figure()
@@ -217,7 +217,7 @@ class Visualization():
 
 
     def main_sequence(self,saccades:pd.DataFrame,axs=None, hline=None):
-        print('Plotting main sequence')
+
         ax = axs
         if ax is None:
             fig, ax = plt.subplots()

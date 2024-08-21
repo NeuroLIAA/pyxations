@@ -36,7 +36,7 @@ class PostProcessing:
         # Classify samples as 'bad' if they fall outside the screen boundaries
         samples['bad'] = (samples['LX'] < 0) | (samples['LY'] < 0) | (samples['RX'] < 0) | (samples['RY'] < 0) | (samples['LX'] > width) | (samples['LY'] > height) | (samples['RX'] > width) | (samples['RY'] > height)
 
-        samples.to_hdf(path_or_buf=path.join(self.session_folder_path,self.events_detection_folder, "samples.hdf5"), key='samples', mode='w')
+        samples.to_hdf(path_or_buf=path.join(self.session_folder_path, "samples.hdf5"), key='samples', mode='w')
         return samples
 
 
@@ -95,9 +95,13 @@ class PostProcessing:
         """
         
         # Get the timestamps for the messages
-        timestamps = user_messages[user_messages['text'].str.contains('|'.join(messages))]['time']
+        timestamps = user_messages[user_messages['text'].str.contains('|'.join(messages))]['time'].to_numpy(dtype=int)
 
-        return timestamps
+        # Raise exception if no timestamps are found
+        if len(timestamps) == 0:
+            raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages, self.session_folder_path))
+
+        return list(timestamps)
 
     def split_into_trials(self,data:pd.DataFrame,filename:str,trial_labels:list[str] = None, user_messages:pd.DataFrame=None,start_msgs: list[str]=None, end_msgs: list[str]=None,duration: float=None, start_times: list[int]=None, end_times: list[int]=None):
         """
@@ -141,9 +145,9 @@ class PostProcessing:
         # If start_times and end_times are provided, use them to split the samples
         elif start_times is not None and end_times is not None:
             pass
-        # If none of the above conditions are met, return None
+        # If none of the above conditions are met, raise an exception
         else:
-            return None
+            raise ValueError("Either start_msgs and end_msgs, start_msgs and duration, or start_times and end_times must be provided.")
 
         # Check that both lists have the same length
         if len(start_times) != len(end_times):
@@ -172,6 +176,6 @@ class PostProcessing:
             for i in range(len(start_times)):
                 data.loc[data['trial_number'] == i, 'trial_label'] = trial_labels[i]
 
-
-        data.to_hdf(path_or_buf=path.join(self.session_folder_path,self.events_detection_folder, filename), key=filename[:-5], mode='w')
+        file_path = path.join(self.session_folder_path,self.events_detection_folder, filename) if filename != "samples.hdf5" else path.join(self.session_folder_path, filename)
+        data.to_hdf(path_or_buf=file_path, key=filename[:-5], mode='w')
         return data

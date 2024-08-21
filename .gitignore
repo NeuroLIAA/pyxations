@@ -9,3 +9,5 @@ example_dataset_derivatives/
 vend/
 env/
 .pytest_cache/
+
+*.log
