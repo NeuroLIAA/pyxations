@@ -132,15 +132,20 @@ class Visualization():
         #----- Plot scanpath and gaze if samples provided -----#
         if type(samples) == pd.DataFrame:
 
-            # Scanpath
-            ax_main.plot(samples['LX'], samples['LY'], '--', color='C0', zorder=1)
-            ax_main.plot(samples['RX'], samples['RY'], '--', color='black', zorder=1)
-            
-            # Gaze
-            ax_gaze.plot(samples['tSample'], samples['LX'], label='Left X')
-            ax_gaze.plot(samples['tSample'], samples['LY'], label='Left Y')
-            ax_gaze.plot(samples['tSample'], samples['RX'], label='Right X')
-            ax_gaze.plot(samples['tSample'], samples['RY'], label='Right Y')
+            # Left eye
+            try:
+                ax_main.plot(samples['LX'], samples['LY'], '--', color='C0', zorder=1)
+                ax_gaze.plot(samples['tSample'], samples['LX'], label='Left X')
+                ax_gaze.plot(samples['tSample'], samples['LY'], label='Left Y')
+            except:
+                pass
+            # Right eye
+            try:
+                ax_main.plot(samples['RX'], samples['RY'], '--', color='black', zorder=1)
+                ax_gaze.plot(samples['tSample'], samples['RX'], label='Right X')
+                ax_gaze.plot(samples['tSample'], samples['RY'], label='Right Y')
+            except:
+                pass
 
             plot_min, plot_max = ax_gaze.get_ylim()
 
