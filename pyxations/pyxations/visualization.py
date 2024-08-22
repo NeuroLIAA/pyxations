@@ -167,6 +167,7 @@ class Visualization():
             ax_gaze.set_xlabel('Time [s]')
         plt.tight_layout()  
         fig.savefig(file_path)
+        plt.close()
 
 
     def duration(self,fixations:pd.DataFrame,axs=None):
@@ -255,4 +256,5 @@ class Visualization():
 
         fig.tight_layout()
         plt.savefig(path.join(self.session_folder_path,self.events_detection_folder,'plots','multipanel.png'))
+        plt.close()
 
