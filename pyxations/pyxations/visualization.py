@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from os import path, makedirs
 import logging
+import math
 
 class Visualization():
     def __init__(self, session_folder_path,events_detection_algorithm):
@@ -57,30 +58,30 @@ class Visualization():
         file_path = path.join(self.session_folder_path,self.events_detection_folder,'plots', scanpath_file_name)
 
         #----- Filter saccades, fixations and samples to defined time interval -----#
-        if not tmax is None and not tmin is None:
+        if tmax is not None and tmin is not None:
             fixations = fixations.loc[(fixations['tStart'] >= tmin) & (fixations['tStart'] <= tmax)].reset_index(drop=True)
-            if type(saccades) == pd.DataFrame:
+            if isinstance(saccades, pd.DataFrame):
                 saccades = saccades.loc[(saccades['tStart'] >= tmin) & (saccades['tStart'] <= tmax)].reset_index(drop=True)
-            if type(samples) == pd.DataFrame:
+            if isinstance(samples, pd.DataFrame):
                 samples = samples.loc[(samples['tSample'] >= tmin) & (samples['tSample'] <= tmax)].reset_index(drop=True)
         
         #----- Filter saccades, fixations and samples to defined trial -----#
-        if not trial_index is None:
+        if trial_index is not None:
             fixations = fixations.loc[fixations['trial_number'] == trial_index].reset_index(drop=True)
-            if type(saccades) == pd.DataFrame:
+            if isinstance(saccades, pd.DataFrame):
                 saccades = saccades.loc[saccades['trial_number'] == trial_index].reset_index(drop=True)
-            if type(samples) == pd.DataFrame:
+            if isinstance(samples, pd.DataFrame):
                 samples = samples.loc[samples['trial_number'] == trial_index].reset_index(drop=True)
 
-        if not trial_label is None:
+        if trial_label is not None:
             fixations = fixations.loc[fixations['trial_label'] == trial_label].reset_index(drop=True)
-            if type(saccades) == pd.DataFrame:
+            if isinstance(saccades, pd.DataFrame):
                 saccades = saccades.loc[saccades['trial_label'] == trial_label].reset_index(drop=True)
-            if type(samples) == pd.DataFrame:
+            if isinstance(samples, pd.DataFrame):
                 samples = samples.loc[samples['trial_label'] == trial_label].reset_index(drop=True)
 
         #----- Define figure and axes -----#
-        if type(samples) == pd.DataFrame:
+        if isinstance(samples, pd.DataFrame):
             fig, axs = plt.subplots(nrows=2, ncols=1, height_ratios=(4, 1),figsize=(10, 6))
             ax_main = axs[0]
             ax_gaze = axs[1]
@@ -115,7 +116,7 @@ class Visualization():
 
 
         #----- Plot image if provided -----#
-        if img_path != None:
+        if img_path is not None:
             # Load search image
             img = mpimg.imread(img_path)
             
@@ -130,7 +131,7 @@ class Visualization():
             ax_main.imshow(img, extent=image_box_extent, zorder=0)
 
         #----- Plot scanpath and gaze if samples provided -----#
-        if type(samples) == pd.DataFrame:
+        if isinstance(samples, pd.DataFrame):
 
             # Left eye
             try:
@@ -155,7 +156,7 @@ class Visualization():
                 ax_gaze.axvspan(ymin=0, ymax=1, xmin=fixation['tStart'], xmax=fixation['tStart'] + fixation['duration'], color=color, alpha=0.4, label='fix')
             
             # Plor saccades as vlines in gaze axes
-            if type(saccades) == pd.DataFrame:
+            if isinstance(saccades, pd.DataFrame):
                 for _, saccade in saccades.iterrows():
                     ax_gaze.vlines(x=saccade['tStart'], ymin=plot_min, ymax=plot_max, colors='red', linestyles='--', label='sac')
 
@@ -170,10 +171,9 @@ class Visualization():
         plt.close()
 
 
-    def duration(self,fixations:pd.DataFrame,axs=None):
+    def fix_duration(self,fixations:pd.DataFrame,axs=None):
+        
         ax = axs
-
-
         if ax is None:
             fig, ax = plt.subplots()
 
@@ -183,7 +183,7 @@ class Visualization():
         ax.set_ylabel('Density')
 
 
-    def amplitude(self,saccades:pd.DataFrame,axs=None):
+    def sacc_amplitude(self,saccades:pd.DataFrame,axs=None):
 
         ax = axs
         if ax is None:
@@ -196,7 +196,7 @@ class Visualization():
         ax.set_ylabel('Density')
 
 
-    def direction(self,saccades:pd.DataFrame,axs=None,figs=None):
+    def sacc_direction(self,saccades:pd.DataFrame,axs=None,figs=None):
 
         ax = axs
         if ax is None:
@@ -222,7 +222,7 @@ class Visualization():
             bar.set_facecolor(plt.cm.Blues(r / np.max(ang_hist)))
 
 
-    def main_sequence(self,saccades:pd.DataFrame,axs=None, hline=None):
+    def sacc_main_sequence(self,saccades:pd.DataFrame,axs=None, hline=None):
 
         ax = axs
         if ax is None:
@@ -248,13 +248,11 @@ class Visualization():
         plt.rcParams.update({'font.size': 12})
         fig, axs = plt.subplots(2, 2, figsize=(12, 7))
         
-
-        self.duration(fixations,axs=axs[0, 0])
-        self.main_sequence(saccades,axs=axs[1, 1])
-        self.direction(saccades,axs=axs[1, 0],figs=fig)
-        self.amplitude(saccades,axs=axs[0, 1])
+        self.fix_duration(fixations,axs=axs[0, 0])
+        self.sacc_main_sequence(saccades,axs=axs[1, 1])
+        self.sacc_direction(saccades,axs=axs[1, 0],figs=fig)
+        self.sacc_amplitude(saccades,axs=axs[0, 1])
 
         fig.tight_layout()
         plt.savefig(path.join(self.session_folder_path,self.events_detection_folder,'plots','multipanel.png'))
         plt.close()
-
