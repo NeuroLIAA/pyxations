@@ -31,32 +31,24 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
     
     file_paths = [file for file in file_paths if file.lower().endswith(".edf") or file.lower().endswith(".bdf") or file.lower().endswith(".log") or file.lower().endswith(".csv")]
 
-    # Create a new folder for the BIDS dataset
     bids_folder_path = os.path.join(target_folder_path, dataset_name)
-    os.makedirs(bids_folder_path, exist_ok=True)
 
-    # Create subfolders for each subject
-    subject_folders = []
-    for file in file_paths:
-        file_name = os.path.basename(file)
-        if file_name.lower().endswith(".edf"):
-            subject_id = file_name.split("_")[0]
-            subject_folder_path = os.path.join(bids_folder_path, "sub-" + subject_id)
-            os.makedirs(subject_folder_path, exist_ok=True)
-            subject_folders.append(subject_folder_path)
+    subj_ids = list(set([os.path.basename(file).split("_")[0] for file in file_paths]))
+    subj_ids.sort()
+    new_subj_ids = [str(subject_index).zfill(4) for subject_index in range(len(subj_ids))]
 
     # Create subfolders for each session for each subject
-    for subject_folder in subject_folders:
+    for subject_id in new_subj_ids:
+        old_subject_id = subj_ids[int(subject_id)]
         for file in file_paths:
             file_name = os.path.basename(file)
             file_lower = file_name.lower()
-            subject_id = os.path.basename(subject_folder)[4:]
             session_id = "_".join(file_name.split("_")[1:session_substrings+1])
-            if file_lower.endswith(".edf") and file_name.startswith(subject_id):
+            if file_lower.endswith(".edf") and file_name.startswith(old_subject_id):
                 move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'ET')
-            if file_lower.endswith(".bdf") and file_name.startswith(subject_id):
+            if file_lower.endswith(".bdf") and file_name.startswith(old_subject_id):
                 move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'EEG')
-            if (file_lower.endswith(".log") or file_lower.endswith(".csv")) and file_name.startswith(subject_id):                
+            if (file_lower.endswith(".log") or file_lower.endswith(".csv")) and file_name.startswith(old_subject_id):                
                 move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'behavioral')
     return bids_folder_path
 
@@ -306,13 +298,19 @@ def process_edf_file(edf_file_path, msg_keywords, session_folder_path):
 def process_session(bids_dataset_folder, subject, session, msg_keywords, derivatives_folder,num_threads):
     eye_tracking_data_path = os.path.join(bids_dataset_folder, subject, session, 'ET')
     edf_files = [file for file in os.listdir(eye_tracking_data_path) if file.lower().endswith(".edf")]
+    if len(edf_files) > 1:
+        logging.warning(f"More than one EDF file found in {eye_tracking_data_path}. Skipping folder.")
+        return
     
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = []
         for file in edf_files:
             edf_file_path = os.path.join(eye_tracking_data_path, file)
             session_folder_path = os.path.join(derivatives_folder, subject, session)
             os.makedirs(os.path.join(session_folder_path, 'eyelink_events'), exist_ok=True)
-            executor.submit(process_edf_file, edf_file_path, msg_keywords, session_folder_path)
+            futures.append(executor.submit(process_edf_file, edf_file_path, msg_keywords, session_folder_path))
+        for future in futures:
+            future.result() # This will raise exceptions if any occurred during processing
 
 def process_subject(bids_dataset_folder, subject, msg_keywords, derivatives_folder,num_threads):
     sessions_folders = [folder for folder in os.listdir(os.path.join(bids_dataset_folder, subject)) if folder.startswith("ses-")]
@@ -333,5 +331,9 @@ def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords,num_proces
     bids_folders = [folder for folder in os.listdir(bids_dataset_folder) if folder.startswith("sub-")]
 
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
+        futures = []
         for subject in bids_folders:
-            executor.submit(process_subject, bids_dataset_folder, subject, msg_keywords, derivatives_folder,num_threads)
+            futures.append(executor.submit(process_subject, bids_dataset_folder, subject, msg_keywords, derivatives_folder,num_threads))
+        for futures in futures:
+            futures.result()  # This will raise exceptions if any occurred during processing
+        

@@ -9,7 +9,7 @@ class TestRemodnav(unittest.TestCase):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
 
-        path_to_session = os.path.join(current_folder, "example_dataset_derivatives", "sub-ab01", "ses-second_half")
+        path_to_session = os.path.join(current_folder, "example_dataset_derivatives", "sub-0000", "ses-second_half")
 
         eye_detection = RemodnavDetection(path_to_session)
 

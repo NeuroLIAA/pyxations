@@ -10,9 +10,9 @@ class TestComputeDerivatives(unittest.TestCase):
         msg_keywords = ["begin","end","press"]
         compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords)
         self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives")))
-        self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-ab01")))
-        self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-ab01", "ses-second_half")))
-        self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-ab01", "ses-second_half", "samples.hdf5")))
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-0000")))
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-0000", "ses-second_half")))
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-0000", "ses-second_half", "samples.hdf5")))
 
 if __name__ == "__main__":
     unittest.main()
