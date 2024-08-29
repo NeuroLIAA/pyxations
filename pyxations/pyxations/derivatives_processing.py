@@ -17,8 +17,14 @@ def process_session(session_folder_path, start_msgs, end_msgs):
     user_messages = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, "msg.hdf5"))
     visualization = Visualization(session_folder_path, "eyelink")
     post_processing = PostProcessing(session_folder_path, "eyelink")
+    header_filename = "header.hdf5"
+    header = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, header_filename))
+    # Screen size is in the last row of the header, in the "value" column, it is a string. I need to split it by whitespaces and take the last two elements, which are the width and height of the screen.
+    screen_size = header["value"].iloc[-1].split()
+    screen_width = int(screen_size[-2])
+    screen_height = int(screen_size[-1])
 
-    samples = post_processing.bad_samples(samples,1080,1920)
+    samples = post_processing.bad_samples(samples,screen_height,screen_width)
     saccades = post_processing.saccades_direction(saccades)
     saccades = post_processing.split_into_trials(saccades, sacc_filename, user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
     fixations = post_processing.split_into_trials(fixations, fix_filename, user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
@@ -40,7 +46,7 @@ def process_session(session_folder_path, start_msgs, end_msgs):
     for trial in unique_trials:
         visualization.scanpath(fixations=fixations, trial_index=trial, saccades=saccades, samples=samples)
 
-def process_derivatives(derivatives_folder_path: str, start_msgs: list[str], end_msgs: list[str]):
+def process_derivatives(derivatives_folder_path: str, start_msgs: list[str], end_msgs: list[str],max_workers:int=None):
     '''
     Process all the sessions for all the subjects in the derivatives folder.
     This will add the direction of the saccades and split the data into trials (for fixations, saccades and samples).
@@ -54,7 +60,7 @@ def process_derivatives(derivatives_folder_path: str, start_msgs: list[str], end
 
     subjects = [subject for subject in os.listdir(derivatives_folder_path) if os.path.isdir(os.path.join(derivatives_folder_path, subject))]
 
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         for subject in subjects:
             sessions = [session for session in os.listdir(os.path.join(derivatives_folder_path, subject)) if os.path.isdir(os.path.join(derivatives_folder_path, subject, session))]

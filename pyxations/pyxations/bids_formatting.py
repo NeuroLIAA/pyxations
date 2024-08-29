@@ -8,12 +8,12 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import logging
 
 
-def dataset_to_bids(folder_path, files_folder_path, dataset_name, session_substrings=2):
+def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session_substrings=2):
     """
     Convert a dataset to BIDS format.
 
     Args:
-        folder_path (str): Path to the folder where the BIDS dataset will be created.
+        target_folder_path (str): Path to the folder where the BIDS dataset will be created.
         files_folder_path (str): Path to the folder containing the EDF files.
         The EDF files are assumed to have the ID of the subject at the beginning of the file name, separated by an underscore.
         dataset_name (str): Name of the BIDS dataset.
@@ -23,42 +23,49 @@ def dataset_to_bids(folder_path, files_folder_path, dataset_name, session_substr
         None
     """
 
-    # List all files in the folder
-    files = os.listdir(files_folder_path)
-    files = [file for file in files if file.lower().endswith(".edf") or file.lower().endswith(".bdf") or file.lower().endswith(".log") or file.lower().endswith(".csv")]
+    # List all file paths in the folder
+    file_paths = []
+    for root, dirs, files in os.walk(files_folder_path):
+        for file in files:
+            file_paths.append(os.path.join(root, file))
+    
+    file_paths = [file for file in file_paths if file.lower().endswith(".edf") or file.lower().endswith(".bdf") or file.lower().endswith(".log") or file.lower().endswith(".csv")]
 
     # Create a new folder for the BIDS dataset
-    bids_folder_path = os.path.join(folder_path, dataset_name)
+    bids_folder_path = os.path.join(target_folder_path, dataset_name)
     os.makedirs(bids_folder_path, exist_ok=True)
 
     # Create subfolders for each subject
     subject_folders = []
-    for file in files:
-        if file.lower().endswith(".edf"):
-            subject_id = file.split("_")[0]
+    for file in file_paths:
+        file_name = os.path.basename(file)
+        if file_name.lower().endswith(".edf"):
+            subject_id = file_name.split("_")[0]
             subject_folder_path = os.path.join(bids_folder_path, "sub-" + subject_id)
             os.makedirs(subject_folder_path, exist_ok=True)
             subject_folders.append(subject_folder_path)
 
     # Create subfolders for each session for each subject
     for subject_folder in subject_folders:
-        for file in files:
-            file_lower = file.lower()
+        for file in file_paths:
+            file_name = os.path.basename(file)
+            file_lower = file_name.lower()
             subject_id = os.path.basename(subject_folder)[4:]
-            session_id = "_".join(file.split("_")[1:session_substrings+1])
-            if file_lower.endswith(".edf") and file.startswith(subject_id):
-                move_file_to_bids_folder(os.path.join(files_folder_path, file), bids_folder_path, subject_id, session_id, 'ET')
-            if file_lower.endswith(".bdf") and file.startswith(subject_id):
-                move_file_to_bids_folder(os.path.join(files_folder_path, file), bids_folder_path, subject_id, session_id, 'EEG')
-            if (file_lower.endswith(".log") or file_lower.endswith(".csv")) and file.startswith(subject_id):                
-                move_file_to_bids_folder(os.path.join(files_folder_path, file), bids_folder_path, subject_id, session_id, 'Psycopy')
+            session_id = "_".join(file_name.split("_")[1:session_substrings+1])
+            if file_lower.endswith(".edf") and file_name.startswith(subject_id):
+                move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'ET')
+            if file_lower.endswith(".bdf") and file_name.startswith(subject_id):
+                move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'EEG')
+            if (file_lower.endswith(".log") or file_lower.endswith(".csv")) and file_name.startswith(subject_id):                
+                move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'behavioral')
     return bids_folder_path
 
 def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id,tag):
     session_folder_path = os.path.join(bids_folder_path, "sub-" + subject_id, "ses-" + session_id,tag)
     os.makedirs(session_folder_path, exist_ok=True)
-    if not os.path.exists(os.path.join(session_folder_path, os.path.basename(file_path))):
-        shutil.move(file_path, session_folder_path)
+    new_file_path = os.path.join(session_folder_path, os.path.basename(file_path))
+    if not os.path.exists(new_file_path):
+        shutil.copy(file_path, session_folder_path)
     
 
 def convert_edf_to_ascii(edf_file_path, output_dir):
@@ -179,6 +186,9 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,session_folder_path,keep_ascii
     dfHeader = pd.read_csv(ascii_file_path,skiprows=np.nonzero(lineType!='HEADER')[0],header=None,sep='\s+')
     # Merge columns into single strings
     dfHeader = dfHeader.apply(lambda x: ' '.join(x.dropna().astype(str)), axis=1)
+    # Change into a DataFrame
+    dfHeader = dfHeader.to_frame(name='value')
+    # Add line number
     dfHeader["Line_number"] = np.nonzero(lineType=='HEADER')[0]
 
 
@@ -186,14 +196,21 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,session_folder_path,keep_ascii
     logging.info(f'Parsing calibration for subject {subject}...')
     iCal = np.nonzero(lineType!='Calibration')[0]
     dfCalib = pd.read_csv(ascii_file_path,skiprows=iCal,names=np.arange(9))
+    # Merge columns into single strings
+    dfCalib = dfCalib.apply(lambda x: ' '.join(x.dropna().astype(str)), axis=1)
+    # Change into a DataFrame
+    dfCalib = dfCalib.to_frame(name='value')
+    # Add line number
     dfCalib["Line_number"] = np.nonzero(lineType=='Calibration')[0]
     # Get the first column (which is of type string) and see which row contains the string 'GAZE_COORDS'
-    i_gaze_coords = dfCalib[0].str.contains('GAZE_COORDS')
+    i_gaze_coords = dfCalib['value'].str.contains('GAZE_COORDS')
     # Get the first row that matches the condition
     i_gaze_coords = i_gaze_coords[i_gaze_coords].index[0]
     # Grab the value of that row in the first column, turn it into a string and split it by spaces, then get the 5th and 6th elements, which are the screen resolution
-    screen_res = dfCalib.iloc[i_gaze_coords][0].split()[5:7]
-    dfHeader.loc[len(dfHeader.index)] = "** SCREEN SIZE: "+ " ".join(screen_res)
+    screen_res = dfCalib.iloc[i_gaze_coords]['value'].split()[5:7]
+    # Parse them as integers and then back to strings
+    screen_res = [str(int(float(res))) for res in screen_res]
+    dfHeader.loc[len(dfHeader.index),'value'] = "** SCREEN SIZE: "+ " ".join(screen_res)
 
 
 
@@ -267,10 +284,8 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,session_folder_path,keep_ascii
             dfSamples['%cX' % eye] = pd.to_numeric(dfSamples['%cX' % eye], errors='coerce')
             dfSamples['%cY' % eye] = pd.to_numeric(dfSamples['%cY' % eye], errors='coerce')
             dfSamples['%cPupil' % eye] = pd.to_numeric(dfSamples['%cPupil' % eye], errors='coerce')
-        else:
-            dfSamples['%cX' % eye] = np.nan
-            dfSamples['%cY' % eye] = np.nan
-            dfSamples['%cPupil' % eye] = np.nan
+
+
     dfSamples["Line_number"] = np.nonzero(lineType=='SAMPLE')[0]
     dict_events = {'fix': df_fix, 'sacc': df_sacc, 'blink': df_blink}
     if not keep_ascii:
@@ -288,23 +303,23 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,session_folder_path,keep_ascii
 def process_edf_file(edf_file_path, msg_keywords, session_folder_path):
     parse_edf_eyelink(edf_file_path, msg_keywords, session_folder_path)
 
-def process_session(bids_dataset_folder, subject, session, msg_keywords, derivatives_folder):
+def process_session(bids_dataset_folder, subject, session, msg_keywords, derivatives_folder,num_threads):
     eye_tracking_data_path = os.path.join(bids_dataset_folder, subject, session, 'ET')
     edf_files = [file for file in os.listdir(eye_tracking_data_path) if file.lower().endswith(".edf")]
     
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
         for file in edf_files:
             edf_file_path = os.path.join(eye_tracking_data_path, file)
             session_folder_path = os.path.join(derivatives_folder, subject, session)
             os.makedirs(os.path.join(session_folder_path, 'eyelink_events'), exist_ok=True)
             executor.submit(process_edf_file, edf_file_path, msg_keywords, session_folder_path)
 
-def process_subject(bids_dataset_folder, subject, msg_keywords, derivatives_folder):
+def process_subject(bids_dataset_folder, subject, msg_keywords, derivatives_folder,num_threads):
     sessions_folders = [folder for folder in os.listdir(os.path.join(bids_dataset_folder, subject)) if folder.startswith("ses-")]
     for session in sessions_folders:
-        process_session(bids_dataset_folder, subject, session, msg_keywords, derivatives_folder)
+        process_session(bids_dataset_folder, subject, session, msg_keywords, derivatives_folder,num_threads)
 
-def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords):
+def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords,num_processes=None,num_threads=None):
     '''
     Generate the derivatives for a BIDS dataset.
 
@@ -317,6 +332,6 @@ def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords):
 
     bids_folders = [folder for folder in os.listdir(bids_dataset_folder) if folder.startswith("sub-")]
 
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=num_processes) as executor:
         for subject in bids_folders:
-            executor.submit(process_subject, bids_dataset_folder, subject, msg_keywords, derivatives_folder)
+            executor.submit(process_subject, bids_dataset_folder, subject, msg_keywords, derivatives_folder,num_threads)
