@@ -6,6 +6,7 @@ from concurrent.futures import ProcessPoolExecutor
 import logging
 
 detection_algorithm_folder = "eyelink_events"
+detection_algorithm = "eyelink"
 
 def process_session(session_folder_path, start_msgs, end_msgs):
     
@@ -15,8 +16,8 @@ def process_session(session_folder_path, start_msgs, end_msgs):
     saccades = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, detection_algorithm_folder, sacc_filename))
     fixations = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, detection_algorithm_folder, fix_filename))
     user_messages = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, "msg.hdf5"))
-    visualization = Visualization(session_folder_path, "eyelink")
-    post_processing = PostProcessing(session_folder_path, "eyelink")
+    visualization = Visualization(session_folder_path,detection_algorithm)
+    post_processing = PostProcessing(session_folder_path, detection_algorithm)
     header_filename = "header.hdf5"
     header = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, header_filename))
     # Screen size is in the last row of the header, in the "value" column, it is a string. I need to split it by whitespaces and take the last two elements, which are the width and height of the screen.
@@ -45,6 +46,7 @@ def process_session(session_folder_path, start_msgs, end_msgs):
     visualization.plot_multipanel(fixations, saccades)
     for trial in unique_trials:
         visualization.scanpath(fixations=fixations, trial_index=trial, saccades=saccades, samples=samples)
+    return samples,fixations,saccades
 
 def process_derivatives(derivatives_folder_path: str, start_msgs: list[str], end_msgs: list[str],max_workers:int=None):
     '''
@@ -59,7 +61,8 @@ def process_derivatives(derivatives_folder_path: str, start_msgs: list[str], end
     '''
 
     subjects = [subject for subject in os.listdir(derivatives_folder_path) if os.path.isdir(os.path.join(derivatives_folder_path, subject))]
-
+    fixations = []
+    saccades = []
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         for subject in subjects:
@@ -68,7 +71,12 @@ def process_derivatives(derivatives_folder_path: str, start_msgs: list[str], end
                 session_folder_path = os.path.join(derivatives_folder_path, subject, session)
                 futures.append(executor.submit(process_session, session_folder_path, start_msgs, end_msgs))
         for future in futures:
-            future.result()  # This will raise exceptions if any occurred during processing
+            fixations.append(future.result()[1])  # This will raise exceptions if any occurred during processing
+            saccades.append(future.result()[2])
+    fixations = pd.concat(fixations)
+    saccades = pd.concat(saccades)
+    visualization = Visualization(derivatives_folder_path, detection_algorithm)
+    visualization.plot_multipanel(fixations, saccades)
 
 
 
