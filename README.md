@@ -49,7 +49,7 @@ pip install -e .
 import pyxations as pyx
 
 pyx.dataset_to_bids(
-    folder_path=" Path/to/the/folder/where/the/BIDS/dataset/will/be/created", 
+    target_folder_path=" Path/to/the/folder/where/the/BIDS/dataset/will/be/created", 
     files_folder_path="Path/to/the/folder/containing/the/EDF/files",  
     dataset_name="dataset_name",
 )
