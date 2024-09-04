@@ -60,13 +60,13 @@ def process_derivatives(derivatives_folder_path: str, start_msgs: list[str], end
     end_msgs (list[str]): List of strings to identify the end of the stimuli.
     '''
 
-    subjects = [subject for subject in os.listdir(derivatives_folder_path) if os.path.isdir(os.path.join(derivatives_folder_path, subject))]
+    subjects = [subject for subject in os.listdir(derivatives_folder_path) if os.path.isdir(os.path.join(derivatives_folder_path, subject)) and subject.startswith("sub-")]
     fixations = []
     saccades = []
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         for subject in subjects:
-            sessions = [session for session in os.listdir(os.path.join(derivatives_folder_path, subject)) if os.path.isdir(os.path.join(derivatives_folder_path, subject, session))]
+            sessions = [session for session in os.listdir(os.path.join(derivatives_folder_path, subject)) if os.path.isdir(os.path.join(derivatives_folder_path, subject, session)) and session.startswith("ses-")]
             for session in sessions:
                 session_folder_path = os.path.join(derivatives_folder_path, subject, session)
                 futures.append(executor.submit(process_session, session_folder_path, start_msgs, end_msgs))
@@ -83,8 +83,8 @@ def process_derivatives(derivatives_folder_path: str, start_msgs: list[str], end
 def get_ordered_trials_from_psycopy_logs(dataset_folder_path:str):
     #TODO: Implement this function
     dict_trial_labels = defaultdict(lambda: defaultdict(list))
-    subjects = [subject for subject in os.listdir(dataset_folder_path) if os.path.isdir(os.path.join(dataset_folder_path, subject))]
+    subjects = [subject for subject in os.listdir(dataset_folder_path) if os.path.isdir(os.path.join(dataset_folder_path, subject)) and subject.startswith("sub-")]
     for subject in subjects:
-        sessions = [session for session in os.listdir(os.path.join(dataset_folder_path, subject)) if os.path.isdir(os.path.join(dataset_folder_path, subject, session))]
+        sessions = [session for session in os.listdir(os.path.join(dataset_folder_path, subject)) if os.path.isdir(os.path.join(dataset_folder_path, subject, session)) and session.startswith("ses-")]
         for session in sessions:
             dict_trial_labels[subject][session] = []

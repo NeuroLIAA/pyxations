@@ -33,8 +33,8 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
 
     bids_folder_path = os.path.join(target_folder_path, dataset_name)
 
-    subj_ids = list(set([os.path.basename(file).split("_")[0] for file in file_paths]))
-    
+    subj_ids = list(set([os.path.basename(file).split("_")[0] for file in file_paths if file.lower().endswith(".edf") or file.lower().endswith(".bdf")]))
+
     # If all of the subjects have numerical IDs, sort them numerically, else sort them alphabetically
     if all(subject_id.isdigit() for subject_id in subj_ids):
         subj_ids.sort(key=int)
@@ -89,9 +89,9 @@ def convert_edf_to_ascii(edf_file_path, output_dir):
     ascii_file_name = os.path.splitext(edf_file_name)[0] + ".asc"
     ascii_file_path = os.path.join(output_dir, ascii_file_name)
 
-    # Run edf2asc command with the -f flag, only run it if the file does not already exist
+    # Run edf2asc command with the -failsafe flag, only run it if the file does not already exist
     if not os.path.exists(ascii_file_path):
-        subprocess.run(["edf2asc", "-f", edf_file_path, ascii_file_path])
+        subprocess.run(["edf2asc", "-failsafe", edf_file_path, ascii_file_path])
 
     return ascii_file_path
 
@@ -341,4 +341,5 @@ def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords,num_proces
             futures.append(executor.submit(process_subject, bids_dataset_folder, subject, msg_keywords, derivatives_folder,num_threads))
         for futures in futures:
             futures.result()  # This will raise exceptions if any occurred during processing
+    return derivatives_folder
         
