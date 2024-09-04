@@ -13,8 +13,9 @@ class PostProcessing:
         """
         Classifies samples as 'bad' if they fall outside the screen boundaries.
 
-        This function processes a DataFrame containing gaze samples data, filling missing values,
+        This function processes a DataFrame containing gaze samples data,
         and classifying samples as 'bad' if they fall outside the screen boundaries.
+        If there are NaN values in a given row, they are skipped.
 
         Parameters:
         samples (pd.DataFrame): DataFrame containing gaze samples data with the following columns:
@@ -26,15 +27,18 @@ class PostProcessing:
         pd.DataFrame: The original DataFrame with an additional column:
                     - 'bad': Whether the sample is 'bad' or not.
         """
+        columns = [cols for cols in samples.columns if cols in ['LX', 'LY', 'RX', 'RY']]
+        width_columns = [cols for cols in samples.columns if cols in ['LX', 'RX']]
+        height_columns = [cols for cols in samples.columns if cols in ['LY', 'RY']]
 
-        # Fill '.' values with 0
-        samples[['LX', 'LY', 'RX', 'RY']] = samples[['LX', 'LY', 'RX', 'RY']].replace('.', 0)
 
-        # Convert columns to float
-        samples[['LX', 'LY', 'RX', 'RY']] = samples[['LX', 'LY', 'RX', 'RY']].astype(float)
+        samples['bad'] = (samples[columns] < 0).any(axis=1)
 
-        # Classify samples as 'bad' if they fall outside the screen boundaries
-        samples['bad'] = (samples['LX'] < 0) | (samples['LY'] < 0) | (samples['RX'] < 0) | (samples['RY'] < 0) | (samples['LX'] > width) | (samples['LY'] > height) | (samples['RX'] > width) | (samples['RY'] > height)
+        # Add width filter to the filter list
+        samples['bad'] = samples['bad'] | (samples[width_columns] > width).any(axis=1)
+        
+        # Add height filter to the filter list
+        samples['bad'] = samples['bad'] | (samples[height_columns] > height).any(axis=1)
 
         samples.to_hdf(path_or_buf=path.join(self.session_folder_path, "samples.hdf5"), key='samples', mode='w')
         return samples

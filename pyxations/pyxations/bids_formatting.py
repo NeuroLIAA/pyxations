@@ -34,7 +34,12 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
     bids_folder_path = os.path.join(target_folder_path, dataset_name)
 
     subj_ids = list(set([os.path.basename(file).split("_")[0] for file in file_paths]))
-    subj_ids.sort()
+    
+    # If all of the subjects have numerical IDs, sort them numerically, else sort them alphabetically
+    if all(subject_id.isdigit() for subject_id in subj_ids):
+        subj_ids.sort(key=int)
+    else:
+        subj_ids.sort()
     new_subj_ids = [str(subject_index).zfill(4) for subject_index in range(len(subj_ids))]
 
     # Create subfolders for each session for each subject
