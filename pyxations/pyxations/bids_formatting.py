@@ -40,7 +40,7 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
         subj_ids.sort(key=int)
     else:
         subj_ids.sort()
-    new_subj_ids = [str(subject_index).zfill(4) for subject_index in range(len(subj_ids))]
+    new_subj_ids = [str(subject_index).zfill(4) for subject_index in range(1,len(subj_ids)+1)]
 
     # Create subfolders for each session for each subject
     for subject_id in new_subj_ids:
