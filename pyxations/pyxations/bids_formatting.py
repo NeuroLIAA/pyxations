@@ -44,7 +44,7 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
 
     # Create subfolders for each session for each subject
     for subject_id in new_subj_ids:
-        old_subject_id = subj_ids[int(subject_id)]
+        old_subject_id = subj_ids[int(subject_id) - 1]
         for file in file_paths:
             file_name = os.path.basename(file)
             file_lower = file_name.lower()
