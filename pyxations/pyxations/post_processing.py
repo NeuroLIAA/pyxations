@@ -129,7 +129,7 @@ class PostProcessing:
 
         Returns:
         pd.DataFrame: The original DataFrame with an additional column:
-                    - 'trial': The trial id for each sample.
+                    - 'trial_number': The trial id for each sample.
         """
 
         # TODO: Turn duration (in seconds) to duration (in samples) using the sample rate of the eye tracker

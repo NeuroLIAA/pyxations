@@ -172,11 +172,23 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,session_folder_path,keep_ascii
             lineType[iLine] = 'EBLINK'
         elif fileTxt0[iLine].split()[0][0].isdigit() or fileTxt0[iLine].split()[0].startswith('-'):
             lineType[iLine] = 'SAMPLE'
+        elif '!MODE RECORD CR 1000 2 0 ' in fileTxt0[iLine]:
+            lineType[iLine] = 'eye_setup'
         else:
             lineType[iLine] = 'OTHER'
         
  
     # ===== PARSE EYELINK FILE ===== #
+
+    # Eye setup filtering
+    i_eye_setup = np.nonzero(lineType!='eye_setup')[0]
+    dfEyeSetup = pd.read_csv(ascii_file_path,skiprows=i_eye_setup,header=None,sep='\s+')
+    # Count the number of "L" values in the last column
+    left_eyes = np.sum(dfEyeSetup.iloc[:,-1] == 'L')
+    # Count the number of "R" values in the last column
+    right_eyes = np.sum(dfEyeSetup.iloc[:,-1] == 'R')
+    # If there are both "L" and "R" values, then the file is binocular
+    both_eyes = np.sum(dfEyeSetup.iloc[:,-1] == 'LR')
 
     # Import Header
     logging.info(f'Parsing header for subject {subject}...')
@@ -262,11 +274,12 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,session_folder_path,keep_ascii
     df_blink["Line_number"] = np.nonzero(lineType=='EBLINK')[0]
 
     # determine sample columns based on eyes recorded in file
-    eyes_in_file = np.unique(df_fix.eye)
-    if eyes_in_file.size == 2:
+    if both_eyes > 0 and left_eyes == 0 and right_eyes == 0:
         cols = ['tSample', 'LX', 'LY', 'LPupil', 'RX', 'RY', 'RPupil']
+        eyes_in_file = ['L', 'R']
     else:
-        eye = eyes_in_file[0]
+        eye = "L" if left_eyes > right_eyes else "R"
+        eyes_in_file = [eye]
         logging.info(f'monocular data ({eye} eye) recording for subject {subject}...')
         cols = ['tSample', '%cX' % eye, '%cY' % eye, '%cPupil' % eye]
 

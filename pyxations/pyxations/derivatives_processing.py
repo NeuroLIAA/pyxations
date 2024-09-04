@@ -9,7 +9,6 @@ detection_algorithm_folder = "eyelink_events"
 detection_algorithm = "eyelink"
 
 def process_session(session_folder_path, start_msgs, end_msgs):
-    
     samples = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, "samples.hdf5"))
     sacc_filename = "sacc.hdf5"
     fix_filename = "fix.hdf5"
@@ -25,11 +24,11 @@ def process_session(session_folder_path, start_msgs, end_msgs):
     screen_width = int(screen_size[-2])
     screen_height = int(screen_size[-1])
 
-    samples = post_processing.bad_samples(samples,screen_height,screen_width)
     saccades = post_processing.saccades_direction(saccades)
     saccades = post_processing.split_into_trials(saccades, sacc_filename, user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
     fixations = post_processing.split_into_trials(fixations, fix_filename, user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
     samples = post_processing.split_into_trials(samples, "samples.hdf5", user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
+    samples = post_processing.bad_samples(samples,screen_height,screen_width)
     unique_trials = fixations[fixations['trial_number'] != -1]['trial_number'].unique()
     bad_samples = samples[(samples['trial_number'] != -1) & (samples['bad'] == True)][['trial_number','bad']].groupby('trial_number').size()
 
@@ -78,13 +77,32 @@ def process_derivatives(derivatives_folder_path: str, start_msgs: list[str], end
     visualization = Visualization(derivatives_folder_path, detection_algorithm)
     visualization.plot_multipanel(fixations, saccades)
 
+def sessions_without_samples(derivatives_folder_path:str):
+    for subject in [subject for subject in os.listdir(derivatives_folder_path) if os.path.isdir(os.path.join(derivatives_folder_path, subject)) and subject.startswith("sub-")]:
+        for session in [session for session in os.listdir(os.path.join(derivatives_folder_path, subject)) if os.path.isdir(os.path.join(derivatives_folder_path, subject, session)) and session.startswith("ses-")]:                
+            if not os.path.exists(os.path.join(derivatives_folder_path,subject,session,"samples.hdf5")):
+                print(os.path.join(derivatives_folder_path,subject,session,"samples.hdf5"))
 
+def parse_psycopy_log_for_trial_names(log_file_path:str,trial_delimiter:str):
+    with open(log_file_path, "r") as log_file:
+        log_lines = log_file.readlines()
+    trial_names = []
+    for line in log_lines:
+        if trial_delimiter in line:
+            trial_name = line.split(trial_delimiter)[1].strip()
+            trial_names.append(trial_name)
+    return trial_names
 
-def get_ordered_trials_from_psycopy_logs(dataset_folder_path:str):
-    #TODO: Implement this function
-    dict_trial_labels = defaultdict(lambda: defaultdict(list))
+def get_ordered_trials_from_psycopy_logs(dataset_folder_path:str,trial_delimiter:str):
+    dict_trial_labels = defaultdict()
     subjects = [subject for subject in os.listdir(dataset_folder_path) if os.path.isdir(os.path.join(dataset_folder_path, subject)) and subject.startswith("sub-")]
     for subject in subjects:
+        dict_trial_labels[subject] = defaultdict(list)
         sessions = [session for session in os.listdir(os.path.join(dataset_folder_path, subject)) if os.path.isdir(os.path.join(dataset_folder_path, subject, session)) and session.startswith("ses-")]
         for session in sessions:
-            dict_trial_labels[subject][session] = []
+            log_files = [log_file for log_file in os.listdir(os.path.join(dataset_folder_path, subject, session,"behavioral")) if log_file.endswith(".log")]
+            if len(log_files) > 1:
+                raise ValueError(f"More than one log file found in {os.path.join(dataset_folder_path, subject, session,'behavioral')}")
+            log_file = log_files[0]
+            dict_trial_labels[subject][session] = parse_psycopy_log_for_trial_names(os.path.join(dataset_folder_path, subject, session,"behavioral",log_file),trial_delimiter)
+    return dict_trial_labels
