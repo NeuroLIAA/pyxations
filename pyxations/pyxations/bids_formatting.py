@@ -25,7 +25,7 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
 
     # List all file paths in the folder
     file_paths = []
-    for root, dirs, files in os.walk(files_folder_path):
+    for root, _, files in os.walk(files_folder_path):
         for file in files:
             file_paths.append(os.path.join(root, file))
     
@@ -49,11 +49,11 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
             file_name = os.path.basename(file)
             file_lower = file_name.lower()
             session_id = "_".join(file_name.split("_")[1:session_substrings+1])
-            if file_lower.endswith(".edf") and file_name.startswith(old_subject_id):
+            if file_lower.endswith(".edf") and file_name.split("_")[0] == old_subject_id:
                 move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'ET')
-            if file_lower.endswith(".bdf") and file_name.startswith(old_subject_id):
+            if file_lower.endswith(".bdf") and file_name.split("_")[0] == old_subject_id:
                 move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'EEG')
-            if (file_lower.endswith(".log") or file_lower.endswith(".csv")) and file_name.startswith(old_subject_id):                
+            if (file_lower.endswith(".log") or file_lower.endswith(".csv")) and file_name.split("_")[0] == old_subject_id:                
                 move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'behavioral')
     return bids_folder_path
 
