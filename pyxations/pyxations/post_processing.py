@@ -101,6 +101,9 @@ class PostProcessing:
         # Get the timestamps for the messages
         timestamps = user_messages[user_messages['text'].str.contains('|'.join(messages))]['time'].to_numpy(dtype=int)
 
+        # Sort the timestamps numerically
+        timestamps.sort()
+
         # Raise exception if no timestamps are found
         if len(timestamps) == 0:
             raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages, self.session_folder_path))
@@ -129,7 +132,7 @@ class PostProcessing:
 
         Returns:
         pd.DataFrame: The original DataFrame with an additional column:
-                    - 'trial': The trial id for each sample.
+                    - 'trial_number': The trial id for each sample.
         """
 
         # TODO: Turn duration (in seconds) to duration (in samples) using the sample rate of the eye tracker
@@ -152,6 +155,9 @@ class PostProcessing:
         # If none of the above conditions are met, raise an exception
         else:
             raise ValueError("Either start_msgs and end_msgs, start_msgs and duration, or start_times and end_times must be provided.")
+
+        # It is somewhat common that the last trial is not closed, so we will discard starting times that are greater than the last ending time
+        start_times = [start_time for start_time in start_times if start_time < end_times[-1]]
 
         # Check that both lists have the same length
         if len(start_times) != len(end_times):
