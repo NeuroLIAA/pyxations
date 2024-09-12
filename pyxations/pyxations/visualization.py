@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 from os import path, makedirs
 import logging
-import math
 
 class Visualization():
     def __init__(self, session_folder_path,events_detection_algorithm):
@@ -132,33 +131,38 @@ class Visualization():
 
         #----- Plot scanpath and gaze if samples provided -----#
         if isinstance(samples, pd.DataFrame):
-
+            starting_time = samples['tSample'].iloc[0]
+            tSamples_from_start = (samples['tSample'] - starting_time)/samples['Rate_recorded']
             # Left eye
             try:
                 ax_main.plot(samples['LX'], samples['LY'], '--', color='C0', zorder=1)
-                ax_gaze.plot(samples['tSample'], samples['LX'], label='Left X')
-                ax_gaze.plot(samples['tSample'], samples['LY'], label='Left Y')
+                ax_gaze.plot(tSamples_from_start, samples['LX'], label='Left X')
+                ax_gaze.plot(tSamples_from_start, samples['LY'], label='Left Y')
             except:
                 pass
             # Right eye
             try:
-                ax_main.plot(samples['RX'], samples['RY'], '--', color='black', zorder=1)
-                ax_gaze.plot(samples['tSample'], samples['RX'], label='Right X')
-                ax_gaze.plot(samples['tSample'], samples['RY'], label='Right Y')
+                ax_main.plot(samples['X'], samples['Y'], '--', color='black', zorder=1)
+                ax_gaze.plot(tSamples_from_start, samples['X'], label='Right X')
+                ax_gaze.plot(tSamples_from_start, samples['RY'], label='Right Y')
             except:
                 pass
-
+            try:
+                ax_main.plot(samples['X'], samples['Y'], '--', color='black', zorder=1)
+                ax_gaze.plot(tSamples_from_start, samples['X'], label='X')
+                ax_gaze.plot(tSamples_from_start, samples['Y'], label='Y')
+            except:
+                pass
             plot_min, plot_max = ax_gaze.get_ylim()
-
             # Plot fixations as color span in gaze axes
             for fix_idx, fixation in fixations.iterrows():
                 color = cmap(norm(fix_idx + 1))
-                ax_gaze.axvspan(ymin=0, ymax=1, xmin=fixation['tStart'], xmax=fixation['tStart'] + fixation['duration'], color=color, alpha=0.4, label='fix')
+                ax_gaze.axvspan(ymin=0, ymax=1, xmin=(fixation['tStart'] - starting_time)/fixation['Rate_recorded'], xmax=(fixation['tStart'] - starting_time + fixation['duration'])/fixation['Rate_recorded'], color=color, alpha=0.4, label='fix')
             
             # Plor saccades as vlines in gaze axes
             if isinstance(saccades, pd.DataFrame):
                 for _, saccade in saccades.iterrows():
-                    ax_gaze.vlines(x=saccade['tStart'], ymin=plot_min, ymax=plot_max, colors='red', linestyles='--', label='sac')
+                    ax_gaze.vlines(x=(saccade['tStart']- starting_time)/saccade['Rate_recorded'], ymin=plot_min, ymax=plot_max, colors='red', linestyles='--', label='sac')
 
             # Legend
             handles, labels = plt.gca().get_legend_handles_labels()

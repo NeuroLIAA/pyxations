@@ -12,6 +12,7 @@ def process_session(session_folder_path, start_msgs, end_msgs):
     samples = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, "samples.hdf5"))
     sacc_filename = "sacc.hdf5"
     fix_filename = "fix.hdf5"
+    blinks_filename = "blink.hdf5"
     saccades = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, detection_algorithm_folder, sacc_filename))
     fixations = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, detection_algorithm_folder, fix_filename))
     user_messages = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, "msg.hdf5"))
@@ -19,8 +20,9 @@ def process_session(session_folder_path, start_msgs, end_msgs):
     post_processing = PostProcessing(session_folder_path, detection_algorithm)
     header_filename = "header.hdf5"
     header = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, header_filename))
-    # Screen size is in the last row of the header, in the "value" column, it is a string. I need to split it by whitespaces and take the last two elements, which are the width and height of the screen.
-    screen_size = header["value"].iloc[-1].split()
+    blinks = pd.read_hdf(path_or_buf=os.path.join(session_folder_path, detection_algorithm_folder, blinks_filename))
+    # Screen size is in the last row of the header, in the "line" column, it is a string. I need to split it by whitespaces and take the last two elements, which are the width and height of the screen.
+    screen_size = header["line"].iloc[-1].split()
     screen_width = int(screen_size[-2])
     screen_height = int(screen_size[-1])
 
@@ -28,6 +30,7 @@ def process_session(session_folder_path, start_msgs, end_msgs):
     saccades = post_processing.split_into_trials(saccades, sacc_filename, user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
     fixations = post_processing.split_into_trials(fixations, fix_filename, user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
     samples = post_processing.split_into_trials(samples, "samples.hdf5", user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
+    blinks = post_processing.split_into_trials(blinks, blinks_filename, user_messages=user_messages, start_msgs=start_msgs, end_msgs=end_msgs)
     samples = post_processing.bad_samples(samples,screen_height,screen_width)
     unique_trials = fixations[fixations['trial_number'] != -1]['trial_number'].unique()
     bad_samples = samples[(samples['trial_number'] != -1) & (samples['bad'] == True)][['trial_number','bad']].groupby('trial_number').size()

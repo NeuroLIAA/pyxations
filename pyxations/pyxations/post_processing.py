@@ -87,11 +87,11 @@ class PostProcessing:
     def get_timestamps_from_messages(self, user_messages:pd.DataFrame, messages: list[str]):
         """
         Get the timestamps for a list of messages from the user messages DataFrame.
-        The idea is to get the rows which have any of the messages in the list as a substring in the value of their 'text' column.
+        The idea is to get the rows which have any of the messages in the list as a substring in the value of their 'message' column.
 
         Parameters:
         user_messages (pd.DataFrame): DataFrame containing user messages data with the following columns:
-                                        'time', 'text'.
+                                        'timestamp', 'message'.
         messages (list[str]): List of strings to identify the messages.
 
         Returns:
@@ -99,7 +99,7 @@ class PostProcessing:
         """
         
         # Get the timestamps for the messages
-        timestamps = user_messages[user_messages['text'].str.contains('|'.join(messages))]['time'].to_numpy(dtype=int)
+        timestamps = user_messages[user_messages['message'].str.contains('|'.join(messages))]['timestamp'].to_numpy(dtype=int)
 
         # Sort the timestamps numerically
         timestamps.sort()
@@ -121,7 +121,7 @@ class PostProcessing:
         data (pd.DataFrame): DataFrame that must contain either the 'tSample' column or the 'tStart' and 'tEnd' columns.
         trial_labels (list[str]): List of trial labels to assign to each trial.
         user_messages (pd.DataFrame): DataFrame containing user messages data with the following columns:
-                                    'time', 'text'.
+                                    'timestamp', 'message'.
         start_msgs (list[str]): List of strings to identify the start of a trial.
         end_msgs (list[str]): List of strings to identify the end of a trial.
         duration (float): Duration of each trial in seconds.
@@ -134,7 +134,7 @@ class PostProcessing:
         pd.DataFrame: The original DataFrame with an additional column:
                     - 'trial_number': The trial id for each sample.
         """
-
+    
         # TODO: Turn duration (in seconds) to duration (in samples) using the sample rate of the eye tracker
         # If start_msgs and end_msgs are provided, use them to split the samples
         if start_msgs is not None and end_msgs is not None and user_messages is not None:
