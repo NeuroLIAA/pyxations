@@ -1,5 +1,5 @@
 import unittest
-from pyxations import PostProcessing
+from pyxations import PreProcessing
 
 class TestBadSamples(unittest.TestCase):
     def test_bad_samples(self):

@@ -1,6 +1,6 @@
 import os
 import unittest
-from pyxations import Visualization, PostProcessing
+from pyxations import Visualization
 import pandas as pd
 
 class TestMultipanel(unittest.TestCase):
@@ -11,15 +11,13 @@ class TestMultipanel(unittest.TestCase):
         current_folder = os.path.dirname(current_folder)
 
         path_to_session = os.path.join(current_folder, "example_dataset_derivatives", "sub-0001", "ses-second_half")
-
-        visualization = Visualization(path_to_session,'eyelink')
-        post_processing = PostProcessing(path_to_session,'eyelink')
         fixations = pd.read_hdf(path_or_buf=os.path.join(path_to_session,'eyelink_events', "fix.hdf5"))
         saccades = pd.read_hdf(path_or_buf=os.path.join(path_to_session,'eyelink_events', "sacc.hdf5"))
-        saccades = post_processing.saccades_direction(saccades)
-        # Plot multipanel
-        visualization.plot_multipanel(fixations, saccades)
+        
+        visualization = Visualization(path_to_session,'eyelink',fixations, saccades,None)
 
+        # Plot multipanel
+        visualization.plot_multipanel()
         # Assert that the file multipanel.png was created
         self.assertTrue(os.path.exists(os.path.join(path_to_session,'eyelink_events','plots', "multipanel.png")))
 

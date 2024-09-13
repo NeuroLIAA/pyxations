@@ -7,16 +7,18 @@ from os import path, makedirs
 import logging
 
 class Visualization():
-    def __init__(self, session_folder_path,events_detection_algorithm):
+    def __init__(self, session_folder_path,events_detection_algorithm,fixations:pd.DataFrame,saccades:pd.DataFrame,samples:pd.DataFrame):
         self.session_folder_path = session_folder_path
         self.events_detection_folder = events_detection_algorithm+'_events'
         makedirs(path.join(self.session_folder_path,self.events_detection_folder,'plots'), exist_ok=True)
         derivatives_folder_path = path.dirname(path.dirname(self.session_folder_path))
         log_file = path.join(derivatives_folder_path,'derivatives_processing.log') 
         logging.basicConfig(filename=log_file,level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        self.fixations = fixations
+        self.saccades = saccades
+        self.samples = samples
 
-    def scanpath(self,fixations:pd.DataFrame,trial_index:int=None,trial_label:str=None,tmin:int=None, tmax:int=None, img_path:str=None, saccades:pd.DataFrame=None, samples:pd.DataFrame=None,
-             screen_res_x:int=1920, screen_res_y:int=1080):
+    def scanpath(self,screen_height:int, screen_width:int,trial_index:int=None,trial_label:str=None,tmin:int=None, tmax:int=None, img_path:str=None, plot_saccades:bool=False, plot_samples:bool=False):
         """
         Plots the scanpath, including fixations, saccades, and optionally an image background and gaze samples.
 
@@ -58,54 +60,54 @@ class Visualization():
 
         #----- Filter saccades, fixations and samples to defined time interval -----#
         if tmax is not None and tmin is not None:
-            fixations = fixations.loc[(fixations['tStart'] >= tmin) & (fixations['tStart'] <= tmax)].reset_index(drop=True)
-            if isinstance(saccades, pd.DataFrame):
-                saccades = saccades.loc[(saccades['tStart'] >= tmin) & (saccades['tStart'] <= tmax)].reset_index(drop=True)
-            if isinstance(samples, pd.DataFrame):
-                samples = samples.loc[(samples['tSample'] >= tmin) & (samples['tSample'] <= tmax)].reset_index(drop=True)
+            filtered_fixations = self.fixations.loc[(self.fixations['tStart'] >= tmin) & (self.fixations['tStart'] <= tmax)].reset_index(drop=True)
+            if plot_saccades:
+                filtered_saccades = self.saccades.loc[(self.saccades['tStart'] >= tmin) & (self.saccades['tStart'] <= tmax)].reset_index(drop=True)
+            if plot_samples:
+                filtered_samples = self.samples.loc[(self.samples['tSample'] >= tmin) & (self.samples['tSample'] <= tmax)].reset_index(drop=True)
         
         #----- Filter saccades, fixations and samples to defined trial -----#
         if trial_index is not None:
-            fixations = fixations.loc[fixations['trial_number'] == trial_index].reset_index(drop=True)
-            if isinstance(saccades, pd.DataFrame):
-                saccades = saccades.loc[saccades['trial_number'] == trial_index].reset_index(drop=True)
-            if isinstance(samples, pd.DataFrame):
-                samples = samples.loc[samples['trial_number'] == trial_index].reset_index(drop=True)
+            filtered_fixations = self.fixations.loc[self.fixations['trial_number'] == trial_index].reset_index(drop=True)
+            if plot_saccades:
+                filtered_saccades = self.saccades.loc[self.saccades['trial_number'] == trial_index].reset_index(drop=True)
+            if plot_samples:
+                filtered_samples = self.samples.loc[self.samples['trial_number'] == trial_index].reset_index(drop=True)
 
         if trial_label is not None:
-            fixations = fixations.loc[fixations['trial_label'] == trial_label].reset_index(drop=True)
-            if isinstance(saccades, pd.DataFrame):
-                saccades = saccades.loc[saccades['trial_label'] == trial_label].reset_index(drop=True)
-            if isinstance(samples, pd.DataFrame):
-                samples = samples.loc[samples['trial_label'] == trial_label].reset_index(drop=True)
+            filtered_fixations = self.fixations.loc[self.fixations['trial_label'] == trial_label].reset_index(drop=True)
+            if plot_saccades:
+                filtered_saccades = self.saccades.loc[self.saccades['trial_label'] == trial_label].reset_index(drop=True)
+            if plot_samples:
+                filtered_samples = self.samples.loc[self.samples['trial_label'] == trial_label].reset_index(drop=True)
 
         #----- Define figure and axes -----#
-        if isinstance(samples, pd.DataFrame):
+        if plot_samples:
             fig, axs = plt.subplots(nrows=2, ncols=1, height_ratios=(4, 1),figsize=(10, 6))
             ax_main = axs[0]
             ax_gaze = axs[1]
         else:
             fig, ax_main = plt.subplots(figsize=(10, 6))
 
-        ax_main.set_xlim(0, screen_res_x)
-        ax_main.set_ylim(0, screen_res_y)
+        ax_main.set_xlim(0, screen_width)
+        ax_main.set_ylim(0, screen_height)
 
 
         #----- Plot fixations as dots if any in time interval -----#
         # Colormap: Get fixation durations for scatter circle size
-        sizes = fixations['duration']
+        sizes = filtered_fixations['duration']
         
         # Define rainwbow cmap for fixations
         cmap = plt.cm.rainbow
         
         # Define the bins and normalize
-        fix_num = fixations.index + 1
+        fix_num = filtered_fixations.index + 1
         bounds = np.linspace(1, fix_num[-1] + 1, fix_num[-1] + 1)
         norm = mplcolors.BoundaryNorm(bounds, cmap.N)
 
         
         # Plot
-        ax_main.scatter(fixations['xAvg'], fixations['yAvg'], c=fix_num, s=sizes, cmap=cmap, norm=norm, alpha=0.5, zorder=2)
+        ax_main.scatter(filtered_fixations['xAvg'], filtered_fixations['yAvg'], c=fix_num, s=sizes, cmap=cmap, norm=norm, alpha=0.5, zorder=2)
 
         # Colorbar
         PCM = ax_main.get_children()[0]  # When the fixations dots for color mappable were ploted (first)
@@ -124,44 +126,44 @@ class Visualization():
             img_res_y = img.shape[0]
             
             # Define box in axes to plot image
-            image_box_extent = ((screen_res_x - img_res_x) / 2, img_res_x + (screen_res_x - img_res_x) / 2, (screen_res_y - img_res_y) / 2, img_res_y + (screen_res_y - img_res_y) / 2) 
+            image_box_extent = ((screen_width - img_res_x) / 2, img_res_x + (screen_width - img_res_x) / 2, (screen_height - img_res_y) / 2, img_res_y + (screen_height - img_res_y) / 2) 
             
             # Plot
             ax_main.imshow(img, extent=image_box_extent, zorder=0)
 
         #----- Plot scanpath and gaze if samples provided -----#
-        if isinstance(samples, pd.DataFrame):
-            starting_time = samples['tSample'].iloc[0]
-            tSamples_from_start = (samples['tSample'] - starting_time)/samples['Rate_recorded']
+        if plot_samples:
+            starting_time = filtered_samples['tSample'].iloc[0]
+            tSamples_from_start = (filtered_samples['tSample'] - starting_time)/filtered_samples['Rate_recorded']
             # Left eye
             try:
-                ax_main.plot(samples['LX'], samples['LY'], '--', color='C0', zorder=1)
-                ax_gaze.plot(tSamples_from_start, samples['LX'], label='Left X')
-                ax_gaze.plot(tSamples_from_start, samples['LY'], label='Left Y')
+                ax_main.plot(filtered_samples['LX'], filtered_samples['LY'], '--', color='C0', zorder=1)
+                ax_gaze.plot(tSamples_from_start, filtered_samples['LX'], label='Left X')
+                ax_gaze.plot(tSamples_from_start, filtered_samples['LY'], label='Left Y')
             except:
                 pass
             # Right eye
             try:
-                ax_main.plot(samples['X'], samples['Y'], '--', color='black', zorder=1)
-                ax_gaze.plot(tSamples_from_start, samples['X'], label='Right X')
-                ax_gaze.plot(tSamples_from_start, samples['RY'], label='Right Y')
+                ax_main.plot(filtered_samples['X'], filtered_samples['Y'], '--', color='black', zorder=1)
+                ax_gaze.plot(tSamples_from_start, filtered_samples['X'], label='Right X')
+                ax_gaze.plot(tSamples_from_start, filtered_samples['RY'], label='Right Y')
             except:
                 pass
             try:
-                ax_main.plot(samples['X'], samples['Y'], '--', color='black', zorder=1)
-                ax_gaze.plot(tSamples_from_start, samples['X'], label='X')
-                ax_gaze.plot(tSamples_from_start, samples['Y'], label='Y')
+                ax_main.plot(filtered_samples['X'], filtered_samples['Y'], '--', color='black', zorder=1)
+                ax_gaze.plot(tSamples_from_start, filtered_samples['X'], label='X')
+                ax_gaze.plot(tSamples_from_start, filtered_samples['Y'], label='Y')
             except:
                 pass
             plot_min, plot_max = ax_gaze.get_ylim()
             # Plot fixations as color span in gaze axes
-            for fix_idx, fixation in fixations.iterrows():
+            for fix_idx, fixation in filtered_fixations.iterrows():
                 color = cmap(norm(fix_idx + 1))
                 ax_gaze.axvspan(ymin=0, ymax=1, xmin=(fixation['tStart'] - starting_time)/fixation['Rate_recorded'], xmax=(fixation['tStart'] - starting_time + fixation['duration'])/fixation['Rate_recorded'], color=color, alpha=0.4, label='fix')
             
             # Plor saccades as vlines in gaze axes
-            if isinstance(saccades, pd.DataFrame):
-                for _, saccade in saccades.iterrows():
+            if plot_saccades:
+                for _, saccade in filtered_saccades.iterrows():
                     ax_gaze.vlines(x=(saccade['tStart']- starting_time)/saccade['Rate_recorded'], ymin=plot_min, ymax=plot_max, colors='red', linestyles='--', label='sac')
 
             # Legend
@@ -175,32 +177,32 @@ class Visualization():
         plt.close()
 
 
-    def fix_duration(self,fixations:pd.DataFrame,axs=None):
+    def fix_duration(self,axs=None):
         
         ax = axs
         if ax is None:
             fig, ax = plt.subplots()
 
-        ax.hist(fixations['duration'], bins=100, edgecolor='black', linewidth=1.2, density=True)
+        ax.hist(self.fixations['duration'], bins=100, edgecolor='black', linewidth=1.2, density=True)
         ax.set_title('Fixation duration')
         ax.set_xlabel('Time (ms)')
         ax.set_ylabel('Density')
 
 
-    def sacc_amplitude(self,saccades:pd.DataFrame,axs=None):
+    def sacc_amplitude(self,axs=None):
 
         ax = axs
         if ax is None:
             fig, ax = plt.subplots()
 
-        saccades_amp = saccades['ampDeg']
+        saccades_amp = self.saccades['ampDeg']
         ax.hist(saccades_amp, bins=100, range=(0, 20), edgecolor='black', linewidth=1.2, density=True)
         ax.set_title('Saccades amplitude')
         ax.set_xlabel('Amplitude (deg)')
         ax.set_ylabel('Density')
 
 
-    def sacc_direction(self,saccades:pd.DataFrame,axs=None,figs=None):
+    def sacc_direction(self,axs=None,figs=None):
 
         ax = axs
         if ax is None:
@@ -209,10 +211,10 @@ class Visualization():
         else:
             ax.set_axis_off()
             ax = figs.add_subplot(2, 2, 3, projection='polar')
-        if 'deg' not in saccades.columns or 'dir' not in saccades.columns:
+        if 'deg' not in self.saccades.columns or 'dir' not in self.saccades.columns:
             raise ValueError('Compute saccades direction first by using saccades_direction function from the PostProcessing module.')
         # Convert from deg to rad
-        saccades_rad = saccades['deg'] * np.pi / 180 
+        saccades_rad = self.saccades['deg'] * np.pi / 180 
 
         n_bins = 24
         ang_hist, bin_edges = np.histogram(saccades_rad, bins=24, density=True)
@@ -226,14 +228,14 @@ class Visualization():
             bar.set_facecolor(plt.cm.Blues(r / np.max(ang_hist)))
 
 
-    def sacc_main_sequence(self,saccades:pd.DataFrame,axs=None, hline=None):
+    def sacc_main_sequence(self,axs=None, hline=None):
 
         ax = axs
         if ax is None:
             fig, ax = plt.subplots()
 
-        saccades_peack_vel = saccades['vPeak']
-        saccades_amp = saccades['ampDeg']
+        saccades_peack_vel = self.saccades['vPeak']
+        saccades_amp = self.saccades['ampDeg']
 
         ax.plot(saccades_amp, saccades_peack_vel, '.', alpha=0.1, markersize=2)
         ax.set_xlim(0.01)
@@ -248,14 +250,14 @@ class Visualization():
         ax.grid()
 
 
-    def plot_multipanel(self,fixations:pd.DataFrame,saccades:pd.DataFrame):
+    def plot_multipanel(self):
         plt.rcParams.update({'font.size': 12})
         fig, axs = plt.subplots(2, 2, figsize=(12, 7))
         
-        self.fix_duration(fixations,axs=axs[0, 0])
-        self.sacc_main_sequence(saccades,axs=axs[1, 1])
-        self.sacc_direction(saccades,axs=axs[1, 0],figs=fig)
-        self.sacc_amplitude(saccades,axs=axs[0, 1])
+        self.fix_duration(axs=axs[0, 0])
+        self.sacc_main_sequence(axs=axs[1, 1])
+        self.sacc_direction(axs=axs[1, 0],figs=fig)
+        self.sacc_amplitude(axs=axs[0, 1])
 
         fig.tight_layout()
         plt.savefig(path.join(self.session_folder_path,self.events_detection_folder,'plots','multipanel.png'))

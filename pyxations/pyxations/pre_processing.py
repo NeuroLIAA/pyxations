@@ -1,15 +1,27 @@
-# no se me ocurrió otro nombre para el archivo xd
-
 import numpy as np
 import pandas as pd
-from os import path
 
-class PostProcessing:
-    def __init__(self, session_folder_path,events_detection_algorithm):
-        self.session_folder_path = session_folder_path
-        self.events_detection_folder = events_detection_algorithm+'_events'
 
-    def bad_samples(self,samples:pd.DataFrame, height:int, width:int):
+class PreProcessing:
+    def __init__(self, samples, fixations,saccades,blinks, user_messages):
+        self.samples = samples
+        self.fixations = fixations
+        self.saccades = saccades
+        self.blinks = blinks
+        self.user_messages = user_messages
+        
+    def split_all_into_trials(self,trial_labels:list[str] = None, start_msgs: list[str]=None, end_msgs: list[str]=None,duration: float=None, start_times: list[int]=None, end_times: list[int]=None):
+        self.split_into_trials(self.samples,trial_labels,start_msgs,end_msgs,duration,start_times,end_times)
+        self.split_into_trials(self.fixations,trial_labels,start_msgs,end_msgs,duration,start_times,end_times)
+        self.split_into_trials(self.saccades,trial_labels,start_msgs,end_msgs,duration,start_times,end_times)
+        self.split_into_trials(self.blinks,trial_labels,start_msgs,end_msgs,duration,start_times,end_times)
+
+    def process(self,functions_and_params:dict):
+        for function,params in functions_and_params.items():
+            getattr(self,function)(**params)
+
+
+    def bad_samples(self, screen_height:int, screen_width:int):
         """
         Classifies samples as 'bad' if they fall outside the screen boundaries.
 
@@ -23,28 +35,23 @@ class PostProcessing:
         height (int): Height of the screen in pixels.
         width (int): Width of the screen in pixels.
 
-        Returns:
-        pd.DataFrame: The original DataFrame with an additional column:
-                    - 'bad': Whether the sample is 'bad' or not.
         """
-        columns = [cols for cols in samples.columns if cols in ['LX', 'LY', 'RX', 'RY']]
-        width_columns = [cols for cols in samples.columns if cols in ['LX', 'RX']]
-        height_columns = [cols for cols in samples.columns if cols in ['LY', 'RY']]
+        columns = [cols for cols in self.samples.columns if cols in ['LX', 'LY', 'RX', 'RY', 'X', 'Y']]
+        width_columns = [cols for cols in self.samples.columns if cols in ['LX', 'RX', 'X']]
+        height_columns = [cols for cols in self.samples.columns if cols in ['LY', 'RY', 'Y']]
 
 
-        samples['bad'] = (samples[columns] < 0).any(axis=1)
+        self.samples['bad'] = (self.samples[columns] < 0).any(axis=1)
 
         # Add width filter to the filter list
-        samples['bad'] = samples['bad'] | (samples[width_columns] > width).any(axis=1)
+        self.samples['bad'] = self.samples['bad'] | (self.samples[width_columns] > screen_width).any(axis=1)
         
         # Add height filter to the filter list
-        samples['bad'] = samples['bad'] | (samples[height_columns] > height).any(axis=1)
-
-        samples.to_hdf(path_or_buf=path.join(self.session_folder_path, "samples.hdf5"), key='samples', mode='w')
-        return samples
+        self.samples['bad'] = self.samples['bad'] | (self.samples[height_columns] > screen_height).any(axis=1)
 
 
-    def saccades_direction(self,saccades:pd.DataFrame):
+
+    def saccades_direction(self):
         """
         Classifies saccades into directional categories based on their start and end coordinates.
 
@@ -57,34 +64,28 @@ class PostProcessing:
         saccades (pd.DataFrame): DataFrame containing saccade data with the following columns:
                                 'xStart', 'xEnd', 'yStart', 'yEnd'.
 
-        Returns:
-        pd.DataFrame: The original DataFrame with additional columns:
-                    - 'deg': The angle of each saccade in degrees.
-                    - 'dir': The direction of each saccade ('right', 'left', 'up', 'down').
         """
 
         # Saccades amplitude in x and y
-        x_dif = saccades['xEnd'] - saccades['xStart']
-        y_dif = saccades['yEnd'] - saccades['yStart']
+        x_dif = self.saccades['xEnd'] - self.saccades['xStart']
+        y_dif = self.saccades['yEnd'] - self.saccades['yStart']
         
         # Take to complex plane
         z = x_dif + 1j * y_dif
 
         # Saccades degrees
-        saccades['deg'] = np.angle(z, deg=True)
+        self.saccades['deg'] = np.angle(z, deg=True)
 
         # Classify in right / left / up / down
-        saccades['dir'] = [''] * len(saccades)
+        self.saccades['dir'] = [''] * len(self.saccades)
 
-        saccades.loc[(-15 < saccades['deg']) & (saccades['deg'] < 15), 'dir'] = 'right'
-        saccades.loc[(75 < saccades['deg']) & (saccades['deg'] < 105), 'dir'] = 'down'
-        saccades.loc[(165 < saccades['deg']) | (saccades['deg'] < -165), 'dir'] = 'left'
-        saccades.loc[(-105 < saccades['deg']) & (saccades['deg'] < -75), 'dir'] = 'up'
+        self.saccades.loc[(-15 < self.saccades['deg']) & (self.saccades['deg'] < 15), 'dir'] = 'right'
+        self.saccades.loc[(75 < self.saccades['deg']) & (self.saccades['deg'] < 105), 'dir'] = 'down'
+        self.saccades.loc[(165 < self.saccades['deg']) | (self.saccades['deg'] < -165), 'dir'] = 'left'
+        self.saccades.loc[(-105 < self.saccades['deg']) & (self.saccades['deg'] < -75), 'dir'] = 'up'
     
-        saccades.to_hdf(path_or_buf=path.join(self.session_folder_path,self.events_detection_folder, "sacc.hdf5"), key="sacc", mode='w')
-        return saccades
     
-    def get_timestamps_from_messages(self, user_messages:pd.DataFrame, messages: list[str]):
+    def get_timestamps_from_messages(self, messages: list[str]):
         """
         Get the timestamps for a list of messages from the user messages DataFrame.
         The idea is to get the rows which have any of the messages in the list as a substring in the value of their 'message' column.
@@ -99,18 +100,18 @@ class PostProcessing:
         """
         
         # Get the timestamps for the messages
-        timestamps = user_messages[user_messages['message'].str.contains('|'.join(messages))]['timestamp'].to_numpy(dtype=int)
+        timestamps = self.user_messages[self.user_messages['message'].str.contains('|'.join(messages))]['timestamp'].to_numpy(dtype=int)
 
         # Sort the timestamps numerically
         timestamps.sort()
 
         # Raise exception if no timestamps are found
         if len(timestamps) == 0:
-            raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages, self.session_folder_path))
+            raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages))
 
         return list(timestamps)
 
-    def split_into_trials(self,data:pd.DataFrame,filename:str,trial_labels:list[str] = None, user_messages:pd.DataFrame=None,start_msgs: list[str]=None, end_msgs: list[str]=None,duration: float=None, start_times: list[int]=None, end_times: list[int]=None):
+    def split_into_trials(self,data:pd.DataFrame,trial_labels:list[str] = None, start_msgs: list[str]=None, end_msgs: list[str]=None,duration: float=None, start_times: list[int]=None, end_times: list[int]=None):
         """
         There are three ways of splitting the samples into trials:
         1) Using the start and end messages.
@@ -130,22 +131,18 @@ class PostProcessing:
 
         In every case the time is measured based on the sample rate of the eye tracker.
 
-        Returns:
-        pd.DataFrame: The original DataFrame with an additional column:
-                    - 'trial_number': The trial id for each sample.
         """
-    
-        # TODO: Turn duration (in seconds) to duration (in samples) using the sample rate of the eye tracker
+
         # If start_msgs and end_msgs are provided, use them to split the samples
-        if start_msgs is not None and end_msgs is not None and user_messages is not None:
+        if start_msgs is not None and end_msgs is not None and self.user_messages is not None:
             # Get the start and end times for each trial
-            start_times = self.get_timestamps_from_messages(user_messages, start_msgs)
-            end_times = self.get_timestamps_from_messages(user_messages, end_msgs)
+            start_times = self.get_timestamps_from_messages(start_msgs)
+            end_times = self.get_timestamps_from_messages(end_msgs)
 
         # If start_msgs and duration are provided, use them to split the samples
-        elif start_msgs is not None and duration is not None and user_messages is not None:
+        elif start_msgs is not None and duration is not None and self.user_messages is not None:
             # Get the start times for each trial
-            start_times = self.get_timestamps_from_messages(user_messages, start_msgs)
+            start_times = self.get_timestamps_from_messages(start_msgs)
             # Calculate the end times for each trial
             end_times = start_times + duration
 
@@ -186,6 +183,3 @@ class PostProcessing:
             for i in range(len(start_times)):
                 data.loc[data['trial_number'] == i, 'trial_label'] = trial_labels[i]
 
-        file_path = path.join(self.session_folder_path,self.events_detection_folder, filename) if filename != "samples.hdf5" else path.join(self.session_folder_path, filename)
-        data.to_hdf(path_or_buf=file_path, key=filename[:-5], mode='w')
-        return data

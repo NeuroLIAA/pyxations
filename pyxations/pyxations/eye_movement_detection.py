@@ -12,17 +12,16 @@ class EyeMovementDetection(ABC):
     def detect_eye_movements(self,*args,**kwargs):
         pass
     
-    # TODO: Ensure that the method is implemented in all subclasses before converting it to an abstract method
-    def save_eye_movements(self,fixations,saccades,times):
-        pass
+
 
 
 class RemodnavDetection(EyeMovementDetection):
-    def __init__(self, session_folder_path):
+    def __init__(self, session_folder_path,samples):
         self.session_folder_path = session_folder_path
-        self.out_folder = 'remodnav_events/'
+        self.out_folder = os.path.join(session_folder_path, 'remodnav_events')
+        self.samples = samples
     
-    #TODO: Implement save_eye_movements method for remodnav, following the guidelines from the eyelink ascii parser.
+
     def detect_eye_movements(self,min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05, 
                                  sac_max_vel:float=1000., fix_max_amp:float=1.5, sac_time_thresh:float=0.002,
                                  drop_fix_from_blink:bool=True, sfreq:float=1000,
@@ -76,22 +75,20 @@ class RemodnavDetection(EyeMovementDetection):
         ValueError
             If Remodnav detection fails.
         """
-        out_folder = os.path.join(self.session_folder_path, self.out_folder)
-        # Move eye data, detections file and image to subject results directory
-        os.makedirs(out_folder, exist_ok=True)
 
-        samples = pd.read_hdf(path_or_buf=os.path.join(self.session_folder_path, 'samples.hdf5'))
+        # Move eye data, detections file and image to subject results directory
+        os.makedirs(self.out_folder, exist_ok=True)
         
-        times = np.arange(stop=len(samples) / sfreq, step=1/sfreq)
+        times = np.arange(stop=len(self.samples) / sfreq, step=1/sfreq)
 
         # Dictionaries to store fixations and saccades DataFrames from each eye
         fixations = {}
         saccades = {}
 
         # TODO: Adapt to one-eye data
-        for gazex_data, gazey_data, pupil_data, eye in zip((samples['LX'], samples['RX']), 
-                                                        (samples['LY'], samples['RY']), 
-                                                        (samples['LPupil'], samples['RPupil']), 
+        for gazex_data, gazey_data, pupil_data, eye in zip((self.samples['LX'], self.samples['RX']), 
+                                                        (self.samples['LY'], self.samples['RY']), 
+                                                        (self.samples['LPupil'], self.samples['RPupil']), 
                                                         ('left', 'right')):
 
             # If not pre run data, run
@@ -116,7 +113,7 @@ class RemodnavDetection(EyeMovementDetection):
             failed = os.system(command)
 
             # Move et data file
-            os.replace(eye_samples_fname, os.path.join(out_folder, eye_samples_fname))
+            os.replace(eye_samples_fname, os.path.join(self.out_folder, eye_samples_fname))
 
             # Raise error if events detection with Remodnav failed
             if failed:
@@ -128,9 +125,9 @@ class RemodnavDetection(EyeMovementDetection):
 
 
             # Move results file
-            os.replace(results_fname, os.path.join(out_folder,results_fname))
+            os.replace(results_fname, os.path.join(self.out_folder,results_fname))
             # Move results image
-            os.replace(image_fname, os.path.join(out_folder, image_fname))
+            os.replace(image_fname, os.path.join(self.out_folder, image_fname))
 
             # Get saccades and fixations
             saccades_eye_all = copy.copy(sac_fix.loc[(sac_fix['label'] == 'SACC') | (sac_fix['label'] == 'ISAC')])
@@ -222,5 +219,5 @@ class RemodnavDetection(EyeMovementDetection):
             fixations[eye] = fixations_eye
             saccades[eye] = saccades_eye
 
-        return fixations, saccades, times
+        return fixations, saccades
     
