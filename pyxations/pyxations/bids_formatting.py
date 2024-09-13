@@ -13,18 +13,20 @@ import inspect
 EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection}
 
 
-def find_besteye(df_cal, default='R'):
+def find_besteye(df_cal):
     if df_cal[df_cal['line'].str.contains('CAL VALIDATION')].index.empty:
-        return default
+        raise ValueError("No validation line found in the calibration file.")
     last_index = df_cal[df_cal['line'].str.contains('CAL VALIDATION')].index[-1]
     last_val_msg = df_cal.loc[last_index].values[0]
-    if not len(last_val_msg) or 'ABORTED' in last_val_msg:
-        return default
     second_to_last_index = last_index - 1
-    second_to_last_msg = df_cal.loc[second_to_last_index].values[0]
-    if '!CAL VALIDATION' not in second_to_last_msg:
+    if 'ABORTED' in last_val_msg:
+        if not second_to_last_index in df_cal.index or 'CAL VALIDATION' not in df_cal.loc[second_to_last_index].values[0] or 'ABORTED' in df_cal.loc[second_to_last_index].values[0]:
+            return 'L' if 'LEFT' in last_val_msg else 'R'
+        last_val_msg = df_cal.loc[second_to_last_index].values[0]
         return 'L' if 'LEFT' in last_val_msg else 'R'
     
+    if not second_to_last_index in df_cal.index or 'CAL VALIDATION' not in df_cal.loc[second_to_last_index].values[0] or 'ABORTED' in df_cal.loc[second_to_last_index].values[0]:
+        return 'L' if 'LEFT' in last_val_msg else 'R'    
     left_index = last_index if 'LEFT' in last_val_msg else second_to_last_index
     right_index = last_index if 'RIGHT' in last_val_msg else second_to_last_index
     right_msg = df_cal.loc[right_index].values[0]
