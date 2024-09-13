@@ -260,7 +260,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,detection_algorithm,session_fo
         if len(dfMsg) == 0:
             raise ValueError(f"No messages {msg_keywords} found in the ASC file for session {session_folder_path}.")
         dfMsg['line'] = dfMsg['line'].str.replace('MSG ','')
-        dfMsg[['timestamp','message']] = dfMsg['line'].str.split(expand=True)
+        dfMsg[['timestamp','message']] = dfMsg['line'].str.split(n=1,expand=True)
         dfMsg.drop(columns=['line'],inplace=True)
         # Reorder columns to havce timestamp first, then message, then line number and calibration index
         dfMsg = dfMsg[['timestamp','message','Line_number','Eyes_recorded','Rate_recorded','Calib_index']]
