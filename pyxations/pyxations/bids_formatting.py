@@ -50,7 +50,7 @@ def keep_eye(eye,df_samples,df_fix,df_blink,df_sacc):
         df_samples.rename(columns={'LX': 'X', 'LY': 'Y', 'LPupil': 'Pupil'}, inplace=True)
     return df_samples,df_fix,df_blink,df_sacc
 
-def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session_substrings=2):
+def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session_substrings=1):
     """
     Convert a dataset to BIDS format.
 
@@ -59,7 +59,7 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
         files_folder_path (str): Path to the folder containing the EDF files.
         The EDF files are assumed to have the ID of the subject at the beginning of the file name, separated by an underscore.
         dataset_name (str): Name of the BIDS dataset.
-        session_substrings (int): Number of substrings to use for the session ID. Default is 2.
+        session_substrings (int): Number of substrings to use for the session ID. Default is 1.
 
     Returns:
         None
@@ -90,7 +90,7 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
         for file in file_paths:
             file_name = os.path.basename(file)
             file_lower = file_name.lower()
-            session_id = "_".join(file_name.split("_")[1:session_substrings+1])
+            session_id = "_".join("".join(file_name.split(".")[:-1]).split("_")[1:session_substrings+1])
             if file_lower.endswith(".edf") and file_name.split("_")[0] == old_subject_id:
                 move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'ET')
             if file_lower.endswith(".bdf") and file_name.split("_")[0] == old_subject_id:
@@ -187,7 +187,6 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,detection_algorithm,session_fo
         rates_recorded = np.array([0.0]*nLines,dtype='float')
         calib_indexes = np.array([0]*nLines,dtype='int')
 
-        msg_keywords = ["beginning_of_stimuli","end_of_stimuli"]
         calibration_flag = False
         start_flag = False
         recorded_eye = ''
@@ -258,6 +257,8 @@ def parse_edf_eyelink(edf_file_path, msg_keywords,detection_algorithm,session_fo
 
 
         # From dfMsg grab the "line" column and split into three two columns: "timestamp" and "message"
+        if len(dfMsg) == 0:
+            raise ValueError(f"No messages {msg_keywords} found in the ASC file for session {session_folder_path}.")
         dfMsg['line'] = dfMsg['line'].str.replace('MSG ','')
         dfMsg[['timestamp','message']] = dfMsg['line'].str.split(expand=True)
         dfMsg.drop(columns=['line'],inplace=True)
@@ -395,7 +396,7 @@ def process_session(bids_dataset_folder, subject, session, msg_keywords,detectio
 
     return parse_edf_eyelink(edf_file_path, msg_keywords,detection_algorithm,session_folder_path,force_best_eye,keep_ascii,**kwargs)
 
-def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords,detection_algorithm,num_processes=None,force_best_eye=True,keep_ascii=True,**kwargs):
+def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords,detection_algorithm='eyelink',num_processes=None,force_best_eye=True,keep_ascii=True,**kwargs):
     '''
     Generate the derivatives for a BIDS dataset.
 
@@ -419,8 +420,9 @@ def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords,detection_
             for session in sessions_folders:
                 futures.append(executor.submit(process_session, bids_dataset_folder, subject, session, msg_keywords,detection_algorithm,derivatives_folder,force_best_eye,keep_ascii,**kwargs))
         for futures in futures:
-            fixations.append(futures.result()[0])
-            saccades.append(futures.result()[1])
+            result = futures.result()
+            fixations.append(result[0])
+            saccades.append(result[1])
     fixations = pd.concat(fixations)
     saccades = pd.concat(saccades)
     visualization = Visualization(derivatives_folder, detection_algorithm, fixations, saccades,None)
