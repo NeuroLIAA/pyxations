@@ -9,6 +9,7 @@ from .eye_movement_detection import RemodnavDetection
 import inspect
 
 
+
 EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection}
 
 
@@ -50,6 +51,10 @@ def keep_eye(eye,df_samples,df_fix,df_blink,df_sacc):
         df_blink = df_blink[df_blink['eye'] == 'L']
         df_sacc = df_sacc[df_sacc['eye'] == 'L']
         df_samples.rename(columns={'LX': 'X', 'LY': 'Y', 'LPupil': 'Pupil'}, inplace=True)
+    df_blink.dropna(inplace=True)
+    df_fix.dropna(inplace=True)
+    df_sacc.dropna(inplace=True)
+    df_samples.dropna(subset= ['X', 'Y'], how='any', inplace=True)
     return df_samples,df_fix,df_blink,df_sacc
 
 
@@ -238,7 +243,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
     dfFix = df[df['Line_type'] == 'EFIX'][['line', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].reset_index(drop=True)
     dfSacc = df[df['Line_type'] == 'ESACC'][['line', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].reset_index(drop=True)
     dfBlink = df[df['Line_type'] == 'EBLINK'][['line', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].reset_index(drop=True)
-    del df  # Free memory
+    del df, line_data, line_types, eyes_recorded, rates_recorded, calib_indexes # Free up memory
     # Optimized screen resolution extraction from dfCalib
     gaze_coords_row = dfCalib.loc[dfCalib['line'].str.contains('GAZE_COORDS'), 'line'].values[0]
     screen_res = [str(int(float(res))) for res in gaze_coords_row.split()[5:7]]
@@ -270,7 +275,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
         if not dfSamples[dfSamples['Eyes_recorded'] == eye].empty:
             dfSamples.loc[dfSamples[dfSamples['Eyes_recorded'] == eye].index, ['tSample'] + cols] = dfSamples[dfSamples['Eyes_recorded'] == eye]['line'].str.split(expand=True)[[0] + list(range(1, len(cols) + 1))].apply(pd.to_numeric, errors='coerce').values
 
-
+    dfSamples.drop(columns=['line'], inplace=True)
 
     # Dropping rows where all LX, LY, RX, and RY are NaN
     dfSamples.dropna(subset=[col for col in ['LX', 'LY','RX', 'RY'] if col in dfSamples.columns], how='all', inplace=True)
