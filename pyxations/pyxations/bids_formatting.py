@@ -333,7 +333,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
         screen_size = dfHeader['line'].iloc[-1].split()
         kwargs['screen_width'], kwargs['screen_height'] = int(screen_size[-2]), int(screen_size[-1])
 
-    visualization = Visualization(session_folder_path,detection_algorithm,dfFix,dfSacc,dfSamples)
+    
     pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg)
     pre_processing.process({'bad_samples': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.bad_samples).parameters.keys()},
                             'split_all_into_trials': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.split_all_into_trials).parameters.keys()},
@@ -363,7 +363,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
     dfFix.to_hdf(os.path.join(session_folder_path, f'{detection_algorithm}_events', 'fix.hdf5'), key='fix', mode='w')
     dfSacc.to_hdf(os.path.join(session_folder_path, f'{detection_algorithm}_events', 'sacc.hdf5'), key='sacc', mode='w')
 
-
+    visualization = Visualization(session_folder_path,detection_algorithm,dfFix,dfSacc,dfSamples)
     for trial in unique_trials:
         visualization.scanpath(trial_index=trial,**{arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(visualization.scanpath).parameters.keys()})
 

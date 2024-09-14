@@ -18,7 +18,7 @@ class Visualization():
         self.saccades = saccades
         self.samples = samples
 
-    def scanpath(self,screen_height:int, screen_width:int,trial_index:int=None,trial_label:str=None,tmin:int=None, tmax:int=None, img_path:str=None, plot_saccades:bool=False, plot_samples:bool=False):
+    def scanpath(self,screen_height:int, screen_width:int,trial_index:int=None,trial_label:str=None,tmin:int=None, tmax:int=None, img_path:str=None):
         """
         Plots the scanpath, including fixations, saccades, and optionally an image background and gaze samples.
 
@@ -51,7 +51,8 @@ class Visualization():
         Either trial_index or trial_label or tmix and tmax must be provided.
 
         """
-
+        plot_saccades = not self.saccades is None
+        plot_samples = not self.samples is None
         #----- Check if trial_index or trial_label or tmix and tmax are provided -----#
         if trial_index is None and trial_label is None and (tmin is None or tmax is None):
             raise ValueError('Either trial_index or trial_label or tmix and tmax must be provided.')
