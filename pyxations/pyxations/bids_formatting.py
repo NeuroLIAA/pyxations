@@ -271,16 +271,16 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
         if not df_eye.empty:
             dfSamples.loc[df_eye.index, ['tSample'] + cols] = df_eye['line'].str.split(expand=True)[[0] + list(range(1, len(cols) + 1))].values
 
-
-    # Dropping rows where all LX, LY, RX, and RY are NaN
-    dfSamples.dropna(subset=['LX', 'LY', 'RX', 'RY'], how='all', inplace=True)
-
     # Efficient conversion to numeric for eye data
     for eye in ['L', 'R']:
         dfSamples[f'{eye}X'] = pd.to_numeric(dfSamples[f'{eye}X'], errors='coerce')
         dfSamples[f'{eye}Y'] = pd.to_numeric(dfSamples[f'{eye}Y'], errors='coerce')
         dfSamples[f'{eye}Pupil'] = pd.to_numeric(dfSamples[f'{eye}Pupil'], errors='coerce')
     dfSamples['tSample'] = pd.to_numeric(dfSamples['tSample'], errors='raise')
+
+    # Dropping rows where all LX, LY, RX, and RY are NaN
+    dfSamples.dropna(subset=['LX', 'LY', 'RX', 'RY'], how='all', inplace=True)
+
     dfSamples = dfSamples[['tSample', 'LX', 'LY', 'LPupil', 'RX', 'RY', 'RPupil', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
 
    # Optimized blink data extraction and conversion
