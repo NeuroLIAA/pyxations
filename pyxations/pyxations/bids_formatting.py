@@ -181,35 +181,39 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
 
         # Process the file line by line
         for line in lines:
-            if len(line) < 2:
-                continue  # Skip empty lines
-
-            if line.startswith('*'):
+            if len(line)<2:
+                line_type = 'EMPTY'
+            elif line.startswith('*'):
                 line_type = 'HEADER'
+            # If there is a !CAL in the line, it is a calibration line
             elif '!CAL' in line and not calibration_flag:
                 line_type = 'Calibration'
                 calibration_flag = True
-                calib_index += 1
-            elif '!MODE RECORD' in line:
+                calib_index += 1    
+            elif '!MODE RECORD' in line and calibration_flag:
                 calibration_flag = False
                 start_flag = True
-                recorded_eye = line.split()[-1]
             elif calibration_flag:
                 line_type = 'Calibration'
-            elif not start_flag:
+            elif not start_flag: # Data before the first successful calibration is discarded. 
+                # After the first successul calibration, EVERY sample is taken into account.
                 line_type = 'Non_calibrated_samples'
-            elif line.startswith('MSG') and any(keyword in line for keyword in msg_keywords):
+            elif line.split()[0] == 'MSG' and any(keyword in line for keyword in msg_keywords):
                 line_type = 'MSG'
-            elif line.startswith('ESACC'):
+            elif line.split()[0] == 'ESACC':
                 line_type = 'ESACC'
-            elif line.startswith('EFIX'):
+            elif line.split()[0] == 'EFIX':
                 line_type = 'EFIX'
-            elif line.startswith('EBLINK'):
+            elif line.split()[0] == 'EBLINK':
                 line_type = 'EBLINK'
-            elif line.split()[0].isdigit():
+            elif line.split()[0][0].isdigit() or line.split()[0].startswith('-'):
                 line_type = 'SAMPLE'
             else:
                 line_type = 'OTHER'
+            if '!MODE RECORD' in line:
+                recorded_eye = line.split()[-1]            
+            if 'RATE' in line and 'TRACKING' in line:
+                rate_recorded = float(line.split('RATE')[-1].split('TRACKING')[0])
 
             # Store relevant information
             line_data.append(line)
