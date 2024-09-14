@@ -9,7 +9,7 @@ class TestRemodnav(unittest.TestCase):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
 
-        path_to_session = os.path.join(current_folder, "example_dataset_derivatives", "sub-0001", "ses-second_half")
+        path_to_session = os.path.join(current_folder, "example_dataset_derivatives", "sub-0001", "ses-second")
         samples_path = os.path.join(path_to_session, "samples.hdf5")
         samples = pd.read_hdf(path_or_buf=samples_path)
 

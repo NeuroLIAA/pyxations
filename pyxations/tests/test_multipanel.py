@@ -10,7 +10,7 @@ class TestMultipanel(unittest.TestCase):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
 
-        path_to_session = os.path.join(current_folder, "example_dataset_derivatives", "sub-0001", "ses-second_half")
+        path_to_session = os.path.join(current_folder, "example_dataset_derivatives", "sub-0001", "ses-second")
         fixations = pd.read_hdf(path_or_buf=os.path.join(path_to_session,'eyelink_events', "fix.hdf5"))
         saccades = pd.read_hdf(path_or_buf=os.path.join(path_to_session,'eyelink_events', "sacc.hdf5"))
         
