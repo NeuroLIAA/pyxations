@@ -4,13 +4,13 @@ import subprocess
 import numpy as np
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
-import logging
-from .visualization import Visualization
 from .pre_processing import PreProcessing
 from .eye_movement_detection import RemodnavDetection
 import inspect
 
+
 EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection}
+
 
 
 def find_besteye(df_cal):
@@ -51,6 +51,7 @@ def keep_eye(eye,df_samples,df_fix,df_blink,df_sacc):
         df_sacc = df_sacc[df_sacc['eye'] == 'L']
         df_samples.rename(columns={'LX': 'X', 'LY': 'Y', 'LPupil': 'Pupil'}, inplace=True)
     return df_samples,df_fix,df_blink,df_sacc
+
 
 def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session_substrings=1):
     """
@@ -142,10 +143,6 @@ def convert_edf_to_ascii(edf_file_path, output_dir):
 
 
 def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, **kwargs):
-    # Configure logging
-    derivatives_folder_path = os.path.dirname(os.path.dirname(session_folder_path))
-    logging.basicConfig(filename=os.path.join(derivatives_folder_path, 'derivatives_generation.log'), level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
     # Convert EDF to ASCII (only if necessary)
     ascii_file_path = convert_edf_to_ascii(edf_file_path, session_folder_path)
 
@@ -155,11 +152,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
         for file_name in ['header.hdf5', 'msg.hdf5', 'calib.hdf5', 'samples.hdf5']
     ])
     if existing_files:
-        dfFix = pd.read_hdf(os.path.join(session_folder_path, f'{detection_algorithm}_events', 'fix.hdf5'))
-        dfSacc = pd.read_hdf(os.path.join(session_folder_path, f'{detection_algorithm}_events', 'sacc.hdf5'))
-        dfSamples = pd.read_hdf(os.path.join(session_folder_path, 'samples.hdf5'))
-        visualization = Visualization(session_folder_path, detection_algorithm, dfFix, dfSacc, dfSamples)
-        return dfFix[['duration']], dfSacc[['vPeak','ampDeg','dir','deg']]
+        return
 
      # Reading ASCII in chunks to reduce memory usage
     with open(ascii_file_path, 'r') as f:
@@ -216,12 +209,12 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
                 rate_recorded = float(line.split('RATE')[-1].split('TRACKING')[0])
 
             # Store relevant information
-            line_data.append(line)
+            line_data.append(line.replace('\n', '').replace('\t', ' '))
             line_types.append(line_type)
             eyes_recorded.append(recorded_eye)
             rates_recorded.append(rate_recorded)
             calib_indexes.append(calib_index)
-
+    
     # Convert to DataFrame (in one step to save memory)
     df = pd.DataFrame({
         'line': line_data,
@@ -231,7 +224,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
         'Calib_index': calib_indexes
     })
     # Process DataFrame columns (vectorized operations)
-    df['line'] = df['line'].str.replace('\n', '').str.replace('\t', ' ')
+
     df['Line_number'] = np.arange(len(df))
 
     
@@ -263,37 +256,26 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
     dfMsg['timestamp'] = pd.to_numeric(dfMsg['timestamp'], errors='raise')
     dfMsg = dfMsg[['timestamp', 'message', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
 
-    # From dfSamples grab the "line" column where Eye_recorded == LR and split into ['tSample', 'LX', 'LY', 'LPupil', 'RX', 'RY', 'RPupil']
-    dfSamples[['tSample','LX','LY','LPupil','RX','RY','RPupil']] = np.nan
-    dfSamples_LR = dfSamples[dfSamples['Eyes_recorded'] == 'LR']
-
-    if not dfSamples_LR.empty:
-        dfSamples.loc[dfSamples_LR.index, ['tSample', 'LX', 'LY', 'LPupil', 'RX', 'RY', 'RPupil']] = dfSamples_LR['line'].str.split(expand=True)[[0, 1, 2, 3, 4, 5, 6]].values
-        
-    for eye, cols in zip(['R', 'L'], [['RX', 'RY', 'RPupil'], ['LX', 'LY', 'LPupil']]):
-        df_eye = dfSamples[dfSamples['Eyes_recorded'] == eye]
-        if not df_eye.empty:
-            dfSamples.loc[df_eye.index, ['tSample'] + cols] = df_eye['line'].str.split(expand=True)[[0] + list(range(1, len(cols) + 1))].values
-
-    # Efficient conversion to numeric for eye data
-    for eye in ['L', 'R']:
-        dfSamples[f'{eye}X'] = pd.to_numeric(dfSamples[f'{eye}X'], errors='coerce')
-        dfSamples[f'{eye}Y'] = pd.to_numeric(dfSamples[f'{eye}Y'], errors='coerce')
-        dfSamples[f'{eye}Pupil'] = pd.to_numeric(dfSamples[f'{eye}Pupil'], errors='coerce')
-    dfSamples['tSample'] = pd.to_numeric(dfSamples['tSample'], errors='raise')
-
-    # Dropping rows where all LX, LY, RX, and RY are NaN
-    dfSamples.dropna(subset=['LX', 'LY', 'RX', 'RY'], how='all', inplace=True)
-
-    dfSamples = dfSamples[['tSample', 'LX', 'LY', 'LPupil', 'RX', 'RY', 'RPupil', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
-
    # Optimized blink data extraction and conversion
     dfBlink['line'] = dfBlink['line'].str.replace('EBLINK ', '')
     dfBlink[['eye', 'tStart', 'tEnd', 'duration']] = dfBlink['line'].str.split(expand=True)
     dfBlink.drop(columns=['line'], inplace=True)
     dfBlink = dfBlink[['eye', 'tStart', 'tEnd', 'duration', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
     dfBlink[['tStart', 'tEnd', 'duration']] = dfBlink[['tStart', 'tEnd', 'duration']].apply(pd.to_numeric, errors='raise')
-    
+
+    if not dfSamples[dfSamples['Eyes_recorded'] == 'LR'].empty:
+        dfSamples.loc[dfSamples[dfSamples['Eyes_recorded'] == 'LR'].index, ['tSample', 'LX', 'LY', 'LPupil', 'RX', 'RY', 'RPupil']] = dfSamples[dfSamples['Eyes_recorded'] == 'LR']['line'].str.split(expand=True)[[0, 1, 2, 3, 4, 5, 6]].apply(pd.to_numeric, errors='coerce').values
+
+    for eye, cols in zip(['R', 'L'], [['RX', 'RY', 'RPupil'], ['LX', 'LY', 'LPupil']]):
+        if not dfSamples[dfSamples['Eyes_recorded'] == eye].empty:
+            dfSamples.loc[dfSamples[dfSamples['Eyes_recorded'] == eye].index, ['tSample'] + cols] = dfSamples[dfSamples['Eyes_recorded'] == eye]['line'].str.split(expand=True)[[0] + list(range(1, len(cols) + 1))].apply(pd.to_numeric, errors='coerce').values
+
+
+
+    # Dropping rows where all LX, LY, RX, and RY are NaN
+    dfSamples.dropna(subset=[col for col in ['LX', 'LY','RX', 'RY'] if col in dfSamples.columns], how='all', inplace=True)
+
+    dfSamples = dfSamples[['tSample'] + [col for col in ['LX', 'LY','LPupil','RX', 'RY', 'RPupil'] if col in dfSamples.columns] + ['Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
     if detection_algorithm == 'eyelink':
         # Optimized fixation and saccade processing
         dfFix['line'] = dfFix['line'].str.replace('EFIX ', '')
@@ -327,6 +309,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
                 best_eyes[i] = best_eyes[i - 1]
         dfslist = [keep_eye(best_eyes[i], dfSamples[dfSamples['Calib_index'] == ci], dfFix[dfFix['Calib_index'] == ci], dfBlink[dfBlink['Calib_index'] == ci], dfSacc[dfSacc['Calib_index'] == ci]) for i, ci in enumerate(calib_indexes)]
         dfSamples, dfFix, dfBlink, dfSacc = [pd.concat([dfslist[i][j] for i in range(len(best_eyes))]) for j in range(4)]
+        del dfslist
 
     # Screen size extraction optimization
     if 'screen_height' not in kwargs or 'screen_width' not in kwargs:
@@ -339,18 +322,6 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
                             'split_all_into_trials': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.split_all_into_trials).parameters.keys()},
                             'saccades_direction': {},})
 
-    unique_trials = dfFix[dfFix['trial_number'] != -1]['trial_number'].unique()
-    bad_samples = dfSamples[(dfSamples['trial_number'] != -1) & (dfSamples['bad'] == True)][['trial_number','bad']].groupby('trial_number').size()
-
-    subject = os.path.basename(os.path.dirname(session_folder_path))
-    session = os.path.basename(session_folder_path)
-    derivatives_folder_path = os.path.dirname(os.path.dirname(session_folder_path))
-    log_file = os.path.join(derivatives_folder_path,'derivatives_processing.log') 
-    logging.basicConfig(filename=log_file,level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    if not bad_samples.empty:
-        for trial in bad_samples.index:
-            logging.info(f"Subject {subject} in session {session} has {bad_samples[trial]} bad samples in trial {trial}.")
-
     if not keep_ascii:
         os.remove(ascii_file_path)
 
@@ -362,23 +333,14 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
     dfBlink.to_hdf(os.path.join(session_folder_path, 'eyelink_events', 'blink.hdf5'), key='blink', mode='w')
     dfFix.to_hdf(os.path.join(session_folder_path, f'{detection_algorithm}_events', 'fix.hdf5'), key='fix', mode='w')
     dfSacc.to_hdf(os.path.join(session_folder_path, f'{detection_algorithm}_events', 'sacc.hdf5'), key='sacc', mode='w')
-    del dfMsg, dfCalib, dfBlink, dfHeader  # Free memory
-    dfSacc = dfSacc[dfSacc['trial_number'] != -1][['tStart','vPeak','ampDeg','dir','deg','Rate_recorded','trial_number']]
-    dfFix = dfFix[dfFix['trial_number'] != -1][['tStart','xAvg','yAvg','Rate_recorded','duration','trial_number']]
-    dfSamples = dfSamples[(dfSamples['trial_number'] != -1) & (dfSamples['bad'] == False)]
-    
 
-    visualization = Visualization(session_folder_path,detection_algorithm,dfFix,dfSacc,dfSamples)
-    for trial in unique_trials:
-        visualization.scanpath(trial_index=trial,**{arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(visualization.scanpath).parameters.keys()})
 
-    return dfFix[['duration']],dfSacc[['vPeak','ampDeg','dir','deg']]
 
 def process_session(bids_dataset_folder, subject, session, msg_keywords,detection_algorithm,derivatives_folder,force_best_eye,keep_ascii,**kwargs):
     eye_tracking_data_path = os.path.join(bids_dataset_folder, subject, session, 'ET')
     edf_files = [file for file in os.listdir(eye_tracking_data_path) if file.lower().endswith(".edf")]
     if len(edf_files) > 1:
-        logging.warning(f"More than one EDF file found in {eye_tracking_data_path}. Skipping folder.")
+        print(f"More than one EDF file found in {eye_tracking_data_path}. Skipping folder.")
         return
 
 
@@ -386,7 +348,7 @@ def process_session(bids_dataset_folder, subject, session, msg_keywords,detectio
     session_folder_path = os.path.join(derivatives_folder, subject, session)
     os.makedirs(os.path.join(session_folder_path, 'eyelink_events'), exist_ok=True)
 
-    return parse_edf_eyelink(edf_file_path, msg_keywords,detection_algorithm,session_folder_path,force_best_eye,keep_ascii,**kwargs)
+    parse_edf_eyelink(edf_file_path, msg_keywords,detection_algorithm,session_folder_path,force_best_eye,keep_ascii,**kwargs)
 
 def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm='eyelink', num_processes=4, force_best_eye=True, keep_ascii=True, **kwargs):
     derivatives_folder = bids_dataset_folder + "_derivatives"
@@ -396,7 +358,7 @@ def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection
     if detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and detection_algorithm != 'eyelink':
         raise ValueError(f"Detection algorithm {detection_algorithm} not found.")
 
-    fixations, saccades = [], []
+
 
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
         futures = [
@@ -406,17 +368,7 @@ def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection
         ]
 
         for future in futures:
-            result = future.result()
-            if result:  # If the session processing was successful
-                fixations.append(result[0])
-                saccades.append(result[1])
-
-    # Only concatenate once to avoid memory overhead during loop
-    fixations_df = pd.concat(fixations, ignore_index=True)
-    saccades_df = pd.concat(saccades, ignore_index=True)
-
-    visualization = Visualization(derivatives_folder, detection_algorithm, fixations_df, saccades_df, None)
-    visualization.plot_multipanel()
+            future.result()
 
     return derivatives_folder
         

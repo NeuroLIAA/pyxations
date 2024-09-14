@@ -4,16 +4,13 @@ import matplotlib.colors as mplcolors
 import numpy as np
 import pandas as pd
 from os import path, makedirs
-import logging
+
 
 class Visualization():
     def __init__(self, session_folder_path,events_detection_algorithm,fixations:pd.DataFrame,saccades:pd.DataFrame,samples:pd.DataFrame):
         self.session_folder_path = session_folder_path
         self.events_detection_folder = events_detection_algorithm+'_events'
         makedirs(path.join(self.session_folder_path,self.events_detection_folder,'plots'), exist_ok=True)
-        derivatives_folder_path = path.dirname(path.dirname(self.session_folder_path))
-        log_file = path.join(derivatives_folder_path,'derivatives_processing.log') 
-        logging.basicConfig(filename=log_file,level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         self.fixations = fixations
         self.saccades = saccades
         self.samples = samples
