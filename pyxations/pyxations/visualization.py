@@ -61,26 +61,26 @@ class Visualization():
 
         #----- Filter saccades, fixations and samples to defined time interval -----#
         if tmax is not None and tmin is not None:
-            filtered_fixations = self.fixations.loc[(self.fixations['tStart'] >= tmin) & (self.fixations['tStart'] <= tmax)].reset_index(drop=True)
+            filtered_fixations = self.fixations[(self.fixations['tStart'] >= tmin) & (self.fixations['tStart'] <= tmax)]
             if plot_saccades:
-                filtered_saccades = self.saccades.loc[(self.saccades['tStart'] >= tmin) & (self.saccades['tStart'] <= tmax)].reset_index(drop=True)
+                filtered_saccades = self.saccades[(self.saccades['tStart'] >= tmin) & (self.saccades['tStart'] <= tmax)]
             if plot_samples:
-                filtered_samples = self.samples.loc[(self.samples['tSample'] >= tmin) & (self.samples['tSample'] <= tmax)].reset_index(drop=True)
+                filtered_samples = self.samples[(self.samples['tSample'] >= tmin) & (self.samples['tSample'] <= tmax)]
         
         #----- Filter saccades, fixations and samples to defined trial -----#
         if trial_index is not None:
-            filtered_fixations = self.fixations.loc[self.fixations['trial_number'] == trial_index].reset_index(drop=True)
+            filtered_fixations = self.fixations[self.fixations['trial_number'] == trial_index]
             if plot_saccades:
-                filtered_saccades = self.saccades.loc[self.saccades['trial_number'] == trial_index].reset_index(drop=True)
+                filtered_saccades = self.saccades[self.saccades['trial_number'] == trial_index]
             if plot_samples:
-                filtered_samples = self.samples.loc[self.samples['trial_number'] == trial_index].reset_index(drop=True)
+                filtered_samples = self.samples[self.samples['trial_number'] == trial_index]
 
         if trial_label is not None:
-            filtered_fixations = self.fixations.loc[self.fixations['trial_label'] == trial_label].reset_index(drop=True)
+            filtered_fixations = self.fixations[self.fixations['trial_label'] == trial_label]
             if plot_saccades:
-                filtered_saccades = self.saccades.loc[self.saccades['trial_label'] == trial_label].reset_index(drop=True)
+                filtered_saccades = self.saccades[self.saccades['trial_label'] == trial_label]
             if plot_samples:
-                filtered_samples = self.samples.loc[self.samples['trial_label'] == trial_label].reset_index(drop=True)
+                filtered_samples = self.samples[self.samples['trial_label'] == trial_label]
 
         #----- Define figure and axes -----#
         if plot_samples:
@@ -102,7 +102,7 @@ class Visualization():
         cmap = plt.cm.rainbow
         
         # Define the bins and normalize
-        fix_num = filtered_fixations.index + 1
+        fix_num = list(range(1,len(filtered_fixations)+1))
         bounds = np.linspace(1, fix_num[-1] + 1, fix_num[-1] + 1)
         norm = mplcolors.BoundaryNorm(bounds, cmap.N)
 

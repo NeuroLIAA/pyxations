@@ -245,7 +245,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
     dfFix = df[df['Line_type'] == 'EFIX'][['line', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].reset_index(drop=True)
     dfSacc = df[df['Line_type'] == 'ESACC'][['line', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].reset_index(drop=True)
     dfBlink = df[df['Line_type'] == 'EBLINK'][['line', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].reset_index(drop=True)
-
+    del df  # Free memory
     # Optimized screen resolution extraction from dfCalib
     gaze_coords_row = dfCalib.loc[dfCalib['line'].str.contains('GAZE_COORDS'), 'line'].values[0]
     screen_res = [str(int(float(res))) for res in gaze_coords_row.split()[5:7]]
@@ -362,6 +362,11 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
     dfBlink.to_hdf(os.path.join(session_folder_path, 'eyelink_events', 'blink.hdf5'), key='blink', mode='w')
     dfFix.to_hdf(os.path.join(session_folder_path, f'{detection_algorithm}_events', 'fix.hdf5'), key='fix', mode='w')
     dfSacc.to_hdf(os.path.join(session_folder_path, f'{detection_algorithm}_events', 'sacc.hdf5'), key='sacc', mode='w')
+    del dfMsg, dfCalib, dfBlink, dfHeader  # Free memory
+    dfSacc = dfSacc[dfSacc['trial_number'] != -1][['tStart','vPeak','ampDeg','dir','deg','Rate_recorded','trial_number']]
+    dfFix = dfFix[dfFix['trial_number'] != -1][['tStart','xAvg','yAvg','Rate_recorded','duration','trial_number']]
+    dfSamples = dfSamples[(dfSamples['trial_number'] != -1) & (dfSamples['bad'] == False)]
+    
 
     visualization = Visualization(session_folder_path,detection_algorithm,dfFix,dfSacc,dfSamples)
     for trial in unique_trials:
