@@ -379,7 +379,7 @@ def process_session(bids_dataset_folder, subject, session, msg_keywords,detectio
 
     return parse_edf_eyelink(edf_file_path, msg_keywords,detection_algorithm,session_folder_path,force_best_eye,keep_ascii,**kwargs)
 
-def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm='eyelink', num_processes=8, force_best_eye=True, keep_ascii=True, **kwargs):
+def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm='eyelink', num_processes=4, force_best_eye=True, keep_ascii=True, **kwargs):
     derivatives_folder = bids_dataset_folder + "_derivatives"
     os.makedirs(derivatives_folder, exist_ok=True)
 
