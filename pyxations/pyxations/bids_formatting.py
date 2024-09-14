@@ -159,7 +159,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
         dfSacc = pd.read_hdf(os.path.join(session_folder_path, f'{detection_algorithm}_events', 'sacc.hdf5'))
         dfSamples = pd.read_hdf(os.path.join(session_folder_path, 'samples.hdf5'))
         visualization = Visualization(session_folder_path, detection_algorithm, dfFix, dfSacc, dfSamples)
-        return dfFix, dfSacc
+        return dfFix[['duration']], dfSacc[['vPeak','ampDeg','dir','deg']]
 
      # Reading ASCII in chunks to reduce memory usage
     with open(ascii_file_path, 'r') as f:
@@ -363,7 +363,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
     for trial in unique_trials:
         visualization.scanpath(trial_index=trial,**{arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(visualization.scanpath).parameters.keys()})
 
-    return dfFix,dfSacc
+    return dfFix[['duration']],dfSacc[['vPeak','ampDeg','dir','deg']]
 
 def process_session(bids_dataset_folder, subject, session, msg_keywords,detection_algorithm,derivatives_folder,force_best_eye,keep_ascii,**kwargs):
     eye_tracking_data_path = os.path.join(bids_dataset_folder, subject, session, 'ET')
