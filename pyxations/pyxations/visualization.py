@@ -3,19 +3,63 @@ import matplotlib.image as mpimg
 import matplotlib.colors as mplcolors
 import numpy as np
 import pandas as pd
-from os import path, makedirs
+from concurrent.futures import ProcessPoolExecutor
+from .bids_formatting import EYE_MOVEMENT_DETECTION_DICT
+from os import path, makedirs,listdir
 
 
 class Visualization():
-    def __init__(self, session_folder_path,events_detection_algorithm,fixations:pd.DataFrame,saccades:pd.DataFrame,samples:pd.DataFrame):
-        self.session_folder_path = session_folder_path
+    def __init__(self, derivatives_folder_path,events_detection_algorithm):
+        self.derivatives_folder_path = derivatives_folder_path
+        if events_detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and events_detection_algorithm != 'eyelink':
+            raise ValueError(f"Detection algorithm {events_detection_algorithm} not found.")
         self.events_detection_folder = events_detection_algorithm+'_events'
-        makedirs(path.join(self.session_folder_path,self.events_detection_folder,'plots'), exist_ok=True)
-        self.fixations = fixations
-        self.saccades = saccades
-        self.samples = samples
 
-    def scanpath(self,screen_height:int, screen_width:int,trial_index:int=None,trial_label:str=None,tmin:int=None, tmax:int=None, img_path:str=None):
+    def get_data_and_plot_scanpaths(self,session_folder_path:str):
+        header = pd.read_hdf(path.join(session_folder_path,'header.hdf5'))
+        screen_size = header['line'].iloc[-1].split()
+        screen_height = int(screen_size[-1])
+        screen_width = int(screen_size[-2])
+        samples = pd.read_hdf(path.join(session_folder_path,'samples.hdf5'))
+        fixations = pd.read_hdf(path.join(session_folder_path,self.events_detection_folder,'fix.hdf5'))
+        saccades = pd.read_hdf(path.join(session_folder_path,self.events_detection_folder,'sacc.hdf5'))
+        unique_trials = fixations['trial_number'].unique()
+        unique_trials = unique_trials[unique_trials != -1]
+        folder_path = path.join(session_folder_path,self.events_detection_folder,'plots')
+        makedirs(folder_path, exist_ok=True)
+        for trial in unique_trials:
+            self.scanpath(fixations,screen_height,screen_width,folder_path,trial_index=trial,saccades=saccades,samples=samples)
+        return fixations[['duration']],saccades[['ampDeg','vPeak','deg','dir']]
+    
+    def process_session(self, session_info):
+        subject, session = session_info
+        return self.get_data_and_plot_scanpaths(
+            path.join(self.derivatives_folder_path, subject, session)
+        )
+
+    def global_plots(self,max_workers:int=8):
+        bids_folders = [folder for folder in listdir(self.derivatives_folder_path) if folder.startswith("sub-")]
+        fixations = []
+        saccades = []
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            results = executor.map(
+                self.process_session,
+                [
+                    (subject, session)
+                    for subject in bids_folders
+                    for session in listdir(path.join(self.derivatives_folder_path, subject))
+                    if session.startswith("ses-")
+                ]
+            )
+
+            for result in results:
+                fixations.append(result[0])
+                saccades.append(result[1])
+        self.plot_multipanel(path.join(self.derivatives_folder_path,self.events_detection_folder,"plots"),pd.concat(fixations),pd.concat(saccades))
+
+
+    def scanpath(self,fixations:pd.DataFrame,screen_height:int, screen_width:int,folder_path:str,trial_index:int=None,trial_label:str=None,
+                 tmin:int=None, tmax:int=None, img_path:str=None,saccades:pd.DataFrame=None,samples:pd.DataFrame=None):
         """
         Plots the scanpath, including fixations, saccades, and optionally an image background and gaze samples.
 
@@ -24,6 +68,12 @@ class Visualization():
         fixations : pd.DataFrame
             DataFrame containing fixation data with the following columns:
             'tStart', 'tEnd', 'duration', 'xAvg', 'yAvg'.
+        screen_width : int
+            Horizontal resolution of the screen in pixels.
+        screen_height : int
+            Vertical resolution of the screen in pixels.
+        folder_path : str
+            Path to the folder where the plots will be saved.
         trial_index : int, optional
             Index of the trial.
         trial_label : str, optional
@@ -40,44 +90,39 @@ class Visualization():
         samples : pd.DataFrame, optional
             DataFrame containing gaze samples data with the following columns:
             'tSample', 'LX', 'LY', 'RX', 'RY'.
-        screen_res_x : int, optional
-            Horizontal resolution of the screen in pixels (default is 1920).
-        screen_res_y : int, optional
-            Vertical resolution of the screen in pixels (default is 1080).
+
 
         Either trial_index or trial_label or tmix and tmax must be provided.
 
         """
-        plot_saccades = not self.saccades is None
-        plot_samples = not self.samples is None
-        #----- Check if trial_index or trial_label or tmix and tmax are provided -----#
-        if trial_index is None and trial_label is None and (tmin is None or tmax is None):
-            raise ValueError('Either trial_index or trial_label or tmix and tmax must be provided.')
+        plot_saccades = not saccades is None
+        plot_samples = not samples is None
+
         scanpath_file_name = 'scanpath' + f'_{trial_index}'*(trial_index is not None) + f'_{trial_label}'*(trial_label is not None) + f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) + '.png'
-        file_path = path.join(self.session_folder_path,self.events_detection_folder,'plots', scanpath_file_name)
+        file_path = path.join(folder_path, scanpath_file_name)
 
         #----- Filter saccades, fixations and samples to defined time interval -----#
         if tmax is not None and tmin is not None:
-            filtered_fixations = self.fixations[(self.fixations['tStart'] >= tmin) & (self.fixations['tStart'] <= tmax)]
+            filtered_fixations = fixations[(fixations['tStart'] >= tmin) & (fixations['tStart'] <= tmax)]
             if plot_saccades:
-                filtered_saccades = self.saccades[(self.saccades['tStart'] >= tmin) & (self.saccades['tStart'] <= tmax)]
+                filtered_saccades = saccades[(saccades['tStart'] >= tmin) & (saccades['tStart'] <= tmax)]
             if plot_samples:
-                filtered_samples = self.samples[(self.samples['tSample'] >= tmin) & (self.samples['tSample'] <= tmax)]
+                filtered_samples = samples[(samples['tSample'] >= tmin) & (samples['tSample'] <= tmax)]
         
         #----- Filter saccades, fixations and samples to defined trial -----#
         if trial_index is not None:
-            filtered_fixations = self.fixations[self.fixations['trial_number'] == trial_index]
+            filtered_fixations = fixations[fixations['trial_number'] == trial_index]
             if plot_saccades:
-                filtered_saccades = self.saccades[self.saccades['trial_number'] == trial_index]
+                filtered_saccades = saccades[saccades['trial_number'] == trial_index]
             if plot_samples:
-                filtered_samples = self.samples[self.samples['trial_number'] == trial_index]
+                filtered_samples = samples[samples['trial_number'] == trial_index]
 
         if trial_label is not None:
-            filtered_fixations = self.fixations[self.fixations['trial_label'] == trial_label]
+            filtered_fixations = fixations[fixations['trial_label'] == trial_label]
             if plot_saccades:
-                filtered_saccades = self.saccades[self.saccades['trial_label'] == trial_label]
+                filtered_saccades = saccades[saccades['trial_label'] == trial_label]
             if plot_samples:
-                filtered_samples = self.samples[self.samples['trial_label'] == trial_label]
+                filtered_samples = samples[samples['trial_label'] == trial_label]
 
         #----- Define figure and axes -----#
         if plot_samples:
@@ -175,32 +220,32 @@ class Visualization():
         plt.close()
 
 
-    def fix_duration(self,axs=None):
+    def fix_duration(self,fixations:pd.DataFrame,axs=None):
         
         ax = axs
         if ax is None:
             fig, ax = plt.subplots()
 
-        ax.hist(self.fixations['duration'], bins=100, edgecolor='black', linewidth=1.2, density=True)
+        ax.hist(fixations['duration'], bins=100, edgecolor='black', linewidth=1.2, density=True)
         ax.set_title('Fixation duration')
         ax.set_xlabel('Time (ms)')
         ax.set_ylabel('Density')
 
 
-    def sacc_amplitude(self,axs=None):
+    def sacc_amplitude(self,saccades:pd.DataFrame,axs=None):
 
         ax = axs
         if ax is None:
             fig, ax = plt.subplots()
 
-        saccades_amp = self.saccades['ampDeg']
+        saccades_amp = saccades['ampDeg']
         ax.hist(saccades_amp, bins=100, range=(0, 20), edgecolor='black', linewidth=1.2, density=True)
         ax.set_title('Saccades amplitude')
         ax.set_xlabel('Amplitude (deg)')
         ax.set_ylabel('Density')
 
 
-    def sacc_direction(self,axs=None,figs=None):
+    def sacc_direction(self,saccades:pd.DataFrame,axs=None,figs=None):
 
         ax = axs
         if ax is None:
@@ -209,10 +254,10 @@ class Visualization():
         else:
             ax.set_axis_off()
             ax = figs.add_subplot(2, 2, 3, projection='polar')
-        if 'deg' not in self.saccades.columns or 'dir' not in self.saccades.columns:
-            raise ValueError('Compute saccades direction first by using saccades_direction function from the PostProcessing module.')
+        if 'deg' not in saccades.columns or 'dir' not in saccades.columns:
+            raise ValueError('Compute saccades direction first by using saccades_direction function from the PreProcessing module.')
         # Convert from deg to rad
-        saccades_rad = self.saccades['deg'] * np.pi / 180 
+        saccades_rad = saccades['deg'] * np.pi / 180 
 
         n_bins = 24
         ang_hist, bin_edges = np.histogram(saccades_rad, bins=24, density=True)
@@ -226,14 +271,14 @@ class Visualization():
             bar.set_facecolor(plt.cm.Blues(r / np.max(ang_hist)))
 
 
-    def sacc_main_sequence(self,axs=None, hline=None):
+    def sacc_main_sequence(self,saccades:pd.DataFrame,axs=None, hline=None):
 
         ax = axs
         if ax is None:
             fig, ax = plt.subplots()
 
-        saccades_peack_vel = self.saccades['vPeak']
-        saccades_amp = self.saccades['ampDeg']
+        saccades_peack_vel = saccades['vPeak']
+        saccades_amp = saccades['ampDeg']
 
         ax.plot(saccades_amp, saccades_peack_vel, '.', alpha=0.1, markersize=2)
         ax.set_xlim(0.01)
@@ -248,15 +293,16 @@ class Visualization():
         ax.grid()
 
 
-    def plot_multipanel(self):
+    def plot_multipanel(self,folder_path:str,fixations:pd.DataFrame,saccades:pd.DataFrame):
         plt.rcParams.update({'font.size': 12})
         fig, axs = plt.subplots(2, 2, figsize=(12, 7))
         
-        self.fix_duration(axs=axs[0, 0])
-        self.sacc_main_sequence(axs=axs[1, 1])
-        self.sacc_direction(axs=axs[1, 0],figs=fig)
-        self.sacc_amplitude(axs=axs[0, 1])
+        self.fix_duration(fixations,axs=axs[0, 0])
+        self.sacc_main_sequence(saccades,axs=axs[1, 1])
+        self.sacc_direction(saccades,axs=axs[1, 0],figs=fig)
+        self.sacc_amplitude(saccades,axs=axs[0, 1])
 
         fig.tight_layout()
-        plt.savefig(path.join(self.session_folder_path,self.events_detection_folder,'plots','multipanel.png'))
+        makedirs(folder_path, exist_ok=True)
+        plt.savefig(path.join(folder_path,'multipanel.png'))
         plt.close()
