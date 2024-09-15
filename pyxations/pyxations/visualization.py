@@ -15,7 +15,7 @@ class Visualization():
             raise ValueError(f"Detection algorithm {events_detection_algorithm} not found.")
         self.events_detection_folder = events_detection_algorithm+'_events'
 
-    def get_data_and_plot_scanpaths(self,session_folder_path:str,trial_image_mapper:dict):
+    def get_data_and_plot_scanpaths(self,session_folder_path:str,trial_image_mapper:dict=None):
         header = pd.read_hdf(path.join(session_folder_path,'header.hdf5'))
         screen_size = header['line'].iloc[-1].split()
         screen_height = int(screen_size[-1])
