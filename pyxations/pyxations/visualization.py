@@ -15,7 +15,7 @@ class Visualization():
             raise ValueError(f"Detection algorithm {events_detection_algorithm} not found.")
         self.events_detection_folder = events_detection_algorithm+'_events'
 
-    def get_data_and_plot_scanpaths(self,session_folder_path:str):
+    def get_data_and_plot_scanpaths(self,session_folder_path:str,trial_image_mapper:dict):
         header = pd.read_hdf(path.join(session_folder_path,'header.hdf5'))
         screen_size = header['line'].iloc[-1].split()
         screen_height = int(screen_size[-1])
@@ -28,16 +28,16 @@ class Visualization():
         folder_path = path.join(session_folder_path,self.events_detection_folder,'plots')
         makedirs(folder_path, exist_ok=True)
         for trial in unique_trials:
-            self.scanpath(fixations,screen_height,screen_width,folder_path,trial_index=trial,saccades=saccades,samples=samples)
+            self.scanpath(fixations,screen_height,screen_width,folder_path,trial_index=trial,saccades=saccades,samples=samples,img_path=trial_image_mapper[trial] if trial_image_mapper is not None else None)
         return fixations[['duration']],saccades[['ampDeg','vPeak','deg','dir']]
     
     def process_session(self, session_info):
-        subject, session = session_info
+        subject, session, trial_image_mapper = session_info
         return self.get_data_and_plot_scanpaths(
-            path.join(self.derivatives_folder_path, subject, session)
+            path.join(self.derivatives_folder_path, subject, session),trial_image_mapper
         )
 
-    def global_plots(self,max_workers:int=8):
+    def global_plots(self,max_workers:int=8,image_path_mapper:dict=None):
         bids_folders = [folder for folder in listdir(self.derivatives_folder_path) if folder.startswith("sub-")]
         fixations = []
         saccades = []
@@ -45,7 +45,7 @@ class Visualization():
             results = executor.map(
                 self.process_session,
                 [
-                    (subject, session)
+                    (subject, session,image_path_mapper[subject][session] if image_path_mapper is not None else None)
                     for subject in bids_folders
                     for session in listdir(path.join(self.derivatives_folder_path, subject))
                     if session.startswith("ses-")
