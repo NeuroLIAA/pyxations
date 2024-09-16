@@ -31,7 +31,7 @@ class Visualization():
         makedirs(folder_path, exist_ok=True)
         for trial in unique_trials:
             self.scanpath(fixations,screen_height,screen_width,folder_path,trial_index=trial,saccades=saccades,samples=samples,img_path=trial_image_mapper[trial] if trial_image_mapper is not None else None)
-        return fixations[['duration']],saccades[['ampDeg','vPeak','deg','dir']]
+        return fixations[['duration','Rate_recorded']],saccades[['ampDeg','vPeak','deg','dir']]
     
     def process_session(self, session_info):
         subject, session, trial_image_mapper = session_info
@@ -228,7 +228,7 @@ class Visualization():
         if ax is None:
             fig, ax = plt.subplots()
 
-        ax.hist(fixations['duration'], bins=100, edgecolor='black', linewidth=1.2, density=True)
+        ax.hist(1000*fixations['duration']/fixations['Rate_recorded'], bins=100, edgecolor='black', linewidth=1.2, density=True)
         ax.set_title('Fixation duration')
         ax.set_xlabel('Time (ms)')
         ax.set_ylabel('Density')

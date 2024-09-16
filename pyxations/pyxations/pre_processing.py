@@ -99,17 +99,17 @@ class PreProcessing:
         list[int]: List of timestamps for the messages.
         """
         
-        # Get the timestamps for the messages
-        timestamps = self.user_messages[self.user_messages['message'].str.contains('|'.join(messages))]['timestamp'].to_numpy(dtype=int)
+        # Get the timestamps for the messages and the samples rates
+        timestamps_and_rates = self.user_messages[self.user_messages['message'].str.contains('|'.join(messages))][['timestamp','Rate_recorded']].sort_values(by='timestamp')
+        timestamps = timestamps_and_rates['timestamp'].tolist()
+        rates = timestamps_and_rates['Rate_recorded'].tolist()
 
-        # Sort the timestamps numerically
-        timestamps.sort()
 
         # Raise exception if no timestamps are found
         if len(timestamps) == 0:
             raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages))
 
-        return list(timestamps)
+        return timestamps, rates
 
     def split_into_trials(self,data:pd.DataFrame,trial_labels:list[str] = None, start_msgs: list[str]=None, end_msgs: list[str]=None,duration: float=None, start_times: list[int]=None, end_times: list[int]=None):
         """
@@ -136,15 +136,15 @@ class PreProcessing:
         # If start_msgs and end_msgs are provided, use them to split the samples
         if start_msgs is not None and end_msgs is not None and self.user_messages is not None:
             # Get the start and end times for each trial
-            start_times = self.get_timestamps_from_messages(start_msgs)
-            end_times = self.get_timestamps_from_messages(end_msgs)
+            start_times,_ = self.get_timestamps_from_messages(start_msgs)
+            end_times,_ = self.get_timestamps_from_messages(end_msgs)
 
         # If start_msgs and duration are provided, use them to split the samples
         elif start_msgs is not None and duration is not None and self.user_messages is not None:
             # Get the start times for each trial
-            start_times = self.get_timestamps_from_messages(start_msgs)
+            start_times, rates = self.get_timestamps_from_messages(start_msgs)
             # Calculate the end times for each trial
-            end_times = start_times + duration
+            end_times = [start_time + duration * rate for start_time, rate in zip(start_times, rates)]
 
         # If start_times and end_times are provided, use them to split the samples
         elif start_times is not None and end_times is not None:
