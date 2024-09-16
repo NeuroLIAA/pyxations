@@ -22,9 +22,9 @@ def find_besteye(df_cal):
     second_to_last_index = last_index - 1
     if 'ABORTED' in last_val_msg:
         if not second_to_last_index in df_cal.index or 'CAL VALIDATION' not in df_cal.loc[second_to_last_index].values[0] or 'ABORTED' in df_cal.loc[second_to_last_index].values[0]:
-            return 'L' if 'LEFT' in last_val_msg else 'R'
+            return 'L' if 'L ABORTED' in last_val_msg else 'R'
         last_val_msg = df_cal.loc[second_to_last_index].values[0]
-        return 'L' if 'LEFT' in last_val_msg else 'R'
+        return 'L' if ('LEFT' in last_val_msg or 'L ABORTED' in last_val_msg) else 'R'
     
     if not second_to_last_index in df_cal.index or 'CAL VALIDATION' not in df_cal.loc[second_to_last_index].values[0] or 'ABORTED' in df_cal.loc[second_to_last_index].values[0]:
         return 'L' if 'LEFT' in last_val_msg else 'R'    
