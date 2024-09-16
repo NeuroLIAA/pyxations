@@ -36,18 +36,19 @@ class PreProcessing:
         width (int): Width of the screen in pixels.
 
         """
-        columns = [cols for cols in self.samples.columns if cols in ['LX', 'LY', 'RX', 'RY', 'X', 'Y']]
-        width_columns = [cols for cols in self.samples.columns if cols in ['LX', 'RX', 'X']]
-        height_columns = [cols for cols in self.samples.columns if cols in ['LY', 'RY', 'Y']]
+        for df in [self.samples,self.fixations,self.saccades]:            
+            columns = [cols for cols in df.columns if cols in ['LX', 'LY', 'RX', 'RY', 'X', 'Y','xStart', 'xEnd', 'yStart', 'yEnd','xAvg','yAvg']]
+            width_columns = [cols for cols in df.columns if cols in ['LX', 'RX', 'X','xStart', 'xEnd','xAvg']]
+            height_columns = [cols for cols in df.columns if cols in ['LY', 'RY', 'Y','yStart', 'yEnd','yAvg']]
 
 
-        self.samples['bad'] = (self.samples[columns] < 0).any(axis=1)
+            df['bad'] = (df[columns] < 0).any(axis=1)
 
-        # Add width filter to the filter list
-        self.samples['bad'] = self.samples['bad'] | (self.samples[width_columns] > screen_width).any(axis=1)
-        
-        # Add height filter to the filter list
-        self.samples['bad'] = self.samples['bad'] | (self.samples[height_columns] > screen_height).any(axis=1)
+            # Add width filter to the filter list
+            df['bad'] = df['bad'] | (df[width_columns] > screen_width).any(axis=1)
+            
+            # Add height filter to the filter list
+            df['bad'] = df['bad'] | (df[height_columns] > screen_height).any(axis=1)
 
 
 

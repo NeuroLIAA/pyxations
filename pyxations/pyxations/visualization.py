@@ -24,8 +24,11 @@ class Visualization():
         fixations = pd.read_hdf(path.join(session_folder_path,self.events_detection_folder,'fix.hdf5'))
         saccades = pd.read_hdf(path.join(session_folder_path,self.events_detection_folder,'sacc.hdf5'))
         samples = samples[samples['trial_number'] != -1]
+        samples = samples[samples['bad'] == False]
         fixations = fixations[fixations['trial_number'] != -1]
+        fixations = fixations[fixations['bad'] == False]
         saccades = saccades[saccades['trial_number'] != -1]
+        saccades = saccades[saccades['bad'] == False]
         unique_trials = fixations['trial_number'].unique()
         folder_path = path.join(session_folder_path,self.events_detection_folder,'plots')
         makedirs(folder_path, exist_ok=True)
@@ -278,12 +281,16 @@ class Visualization():
         ax = axs
         if ax is None:
             fig, ax = plt.subplots()
+        # Logarithmic bins
+        XL = np.log10(25)  # Adjusted to fit the xlim
+        YL = np.log10(1000)  # Adjusted to fit the ylim
 
-        saccades_peack_vel = saccades['vPeak']
+        saccades_peak_vel = saccades['vPeak']
         saccades_amp = saccades['ampDeg']
 
-        ax.plot(saccades_amp, saccades_peack_vel, '.', alpha=0.1, markersize=2)
-        ax.set_xlim(0.01)
+        # Create a 2D histogram with logarithmic bins
+        ax.hist2d(saccades_amp, saccades_peak_vel, bins=[np.logspace(-1, XL, 50), np.logspace(0, YL, 50)])
+
         if hline:
             ax.hlines(y=hline, xmin=ax.get_xlim()[0], xmax=ax.get_xlim()[1], colors='grey', linestyles='--', label=hline)
             ax.legend()
@@ -292,7 +299,10 @@ class Visualization():
         ax.set_title('Main sequence')
         ax.set_xlabel('Amplitude (deg)')
         ax.set_ylabel('Peak velocity (deg)')
-        ax.grid()
+         # Set the limits of the axes
+        ax.set_xlim(0.1, 25)
+        ax.set_ylim(10, 1000)
+        ax.set_aspect('equal')
 
 
     def plot_multipanel(self,folder_path:str,fixations:pd.DataFrame,saccades:pd.DataFrame):
