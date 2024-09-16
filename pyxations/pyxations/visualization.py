@@ -23,8 +23,10 @@ class Visualization():
         samples = pd.read_hdf(path.join(session_folder_path,'samples.hdf5'))
         fixations = pd.read_hdf(path.join(session_folder_path,self.events_detection_folder,'fix.hdf5'))
         saccades = pd.read_hdf(path.join(session_folder_path,self.events_detection_folder,'sacc.hdf5'))
+        samples = samples[samples['trial_number'] != -1]
+        fixations = fixations[fixations['trial_number'] != -1]
+        saccades = saccades[saccades['trial_number'] != -1]
         unique_trials = fixations['trial_number'].unique()
-        unique_trials = unique_trials[unique_trials != -1]
         folder_path = path.join(session_folder_path,self.events_detection_folder,'plots')
         makedirs(folder_path, exist_ok=True)
         for trial in unique_trials:
