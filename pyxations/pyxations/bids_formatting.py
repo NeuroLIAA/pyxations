@@ -320,7 +320,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
     
     pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg)
     pre_processing.process({'bad_samples': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.bad_samples).parameters.keys()},
-                            'split_all_into_trials': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.split_all_into_trials).parameters.keys()},
+                            'split_all_into_trials_by_msgs': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.split_all_into_trials_by_msgs).parameters.keys()},
                             'saccades_direction': {},})
 
     if not keep_ascii:

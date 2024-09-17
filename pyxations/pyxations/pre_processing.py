@@ -9,12 +9,34 @@ class PreProcessing:
         self.saccades = saccades
         self.blinks = blinks
         self.user_messages = user_messages
+
+    def split_all_into_trials(self,start_times: list[int], end_times: list[int],trial_labels:list[str] = None):
+        self.split_into_trials(self.samples,start_times,end_times,trial_labels)
+        self.split_into_trials(self.fixations,start_times,end_times,trial_labels)
+        self.split_into_trials(self.saccades,start_times,end_times,trial_labels)
+        self.split_into_trials(self.blinks,start_times,end_times,trial_labels)
         
-    def split_all_into_trials(self,trial_labels:list[str] = None, start_msgs: list[str]=None, end_msgs: list[str]=None,duration: float=None, start_times: list[int]=None, end_times: list[int]=None):
-        self.split_into_trials(self.samples,trial_labels,start_msgs,end_msgs,duration,start_times,end_times)
-        self.split_into_trials(self.fixations,trial_labels,start_msgs,end_msgs,duration,start_times,end_times)
-        self.split_into_trials(self.saccades,trial_labels,start_msgs,end_msgs,duration,start_times,end_times)
-        self.split_into_trials(self.blinks,trial_labels,start_msgs,end_msgs,duration,start_times,end_times)
+    def split_all_into_trials_by_msgs(self, start_msgs: list[str], end_msgs: list[str],trial_labels:list[str] = None):
+        start_times, _ = self.get_timestamps_from_messages(start_msgs)
+        end_times, _ = self.get_timestamps_from_messages(end_msgs)
+        self.split_into_trials(self.samples,start_times,end_times,trial_labels)
+        self.split_into_trials(self.fixations,start_times,end_times,trial_labels)
+        self.split_into_trials(self.saccades,start_times,end_times,trial_labels)
+        self.split_into_trials(self.blinks,start_times,end_times,trial_labels)
+
+    def split_all_into_trials_by_durations(self, start_msgs: list[str], durations: list[int],trial_labels:list[str] = None):
+        # Get the start times for each trial
+        start_times, rates = self.get_timestamps_from_messages(start_msgs)
+        if len(durations) < len(start_times):
+            raise ValueError("The amount of durations provided is less than the amount of start messages.")
+        # Calculate the end times for each trial
+        end_times = [start_time + duration * rate for start_time, rate, duration in zip(start_times, rates, durations)]
+        self.split_into_trials(self.samples,start_times,end_times,trial_labels)
+        self.split_into_trials(self.fixations,start_times,end_times,trial_labels)
+        self.split_into_trials(self.saccades,start_times,end_times,trial_labels)
+        self.split_into_trials(self.blinks,start_times,end_times,trial_labels)
+
+
 
     def process(self,functions_and_params:dict):
         for function,params in functions_and_params.items():
@@ -111,49 +133,8 @@ class PreProcessing:
             raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages))
 
         return timestamps, rates
-
-    def split_into_trials(self,data:pd.DataFrame,trial_labels:list[str] = None, start_msgs: list[str]=None, end_msgs: list[str]=None,duration: float=None, start_times: list[int]=None, end_times: list[int]=None):
-        """
-        There are three ways of splitting the samples into trials:
-        1) Using the start and end messages.
-        2) Using the start messages and a fixed duration.
-        3) Using the start and end times.
-
-        Parameters:
-        data (pd.DataFrame): DataFrame that must contain either the 'tSample' column or the 'tStart' and 'tEnd' columns.
-        trial_labels (list[str]): List of trial labels to assign to each trial.
-        user_messages (pd.DataFrame): DataFrame containing user messages data with the following columns:
-                                    'timestamp', 'message'.
-        start_msgs (list[str]): List of strings to identify the start of a trial.
-        end_msgs (list[str]): List of strings to identify the end of a trial.
-        duration (float): Duration of each trial in seconds.
-        start_times (list[int]): List of start times for each trial.
-        end_times (list[int]): List of end times for each trial.
-
-        In every case the time is measured based on the sample rate of the eye tracker.
-
-        """
-
-        # If start_msgs and end_msgs are provided, use them to split the samples
-        if start_msgs is not None and end_msgs is not None and self.user_messages is not None:
-            # Get the start and end times for each trial
-            start_times,_ = self.get_timestamps_from_messages(start_msgs)
-            end_times,_ = self.get_timestamps_from_messages(end_msgs)
-
-        # If start_msgs and duration are provided, use them to split the samples
-        elif start_msgs is not None and duration is not None and self.user_messages is not None:
-            # Get the start times for each trial
-            start_times, rates = self.get_timestamps_from_messages(start_msgs)
-            # Calculate the end times for each trial
-            end_times = [start_time + duration * rate for start_time, rate in zip(start_times, rates)]
-
-        # If start_times and end_times are provided, use them to split the samples
-        elif start_times is not None and end_times is not None:
-            pass
-        # If none of the above conditions are met, raise an exception
-        else:
-            raise ValueError("Either start_msgs and end_msgs, start_msgs and duration, or start_times and end_times must be provided.")
-
+    
+    def split_into_trials(self,data:pd.DataFrame, start_times: list[int], end_times: list[int],trial_labels:list[str] = None):
         # It is somewhat common that the last trial is not closed, so we will discard starting times that are greater than the last ending time
         start_times = [start_time for start_time in start_times if start_time < end_times[-1]]
 
@@ -183,4 +164,3 @@ class PreProcessing:
             data['trial_label'] = [''] * len(data)
             for i in range(len(start_times)):
                 data.loc[data['trial_number'] == i, 'trial_label'] = trial_labels[i]
-
