@@ -10,27 +10,30 @@ class PreProcessing:
         self.blinks = blinks
         self.user_messages = user_messages
 
-    def split_all_into_trials(self,start_times: list[int], end_times: list[int],trial_labels:list[str] = None):
+    def split_all_into_trials(self,start_times: dict[list[int]], end_times: dict[list[int]],trial_labels:dict[list[str]] = None):
         self.split_into_trials(self.samples,start_times,end_times,trial_labels)
         self.split_into_trials(self.fixations,start_times,end_times,trial_labels)
         self.split_into_trials(self.saccades,start_times,end_times,trial_labels)
         self.split_into_trials(self.blinks,start_times,end_times,trial_labels)
         
-    def split_all_into_trials_by_msgs(self, start_msgs: list[str], end_msgs: list[str],trial_labels:list[str] = None):
-        start_times, _ = self.get_timestamps_from_messages(start_msgs)
-        end_times, _ = self.get_timestamps_from_messages(end_msgs)
+    def split_all_into_trials_by_msgs(self, start_msgs: dict[list[str]], end_msgs: dict[list[str]],trial_labels:dict[list[str]] = None):
+        start_times,_ = self.get_timestamps_from_messages(start_msgs)
+        end_times,_ = self.get_timestamps_from_messages(end_msgs)
         self.split_into_trials(self.samples,start_times,end_times,trial_labels)
         self.split_into_trials(self.fixations,start_times,end_times,trial_labels)
         self.split_into_trials(self.saccades,start_times,end_times,trial_labels)
         self.split_into_trials(self.blinks,start_times,end_times,trial_labels)
 
-    def split_all_into_trials_by_durations(self, start_msgs: list[str], durations: list[int],trial_labels:list[str] = None):
+    def split_all_into_trials_by_durations(self, start_msgs: dict[list[str]], durations: dict[list[int]],trial_labels:dict[list[str]] = None):
         # Get the start times for each trial
         start_times, rates = self.get_timestamps_from_messages(start_msgs)
-        if len(durations) < len(start_times):
-            raise ValueError("The amount of durations provided is less than the amount of start messages.")
-        # Calculate the end times for each trial
-        end_times = [start_time + duration * rate for start_time, rate, duration in zip(start_times, rates, durations)]
+
+        end_times = {}
+        for key in durations.keys():
+            if len(durations[key]) < len(start_times[key]):
+                raise ValueError("The amount of durations provided is less than the amount of start messages.")
+            end_times[key] = ([(start_time + duration*rate) for start_time, duration, rate in zip(start_times[key],durations[key],rates[key])])
+
         self.split_into_trials(self.samples,start_times,end_times,trial_labels)
         self.split_into_trials(self.fixations,start_times,end_times,trial_labels)
         self.split_into_trials(self.saccades,start_times,end_times,trial_labels)
@@ -108,7 +111,7 @@ class PreProcessing:
         self.saccades.loc[(-105 < self.saccades['deg']) & (self.saccades['deg'] < -75), 'dir'] = 'up'
     
     
-    def get_timestamps_from_messages(self, messages: list[str]):
+    def get_timestamps_from_messages(self, messages_dict: dict[list[str]]):
         """
         Get the timestamps for a list of messages from the user messages DataFrame.
         The idea is to get the rows which have any of the messages in the list as a substring in the value of their 'message' column.
@@ -116,51 +119,67 @@ class PreProcessing:
         Parameters:
         user_messages (pd.DataFrame): DataFrame containing user messages data with the following columns:
                                         'timestamp', 'message'.
-        messages (list[str]): List of strings to identify the messages.
+        messages (dict[list[str]]): Dict of the name of the epochs as keys and value of list of strings to identify the messages.
 
         Returns:
         list[int]: List of timestamps for the messages.
         """
-        
-        # Get the timestamps for the messages and the samples rates
-        timestamps_and_rates = self.user_messages[self.user_messages['message'].str.contains('|'.join(messages))][['timestamp','Rate_recorded']].sort_values(by='timestamp')
-        timestamps = timestamps_and_rates['timestamp'].tolist()
-        rates = timestamps_and_rates['Rate_recorded'].tolist()
+        timestamps_dict = {}
+        rates_dict = {}
+        for key,messages in messages_dict.items():
+            # Get the timestamps for the messages and the samples rates
+            timestamps_and_rates = self.user_messages[self.user_messages['message'].str.contains('|'.join(messages))][['timestamp','Rate_recorded']].sort_values(by='timestamp')
+            timestamps = timestamps_and_rates['timestamp'].tolist()
+            rates = timestamps_and_rates['Rate_recorded'].tolist()
 
 
-        # Raise exception if no timestamps are found
-        if len(timestamps) == 0:
-            raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages))
+            # Raise exception if no timestamps are found
+            if len(timestamps) == 0:
+                raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages))
+            timestamps_dict[key] = timestamps
+            rates_dict[key] = rates
 
-        return timestamps, rates
+        return timestamps_dict, rates_dict
     
-    def split_into_trials(self,data:pd.DataFrame, start_times: list[int], end_times: list[int],trial_labels:list[str] = None):
-        # It is somewhat common that the last trial is not closed, so we will discard starting times that are greater than the last ending time
-        start_times = [start_time for start_time in start_times if start_time < end_times[-1]]
-
-        # Check that both lists have the same length
-        if len(start_times) != len(end_times):
-            raise ValueError("start_times and end_times must have the same length, but they have lengths {} and {} respectively.".format(len(start_times), len(end_times)))
-
-        # Check that the length of ordered_trials_ids is the same as the number of trials
-        if trial_labels and len(trial_labels) != len(start_times):
-            raise ValueError("The amount of computed trials is {} while the amount of ordered trial ids is {}.".format(len(start_times), len(trial_labels)))
-
-        # Create a list of trial ids for each sample
+    def split_into_trials(self,data:pd.DataFrame, start_times: dict[list[int]], end_times: dict[list[int]],trial_labels:dict[list[str]] = None):
+        data['phase'] = [''] * len(data)
         data['trial_number'] = [-1] * len(data)
+        for key in start_times.keys():
+            start_times_list = start_times[key]
+            end_times_list = end_times[key]
+            trial_labels_list = trial_labels[key] if trial_labels and key in trial_labels else None
+            # It is somewhat common that the last trial is not closed, so we will discard starting times that are greater than the last ending time
+            start_times_list = [start_time for start_time in start_times_list if start_time < end_times_list[-1]]
+
+            # Check that both lists have the same length
+            if len(start_times_list) != len(end_times_list):
+                data.drop('trial_number', axis=1, inplace=True)
+                data.drop('phase', axis=1, inplace=True)
+                raise ValueError("start_times and end_times for {} must have the same length, but they have lengths {} and {} respectively.".format(key,len(start_times_list), len(end_times_list)))
+
+            # Check that the length of ordered_trials_ids is the same as the number of trials
+            if trial_labels_list and len(trial_labels_list) != len(start_times_list):
+                data.drop('trial_number', axis=1, inplace=True)
+                data.drop('phase', axis=1, inplace=True)
+                raise ValueError("The amount of computed trials is {} while the amount of ordered trial ids is {} for key {}.".format(len(start_times_list), len(trial_labels_list)), key)
 
 
-        # Divide in trials according to start_times and end_times
-        if 'tSample' in data.columns:
-            for i in range(len(start_times)):
-                data.loc[(data['tSample'] >= start_times[i]) & (data['tSample'] <= end_times[i]), 'trial_number'] = i
-        elif 'tStart' in data.columns and 'tEnd' in data.columns:
-            for i in range(len(start_times)):
-                data.loc[(data['tStart'] >= start_times[i]) & (data['tEnd'] <= end_times[i]), 'trial_number'] = i
-        else:
-            raise ValueError("The DataFrame must contain either the 'tSample' column or the 'tStart' and 'tEnd' columns.")
 
-        if trial_labels:
-            data['trial_label'] = [''] * len(data)
-            for i in range(len(start_times)):
-                data.loc[data['trial_number'] == i, 'trial_label'] = trial_labels[i]
+            # Divide in trials according to start_times_list and end_times_list
+            if 'tSample' in data.columns:
+                for i in range(len(start_times_list)):
+                    data.loc[(data['tSample'] >= start_times_list[i]) & (data['tSample'] <= end_times_list[i]), 'trial_number'] = i
+                    data.loc[(data['tSample'] >= start_times_list[i]) & (data['tSample'] <= end_times_list[i]), 'phase'] = key
+            elif 'tStart' in data.columns and 'tEnd' in data.columns:
+                for i in range(len(start_times_list)):
+                    data.loc[(data['tStart'] >= start_times_list[i]) & (data['tEnd'] <= end_times_list[i]), 'trial_number'] = i
+                    data.loc[(data['tStart'] >= start_times_list[i]) & (data['tEnd'] <= end_times_list[i]), 'phase'] = key
+            else:
+                data.drop('trial_number', axis=1, inplace=True)
+                data.drop('phase', axis=1, inplace=True)
+                raise ValueError("The DataFrame must contain either the 'tSample' column or the 'tStart' and 'tEnd' columns.")
+
+            if trial_labels_list:
+                data['trial_label'] = [''] * len(data)
+                for i in range(len(start_times_list)):
+                    data.loc[data['trial_number'] == i, 'trial_label'] = trial_labels_list[i]
