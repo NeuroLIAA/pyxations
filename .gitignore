@@ -1,5 +1,7 @@
 # Ignore all derivatives
 example_dataset_derivatives/
+example_dataset/
+
 
 
 # Ignore Pycharm .idea directory
@@ -11,3 +13,6 @@ env/
 .pytest_cache/
 
 *.log
+*pyxations.egg-info
+*/build
+*.ipynb_checkpoints

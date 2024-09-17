@@ -3,7 +3,6 @@ import re
 import pandas as pd
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
-from .subjects import Subject
 
 
 # Abstract Experiment class
@@ -43,39 +42,38 @@ class Experiment(BaseExperiment):
         df["subj_id"] = subj_id
         return df
 
-    def load_data(self, subject_id, session=None, trial_id=None, detection_algorithm_folder=None):
-        """Abstract method to load data, must be implemented by subclasses."""
+    # def load_data(self, subject_id, session=None, trial_id=None, detection_algorithm_folder=None):
+    #     """Abstract method to load data, must be implemented by subclasses."""
         
-        if not session:
-            raise(f"session for subject {subject_id} not found")
+    #     if not session:
+    #         raise(f"session for subject {subject_id} not found")
         
-        if not trial_id:
-            raise((f"trial for subject {subject_id} not found"))
+    #     if not trial_id:
+    #         raise((f"trial for subject {subject_id} not found"))
 
-        subject_id = f'sub-{subject_id}'
-        subject_path_ids = dict(zip(self.subjects, self.paths))
-        subj_path = subject_path_ids[subject_id]
-        data = {}
+    #     subject_id = f'sub-{subject_id}'
+    #     subject_path_ids = dict(zip(self.subjects, self.paths))
+    #     subj_path = subject_path_ids[subject_id]
+    #     data = {}
 
-        path = os.path.join(subj_path, f"ses-{session}", detection_algorithm_folder)
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"The path {path} does not exist.")
+    #     path = os.path.join(subj_path, f"ses-{session}", detection_algorithm_folder)
+    #     if not os.path.exists(path):
+    #         raise FileNotFoundError(f"The path {path} does not exist.")
         
-        for dirpath, _, filenames in os.walk(path):
-            for filename in filenames:
-                if filename.endswith(".hdf5"):
-                    hdf5_data = self.load_hdf5_file(os.path.join(dirpath, filename))
-                    dataframe_name = filename.split(".")[0]
-                    print("dataframe_name:", dataframe_name)
-                    if int(trial_id) in list(hdf5_data['trial_number'].unique()):
-                        hdf5_data = hdf5_data.query(f"trial_number == {trial_id}")
-                        data[dataframe_name] = hdf5_data 
-                    else:   
-                        raise ValueError(f"Warning: trial {trial_id} is not present")
+    #     for dirpath, _, filenames in os.walk(path):
+    #         for filename in filenames:
+    #             if filename.endswith(".hdf5"):
+    #                 hdf5_data = self.load_hdf5_file(os.path.join(dirpath, filename))
+    #                 dataframe_name = filename.split(".")[0]
+    #                 if int(trial_id) in list(hdf5_data['trial_number'].unique()):
+    #                     hdf5_data = hdf5_data.query(f"trial_number == {trial_id}")
+    #                     data[dataframe_name] = hdf5_data 
+    #                 else:   
+    #                     raise ValueError(f"Warning: trial {trial_id} is not present")
 
         
-        print("data:", data)
-        return Subject(subject_id, subj_path, session, trial_id, detection_algorithm_folder, data['fix'], data['sacc'], None)
+    #     print("data:", data)
+    #     return Subject(subject_id, subj_path, session, trial_id, detection_algorithm_folder, data['fix'], data['sacc'], None)
 
     def get_subject_data(self, subject_id, session, trial_id, detection_algorithm_folder):
         """Load specific subject and trial data, handling missing files internally."""

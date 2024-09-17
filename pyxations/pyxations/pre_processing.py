@@ -17,8 +17,8 @@ class PreProcessing:
         self.split_into_trials(self.blinks,start_times,end_times,trial_labels)
         
     def split_all_into_trials_by_msgs(self, start_msgs: dict[list[str]], end_msgs: dict[list[str]],trial_labels:dict[list[str]] = None):
-        start_times,_ = self.get_timestamps_from_messages(start_msgs)
-        end_times,_ = self.get_timestamps_from_messages(end_msgs)
+        start_times = self.get_timestamps_from_messages(start_msgs)
+        end_times = self.get_timestamps_from_messages(end_msgs)
         self.split_into_trials(self.samples,start_times,end_times,trial_labels)
         self.split_into_trials(self.fixations,start_times,end_times,trial_labels)
         self.split_into_trials(self.saccades,start_times,end_times,trial_labels)
@@ -26,13 +26,13 @@ class PreProcessing:
 
     def split_all_into_trials_by_durations(self, start_msgs: dict[list[str]], durations: dict[list[int]],trial_labels:dict[list[str]] = None):
         # Get the start times for each trial
-        start_times, rates = self.get_timestamps_from_messages(start_msgs)
+        start_times = self.get_timestamps_from_messages(start_msgs)
 
         end_times = {}
         for key in durations.keys():
             if len(durations[key]) < len(start_times[key]):
                 raise ValueError("The amount of durations provided is less than the amount of start messages.")
-            end_times[key] = ([(start_time + duration*rate) for start_time, duration, rate in zip(start_times[key],durations[key],rates[key])])
+            end_times[key] = ([(start_time + duration) for start_time, duration in zip(start_times[key],durations[key])])
 
         self.split_into_trials(self.samples,start_times,end_times,trial_labels)
         self.split_into_trials(self.fixations,start_times,end_times,trial_labels)
@@ -125,21 +125,18 @@ class PreProcessing:
         list[int]: List of timestamps for the messages.
         """
         timestamps_dict = {}
-        rates_dict = {}
         for key,messages in messages_dict.items():
             # Get the timestamps for the messages and the samples rates
             timestamps_and_rates = self.user_messages[self.user_messages['message'].str.contains('|'.join(messages))][['timestamp','Rate_recorded']].sort_values(by='timestamp')
             timestamps = timestamps_and_rates['timestamp'].tolist()
-            rates = timestamps_and_rates['Rate_recorded'].tolist()
 
 
             # Raise exception if no timestamps are found
             if len(timestamps) == 0:
                 raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages))
             timestamps_dict[key] = timestamps
-            rates_dict[key] = rates
 
-        return timestamps_dict, rates_dict
+        return timestamps_dict
     
     def split_into_trials(self,data:pd.DataFrame, start_times: dict[list[int]], end_times: dict[list[int]],trial_labels:dict[list[str]] = None):
         data['phase'] = [''] * len(data)

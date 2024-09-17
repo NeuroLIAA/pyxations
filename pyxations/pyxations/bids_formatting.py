@@ -146,7 +146,7 @@ def convert_edf_to_ascii(edf_file_path, output_dir):
 
 
 
-def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, **kwargs):
+def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
     # Convert EDF to ASCII (only if necessary)
     ascii_file_path = convert_edf_to_ascii(edf_file_path, session_folder_path)
 
@@ -155,7 +155,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
         os.path.exists(os.path.join(session_folder_path, file_name)) 
         for file_name in ['header.hdf5', 'msg.hdf5', 'calib.hdf5', 'samples.hdf5']
     ])
-    if existing_files:
+    if existing_files and not overwrite:
         return
 
      # Reading ASCII in chunks to reduce memory usage
@@ -337,7 +337,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
 
 
 
-def process_session(bids_dataset_folder, subject, session, msg_keywords,detection_algorithm,derivatives_folder,force_best_eye,keep_ascii,**kwargs):
+def process_session(bids_dataset_folder, subject, session, msg_keywords,detection_algorithm,derivatives_folder,force_best_eye,keep_ascii, overwrite, **kwargs):
     eye_tracking_data_path = os.path.join(bids_dataset_folder, subject, session, 'ET')
     edf_files = [file for file in os.listdir(eye_tracking_data_path) if file.lower().endswith(".edf")]
     if len(edf_files) > 1:
@@ -349,9 +349,9 @@ def process_session(bids_dataset_folder, subject, session, msg_keywords,detectio
     session_folder_path = os.path.join(derivatives_folder, subject, session)
     os.makedirs(os.path.join(session_folder_path, 'eyelink_events'), exist_ok=True)
 
-    parse_edf_eyelink(edf_file_path, msg_keywords,detection_algorithm,session_folder_path,force_best_eye,keep_ascii,**kwargs)
+    parse_edf_eyelink(edf_file_path, msg_keywords,detection_algorithm,session_folder_path,force_best_eye,keep_ascii, overwrite, **kwargs)
 
-def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm='eyelink', num_processes=4, force_best_eye=True, keep_ascii=True, **kwargs):
+def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm='eyelink', num_processes=4, force_best_eye=True, keep_ascii=True, overwrite=False, **kwargs):
     derivatives_folder = bids_dataset_folder + "_derivatives"
     os.makedirs(derivatives_folder, exist_ok=True)
 
@@ -363,7 +363,7 @@ def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection
 
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
         futures = [
-            executor.submit(process_session, bids_dataset_folder, subject, session, msg_keywords, detection_algorithm, derivatives_folder, force_best_eye, keep_ascii, **kwargs)
+            executor.submit(process_session, bids_dataset_folder, subject, session, msg_keywords, detection_algorithm, derivatives_folder, force_best_eye, keep_ascii, overwrite, **kwargs)
             for subject in bids_folders
             for session in os.listdir(os.path.join(bids_dataset_folder, subject)) if session.startswith("ses-")
         ]

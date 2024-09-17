@@ -33,7 +33,7 @@ class Visualization():
         folder_path = path.join(session_folder_path,self.events_detection_folder,'plots')
         makedirs(folder_path, exist_ok=True)
         for trial in unique_trials:
-            self.scanpath(fixations,screen_height,screen_width,folder_path,trial_index=trial,saccades=saccades,samples=samples,img_path=trial_image_mapper[trial] if trial_image_mapper is not None else None)
+            self.scanpath(fixations,screen_height,screen_width,folder_path,trial_index=trial,saccades=saccades,samples=samples,img_path=trial_image_mapper[trial] if trial_image_mapper is not None else None, display=False)
         return fixations[['duration','Rate_recorded']],saccades[['ampDeg','vPeak','deg','dir']]
     
     def process_session(self, session_info):
@@ -63,8 +63,8 @@ class Visualization():
         self.plot_multipanel(path.join(self.derivatives_folder_path,self.events_detection_folder,"plots"),pd.concat(fixations),pd.concat(saccades))
 
 
-    def scanpath(self,fixations:pd.DataFrame,screen_height:int, screen_width:int,folder_path:str,trial_index:int=None,trial_label:str=None,
-                 tmin:int=None, tmax:int=None, img_path:str=None,saccades:pd.DataFrame=None,samples:pd.DataFrame=None):
+    def scanpath(self,fixations:pd.DataFrame,screen_height:int, screen_width:int,folder_path:str=None,trial_index:int=None,trial_label:str=None,
+                 tmin:int=None, tmax:int=None, img_path:str=None,saccades:pd.DataFrame=None,samples:pd.DataFrame=None, display:bool=True):
         """
         Plots the scanpath, including fixations, saccades, and optionally an image background and gaze samples.
 
@@ -95,6 +95,8 @@ class Visualization():
         samples : pd.DataFrame, optional
             DataFrame containing gaze samples data with the following columns:
             'tSample', 'LX', 'LY', 'RX', 'RY'.
+        display: bool
+            Show plot
 
 
         Either trial_index or trial_label or tmix and tmax must be provided.
@@ -103,9 +105,14 @@ class Visualization():
         plot_saccades = not saccades is None
         plot_samples = not samples is None
 
-        scanpath_file_name = 'scanpath' + f'_{trial_index}'*(trial_index is not None) + f'_{trial_label}'*(trial_label is not None) + f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) + '.png'
-        file_path = path.join(folder_path, scanpath_file_name)
+        
+        if folder_path:
+            scanpath_file_name = 'scanpath' + f'_{trial_index}'*(trial_index is not None) + f'_{trial_label}'*(trial_label is not None) + f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) + '.png'
+            file_path = path.join(folder_path, scanpath_file_name)
 
+        if all(v is None for v in [trial_index, trial_label, tmin, tmax]): 
+            raise ValueError("Either trial_index or trial_label or tmix and tmax must be provided.")
+        
         #----- Filter saccades, fixations and samples to defined time interval -----#
         if tmax is not None and tmin is not None:
             filtered_fixations = fixations[(fixations['tStart'] >= tmin) & (fixations['tStart'] <= tmax)]
@@ -159,7 +166,7 @@ class Visualization():
 
         # Colorbar
         PCM = ax_main.get_children()[0]  # When the fixations dots for color mappable were ploted (first)
-        cb = plt.colorbar(PCM, ax=ax_main, ticks=[fix_num[0] + 1/2, fix_num[int(len(fix_num)/2)]+1/2, fix_num[-1]+1/2], fraction=0.046, pad=0.04)
+        cb = plt.colorbar(PCM, ax=ax_main, ticks=[fix_num[0], fix_num[int(len(fix_num)/2)], fix_num[-1] + 1], fraction=0.046, pad=0.04)
         cb.ax.set_yticklabels([fix_num[0], fix_num[int(len(fix_num)/2)], fix_num[-1]])
         cb.set_label('# of fixation')
 
@@ -182,7 +189,7 @@ class Visualization():
         #----- Plot scanpath and gaze if samples provided -----#
         if plot_samples:
             starting_time = filtered_samples['tSample'].iloc[0]
-            tSamples_from_start = (filtered_samples['tSample'] - starting_time)/filtered_samples['Rate_recorded']
+            tSamples_from_start = (filtered_samples['tSample'] - starting_time)
             # Left eye
             try:
                 ax_main.plot(filtered_samples['LX'], filtered_samples['LY'], '--', color='C0', zorder=1)
@@ -205,24 +212,26 @@ class Visualization():
                 pass
             plot_min, plot_max = ax_gaze.get_ylim()
             # Plot fixations as color span in gaze axes
-            for fix_idx, fixation in filtered_fixations.iterrows():
+            for fix_idx,(_, fixation) in enumerate(filtered_fixations.iterrows()):
                 color = cmap(norm(fix_idx + 1))
-                ax_gaze.axvspan(ymin=0, ymax=1, xmin=(fixation['tStart'] - starting_time)/fixation['Rate_recorded'], xmax=(fixation['tStart'] - starting_time + fixation['duration'])/fixation['Rate_recorded'], color=color, alpha=0.4, label='fix')
+                ax_gaze.axvspan(ymin=0, ymax=1, xmin=(fixation['tStart'] - starting_time), xmax=(fixation['tStart'] - starting_time + fixation['duration']), color=color, alpha=0.4, label='fix')
             
             # Plor saccades as vlines in gaze axes
             if plot_saccades:
                 for _, saccade in filtered_saccades.iterrows():
-                    ax_gaze.vlines(x=(saccade['tStart']- starting_time)/saccade['Rate_recorded'], ymin=plot_min, ymax=plot_max, colors='red', linestyles='--', label='sac')
+                    ax_gaze.vlines(x=(saccade['tStart']- starting_time), ymin=plot_min, ymax=plot_max, colors='red', linestyles='--', label='sac', linewidth=0.8)
 
             # Legend
             handles, labels = plt.gca().get_legend_handles_labels()
             by_label = dict(zip(labels, handles))
             plt.legend(by_label.values(), by_label.keys(),  loc='center left', bbox_to_anchor=(1, 0.5))
             ax_gaze.set_ylabel('Gaze')
-            ax_gaze.set_xlabel('Time [s]')
+            ax_gaze.set_xlabel('Time [ms]')
         plt.tight_layout()  
-        fig.savefig(file_path)
-        plt.close()
+        if folder_path:
+            fig.savefig(file_path)
+        if not display:
+            plt.close()
 
 
     def fix_duration(self,fixations:pd.DataFrame,axs=None):
@@ -305,7 +314,7 @@ class Visualization():
         ax.set_aspect('equal')
 
 
-    def plot_multipanel(self,folder_path:str,fixations:pd.DataFrame,saccades:pd.DataFrame):
+    def plot_multipanel(self,folder_path:str,fixations:pd.DataFrame,saccades:pd.DataFrame, display:bool=True):
         plt.rcParams.update({'font.size': 12})
         fig, axs = plt.subplots(2, 2, figsize=(12, 7))
         
@@ -317,4 +326,5 @@ class Visualization():
         fig.tight_layout()
         makedirs(folder_path, exist_ok=True)
         plt.savefig(path.join(folder_path,'multipanel.png'))
-        plt.close()
+        if not display:
+            plt.close()
