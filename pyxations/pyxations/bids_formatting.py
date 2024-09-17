@@ -54,7 +54,6 @@ def keep_eye(eye,df_samples,df_fix,df_blink,df_sacc):
     df_blink.dropna(inplace=True)
     df_fix.dropna(inplace=True)
     df_sacc.dropna(inplace=True)
-    df_samples.dropna(subset= ['X', 'Y'], how='any', inplace=True)
     return df_samples,df_fix,df_blink,df_sacc
 
 
@@ -276,9 +275,6 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
             dfSamples.loc[dfSamples[dfSamples['Eyes_recorded'] == eye].index, ['tSample'] + cols] = dfSamples[dfSamples['Eyes_recorded'] == eye]['line'].str.split(expand=True)[[0] + list(range(1, len(cols) + 1))].apply(pd.to_numeric, errors='coerce').values
 
     dfSamples.drop(columns=['line'], inplace=True)
-
-    # Dropping rows where all LX, LY, RX, and RY are NaN
-    dfSamples.dropna(subset=[col for col in ['LX', 'LY','RX', 'RY'] if col in dfSamples.columns], how='all', inplace=True)
 
     dfSamples = dfSamples[['tSample'] + [col for col in ['LX', 'LY','LPupil','RX', 'RY', 'RPupil'] if col in dfSamples.columns] + ['Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
     if detection_algorithm == 'eyelink':
