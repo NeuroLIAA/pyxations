@@ -240,7 +240,7 @@ class Visualization():
         if ax is None:
             fig, ax = plt.subplots()
 
-        ax.hist(1000*fixations['duration'], bins=100, edgecolor='black', linewidth=1.2, density=True)
+        ax.hist(fixations['duration'], bins=100, edgecolor='black', linewidth=1.2, density=True)
         ax.set_title('Fixation duration')
         ax.set_xlabel('Time (ms)')
         ax.set_ylabel('Density')
