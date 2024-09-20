@@ -41,15 +41,15 @@ def find_besteye(df_cal):
 def keep_eye(eye,df_samples,df_fix,df_blink,df_sacc):
     if eye == 'R':
         df_samples = df_samples[['tSample', 'RX', 'RY', 'RPupil','Line_number','Eyes_recorded','Rate_recorded','Calib_index']].copy()
-        df_fix = df_fix[df_fix['eye'] == 'R']
-        df_blink = df_blink[df_blink['eye'] == 'R']
-        df_sacc = df_sacc[df_sacc['eye'] == 'R']
+        df_fix = df_fix[df_fix['eye'] == 'R'].reset_index(drop=True)
+        df_blink = df_blink[df_blink['eye'] == 'R'].reset_index(drop=True)
+        df_sacc = df_sacc[df_sacc['eye'] == 'R'].reset_index(drop=True)
         df_samples.rename(columns={'RX': 'X', 'RY': 'Y', 'RPupil': 'Pupil'}, inplace=True)
     else:
         df_samples = df_samples[['tSample', 'LX', 'LY', 'LPupil','Line_number','Eyes_recorded','Rate_recorded','Calib_index']].copy()
-        df_fix = df_fix[df_fix['eye'] == 'L']
-        df_blink = df_blink[df_blink['eye'] == 'L']
-        df_sacc = df_sacc[df_sacc['eye'] == 'L']
+        df_fix = df_fix[df_fix['eye'] == 'L'].reset_index(drop=True)
+        df_blink = df_blink[df_blink['eye'] == 'L'].reset_index(drop=True)
+        df_sacc = df_sacc[df_sacc['eye'] == 'L'].reset_index(drop=True)
         df_samples.rename(columns={'LX': 'X', 'LY': 'Y', 'LPupil': 'Pupil'}, inplace=True)
     df_blink.dropna(inplace=True)
     df_fix.dropna(inplace=True)
@@ -248,7 +248,11 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
     screen_res = [str(int(float(res))) for res in gaze_coords_row.split()[5:7]]
     dfHeader.loc[len(dfHeader.index)] = ["** SCREEN SIZE: " + " ".join(screen_res), -1]
 
-    
+    # Screen size extraction optimization
+    if 'screen_height' not in kwargs or 'screen_width' not in kwargs:
+        screen_size = dfHeader['line'].iloc[-1].split()
+        kwargs['screen_width'], kwargs['screen_height'] = int(screen_size[-2]), int(screen_size[-1])
+
     # Optimized processing of dfMsg to extract timestamp and message
     if dfMsg.empty:
         raise ValueError(f"No messages {msg_keywords} found in the ASC file for session {session_folder_path}.")
@@ -294,8 +298,8 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
         dfSacc = dfSacc[['eye', 'tStart', 'tEnd', 'duration', 'xStart', 'yStart', 'xEnd', 'yEnd', 'ampDeg', 'vPeak', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
 
     else:
-        dfFix, dfSacc = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path, dfSamples).detect_eye_movements()
-        # TODO: 'Eyes_recorded','Rate_recorded','Calib_index' are not being added to the dfFix and dfSacc DataFrames in the remodnav case. Fix this. They can be copied from the samples DataFrame.
+        eye_movement_detector = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path=session_folder_path,samples=dfSamples)
+        dfFix, dfSacc = eye_movement_detector.detect_eye_movements(**{arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(eye_movement_detector.detect_eye_movements).parameters.keys()})
 
     # Optimization for selecting best eye
     if force_best_eye:
@@ -312,10 +316,6 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
         dfSamples, dfFix, dfBlink, dfSacc = [pd.concat([dfslist[i][j] for i in range(len(best_eyes))]) for j in range(4)]
         del dfslist
 
-    # Screen size extraction optimization
-    if 'screen_height' not in kwargs or 'screen_width' not in kwargs:
-        screen_size = dfHeader['line'].iloc[-1].split()
-        kwargs['screen_width'], kwargs['screen_height'] = int(screen_size[-2]), int(screen_size[-1])
 
     
     pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg)
