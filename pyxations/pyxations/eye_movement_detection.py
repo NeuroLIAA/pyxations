@@ -218,10 +218,10 @@ class RemodnavDetection(EyeMovementDetection):
                 mean_x.append(np.nanmean(gazex_data_fix))
                 mean_y.append(np.nanmean(gazey_data_fix))
 
-            fixations_eye['mean_x'] = mean_x
-            fixations_eye['mean_y'] = mean_y
+            fixations_eye['xAvg'] = mean_x
+            fixations_eye['yAvg'] = mean_y
             fixations_eye['pupilAvg'] = pupil_size
-            fixations_eye = fixations_eye.astype({'mean_x': float, 'mean_y': float, 'pupilAvg': float})
+            fixations_eye = fixations_eye.astype({'xAvg': float, 'yAvg': float, 'pupilAvg': float})
             
 
             
