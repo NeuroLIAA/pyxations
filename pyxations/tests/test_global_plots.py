@@ -21,7 +21,7 @@ class TestGlobalPlots(unittest.TestCase):
         
 
         # Plot multipanel
-        visualization.global_plots(16,image_path_mapper)
+        visualization.global_plots("search",16,image_path_mapper)
         # Assert that the file multipanel.png was created
         self.assertTrue(os.path.exists(os.path.join(path_to_derivatives,'eyelink_events','plots', "multipanel.png")))
         self.assertTrue(os.path.exists(os.path.join(path_to_derivatives,'sub-0001','ses-second','eyelink_events','plots', "scanpath_0.png")))

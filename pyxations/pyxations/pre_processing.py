@@ -127,7 +127,7 @@ class PreProcessing:
         timestamps_dict = {}
         for key,messages in messages_dict.items():
             # Get the timestamps for the messages and the samples rates
-            timestamps_and_rates = self.user_messages[self.user_messages['message'].str.contains('|'.join(messages))][['timestamp','Rate_recorded']].sort_values(by='timestamp')
+            timestamps_and_rates = self.user_messages[self.user_messages['message'].str.contains('|'.join(messages))][['timestamp']].sort_values(by='timestamp')
             timestamps = timestamps_and_rates['timestamp'].tolist()
 
 
