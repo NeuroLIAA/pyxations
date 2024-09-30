@@ -20,6 +20,7 @@ class Session:
         self.subject_id = subject_id
         self.session_id = session_id
         
+        
         # Check if the dataset path and session folder exist
         base_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}"
         
@@ -31,7 +32,11 @@ class Session:
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
         events_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / f"{self.detection_algorithm}_events"
-        
+        behavior_path = Path(str(self.dataset_path).rsplit('_',1)[0]) / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / "behavioral"
+        if behavior_path.exists() and list(behavior_path.glob("*.csv")):
+            behavior_data = pd.read_csv(next(behavior_path.glob("*.csv")))
+            self.behavior_data = behavior_data
+    
         # Check if paths and files exist
         if not events_path.exists():
             raise FileNotFoundError(f"Algorithm events path not found: {events_path}")
