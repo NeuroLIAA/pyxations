@@ -19,6 +19,7 @@ class Session:
         self.dataset_path = Path(dataset_path)
         self.subject_id = subject_id
         self.session_id = session_id
+        self.session_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}"
         
         
         # Check if the dataset path and session folder exist
@@ -31,7 +32,7 @@ class Session:
         
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
-        events_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / f"{self.detection_algorithm}_events"
+        events_path =  self.session_path / f"{self.detection_algorithm}_events"
         behavior_path = Path(str(self.dataset_path).rsplit('_',1)[0]) / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / "behavioral"
         if behavior_path.exists() and list(behavior_path.glob("*.csv")):
             behavior_data = pd.read_csv(next(behavior_path.glob("*.csv")))
@@ -42,7 +43,10 @@ class Session:
             raise FileNotFoundError(f"Algorithm events path not found: {events_path}")
 
         # Define file paths
-        samples_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / "samples.hdf5"
+        samples_path = self.session_path  / "samples.hdf5"
+        calib_path = self.session_path  / "calib.hdf5"
+        header_path = self.session_path  / "header.hdf5"
+        msg_path = self.session_path  / "msg.hdf5"
         fix_path = events_path / "fix.hdf5"
         sacc_path = events_path / "sacc.hdf5"
         blink_path = events_path / "blink.hdf5"
@@ -56,12 +60,22 @@ class Session:
             raise FileNotFoundError(f"Saccades file not found: {sacc_path}")
         if not blink_path.exists():
             raise FileNotFoundError(f"Blinks file not found: {blink_path}")
+        if not calib_path.exists():
+            raise FileNotFoundError(f"Calibration file not found: {calib_path}")
+        if not header_path.exists():
+            raise FileNotFoundError(f"Header file not found: {header_path}")
+        if not msg_path.exists():
+            raise FileNotFoundError(f"Messsages file not found: {msg_path}")
+    
 
         # Load the data
         self.samples = pd.read_hdf(samples_path)
         self.fix = pd.read_hdf(fix_path)
         self.sacc = pd.read_hdf(sacc_path)
         self.blink = pd.read_hdf(blink_path)
+        self.calib = pd.read_hdf(calib_path)
+        self.header = pd.read_hdf(header_path)
+        self.msg = pd.read_hdf(msg_path)
 
     def plot_scanpath(self, **kwargs) -> None:
         events_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / f"{self.detection_algorithm}_events"
