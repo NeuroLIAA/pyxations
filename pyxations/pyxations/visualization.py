@@ -5,24 +5,24 @@ import numpy as np
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
 from .bids_formatting import EYE_MOVEMENT_DETECTION_DICT
-from os import path, makedirs,listdir
+from pathlib import Path
 
 
 class Visualization():
     def __init__(self, derivatives_folder_path,events_detection_algorithm):
-        self.derivatives_folder_path = derivatives_folder_path
+        self.derivatives_folder_path = Path(derivatives_folder_path)
         if events_detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and events_detection_algorithm != 'eyelink':
             raise ValueError(f"Detection algorithm {events_detection_algorithm} not found.")
-        self.events_detection_folder = events_detection_algorithm+'_events'
+        self.events_detection_folder = Path(events_detection_algorithm+'_events')
 
-    def get_data_and_plot_scanpaths(self,session_folder_path:str,phase:str,trial_image_mapper:dict=None):
-        header = pd.read_hdf(path.join(session_folder_path,'header.hdf5'))
+    def get_data_and_plot_scanpaths(self,session_folder_path:Path,phase:str,trial_image_mapper:dict=None):
+        header = pd.read_hdf(session_folder_path /'header.hdf5')
         screen_size = header['line'].iloc[-1].split()
         screen_height = int(screen_size[-1])
         screen_width = int(screen_size[-2])
-        samples = pd.read_hdf(path.join(session_folder_path,'samples.hdf5'))
-        fixations = pd.read_hdf(path.join(session_folder_path,self.events_detection_folder,'fix.hdf5'))
-        saccades = pd.read_hdf(path.join(session_folder_path,self.events_detection_folder,'sacc.hdf5'))
+        samples = pd.read_hdf(session_folder_path / 'samples.hdf5')
+        fixations = pd.read_hdf(session_folder_path / self.events_detection_folder / 'fix.hdf5')
+        saccades = pd.read_hdf(session_folder_path / self.events_detection_folder / 'sacc.hdf5')
         samples = samples[samples['phase'] == phase]
         samples = samples[samples['trial_number'] != -1]
         samples = samples[samples['bad'] == False]
@@ -33,8 +33,8 @@ class Visualization():
         saccades = saccades[saccades['trial_number'] != -1]
         saccades = saccades[saccades['bad'] == False]
         unique_trials = fixations['trial_number'].unique()
-        folder_path = path.join(session_folder_path,self.events_detection_folder,'plots')
-        makedirs(folder_path, exist_ok=True)
+        folder_path = session_folder_path / self.events_detection_folder / 'plots'
+        folder_path.mkdir(parents=True, exist_ok=True)
         for trial in unique_trials:
             self.scanpath(fixations,screen_height,screen_width,folder_path,trial_index=trial,saccades=saccades,samples=samples,img_path=trial_image_mapper[trial] if trial_image_mapper is not None else None, display=False)
         return fixations[['duration']],saccades[['ampDeg','vPeak','deg','dir']]
@@ -42,28 +42,28 @@ class Visualization():
     def process_session(self, session_info):
         subject, session,phase, trial_image_mapper = session_info
         return self.get_data_and_plot_scanpaths(
-            path.join(self.derivatives_folder_path, subject, session),phase,trial_image_mapper
+            self.derivatives_folder_path / subject / session,phase,trial_image_mapper
         )
 
     def global_plots(self,phase:str,max_workers:int=8,image_path_mapper:dict=None):
-        bids_folders = [folder for folder in listdir(self.derivatives_folder_path) if folder.startswith("sub-")]
+        bids_folders = [folder for folder in self.derivatives_folder_path.iterdir() if folder.name.startswith("sub-") and folder.is_dir()]
         fixations = []
         saccades = []
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             results = executor.map(
                 self.process_session,
                 [
-                    (subject, session,phase,image_path_mapper[subject][session] if image_path_mapper is not None else None)
+                    (subject.name, session.name,phase,image_path_mapper[subject.name][session.name] if image_path_mapper is not None else None)
                     for subject in bids_folders
-                    for session in listdir(path.join(self.derivatives_folder_path, subject))
-                    if session.startswith("ses-")
+                    for session in (self.derivatives_folder_path / subject).iterdir()
+                    if session.name.startswith("ses-") and session.is_dir()
                 ]
             )
 
             for result in results:
                 fixations.append(result[0])
                 saccades.append(result[1])
-        self.plot_multipanel(path.join(self.derivatives_folder_path,self.events_detection_folder,"plots"),pd.concat(fixations),pd.concat(saccades))
+        self.plot_multipanel((self.derivatives_folder_path / self.events_detection_folder / "plots"),pd.concat(fixations),pd.concat(saccades))
 
 
     def scanpath(self,fixations:pd.DataFrame,screen_height:int, screen_width:int,folder_path:str=None,trial_index:int=None,trial_label:str=None,
@@ -111,7 +111,7 @@ class Visualization():
         
         if folder_path:
             scanpath_file_name = 'scanpath' + f'_{trial_index}'*(trial_index is not None) + f'_{trial_label}'*(trial_label is not None) + f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) + '.png'
-            file_path = path.join(folder_path, scanpath_file_name)
+            file_path = folder_path / scanpath_file_name
 
         if all(v is None for v in [trial_index, trial_label, tmin, tmax]): 
             raise ValueError("Either trial_index or trial_label or tmix and tmax must be provided.")
@@ -318,7 +318,7 @@ class Visualization():
         ax.set_aspect('equal')
 
 
-    def plot_multipanel(self,folder_path:str,fixations:pd.DataFrame,saccades:pd.DataFrame, display:bool=True):
+    def plot_multipanel(self,folder_path:Path,fixations:pd.DataFrame,saccades:pd.DataFrame, display:bool=True):
         plt.rcParams.update({'font.size': 12})
         fig, axs = plt.subplots(2, 2, figsize=(12, 7))
         
@@ -328,8 +328,8 @@ class Visualization():
         self.sacc_amplitude(saccades,axs=axs[0, 1])
 
         fig.tight_layout()
-        makedirs(folder_path, exist_ok=True)
-        plt.savefig(path.join(folder_path,'multipanel.png'))
+        folder_path.mkdir(parents=True, exist_ok=True)
+        plt.savefig(folder_path / 'multipanel.png')
         if display:
             plt.show()
         plt.close()
