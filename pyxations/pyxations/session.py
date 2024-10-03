@@ -29,6 +29,9 @@ class Session:
             raise FileNotFoundError(f"Dataset path not found: {self.dataset_path}")
         if not base_path.exists():
             raise FileNotFoundError(f"Session path not found: {base_path}")
+    def __repr__(self):
+      return f"Session('session_id={self.session_id}', subject_id={self.subject_id}, dataset={str(self.dataset_path).split('/')[-1]})"
+
         
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
