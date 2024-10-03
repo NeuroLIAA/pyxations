@@ -30,7 +30,7 @@ class Session:
         if not base_path.exists():
             raise FileNotFoundError(f"Session path not found: {base_path}")
     def __repr__(self):
-      return f"Session('session_id={self.session_id}', subject_id={self.subject_id}, dataset={str(self.dataset_path).split('/')[-1]})"
+      return f"Session('session_id={self.session_id}', subject_id={self.subject_id}, dataset={self.dataset_path.name})"
 
         
     def load_data(self, detection_algorithm: str):
@@ -80,6 +80,7 @@ class Session:
         self.header = pd.read_hdf(header_path)
         self.msg = pd.read_hdf(msg_path)
 
+    # Esta función es para una sesión o para un trial?
     def plot_scanpath(self, **kwargs) -> None:
         events_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / f"{self.detection_algorithm}_events"
         if not events_path.exists():
