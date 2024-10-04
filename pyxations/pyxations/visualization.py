@@ -63,7 +63,7 @@ class Visualization():
             for result in results:
                 fixations.append(result[0])
                 saccades.append(result[1])
-        self.plot_multipanel((self.derivatives_folder_path / self.events_detection_folder / "plots"),pd.concat(fixations),pd.concat(saccades))
+        self.plot_multipanel(pd.concat(fixations),pd.concat(saccades))
 
 
     def scanpath(self,fixations:pd.DataFrame,screen_height:int, screen_width:int,folder_path:str=None,trial_index:int=None,trial_label:str=None,
@@ -318,7 +318,8 @@ class Visualization():
         ax.set_aspect('equal')
 
 
-    def plot_multipanel(self,folder_path:Path,fixations:pd.DataFrame,saccades:pd.DataFrame, display:bool=True):
+    def plot_multipanel(self,fixations:pd.DataFrame,saccades:pd.DataFrame, display:bool=True):
+        folder_path = self.derivatives_folder_path / self.events_detection_folder / "plots"
         plt.rcParams.update({'font.size': 12})
         fig, axs = plt.subplots(2, 2, figsize=(12, 7))
         
