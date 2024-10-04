@@ -7,7 +7,7 @@ class Experiment:
     def __init__(self,dataset_path: str):
         self.dataset_path = Path(dataset_path)
         self.derivatives_path = Path(str(self.dataset_path) + "_derivatives")
-        self.metadata = pd.read_csv(self.dataset_path / "participants.tsv", sep="\t")
+        self.metadata = pd.read_csv(self.dataset_path / "participants.tsv", sep="\t",dtype={"subject_id":str,"old_subject_id":str})
         self.subjects = self.create_subjects()
 
     def get_derivatives_path(self):
@@ -49,6 +49,22 @@ class Experiment:
         vis = Visualization(self.derivatives_path, self.detection_algorithm)
         vis.plot_multipanel(pd.concat(fixations),pd.concat(saccades))
 
+    def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
+        for subject in self.subjects:
+            subject.filter_fixations(min_fix_dur, max_fix_dur)
+
+    def filter_saccades(self, max_sacc_dur=100):
+        for subject in self.subjects:
+            subject.filter_saccades(max_sacc_dur)
+
+    def drop_trials_with_nan_threshold(self, threshold=0.5):
+        for subject in self.subjects:
+            percentage = subject.drop_trials_with_nan_threshold(threshold)
+            if percentage > threshold:
+                # Remove from the list of subjects and delete the subject
+                self.subjects.remove(subject)
+                del subject
+
 
 class Subject:
 
@@ -67,7 +83,8 @@ class Subject:
 
     def create_sessions(self):
         sessions = []
-        for session_id in self.experiment.metadata["session_id"]:
+        for session_folder in self.get_subject_path().glob("ses-*"):
+            session_id = session_folder.name.split("-")[-1]
             sessions.append(Session(session_id, self))
         return sessions
     
@@ -96,7 +113,32 @@ class Subject:
     
     def get_saccades(self):
         return [session.get_saccades() for session in self.sessions]
+    
+    def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
+        for session in self.sessions:
+            session.filter_fixations(min_fix_dur, max_fix_dur)
 
+    def filter_saccades(self, max_sacc_dur=100):
+        for session in self.sessions:
+            session.filter_saccades(max_sacc_dur)
+
+    def drop_trials_with_nan_threshold(self, threshold=0.5):
+        total_amount = len(self.sessions)
+        bad_sessions = 0
+        for session in self.sessions:
+            percentage = session.drop_trials_with_nan_threshold(threshold)
+            if percentage > threshold:
+                # Remove from the list of sessions and delete the session
+                self.sessions.remove(session)
+                del session
+                bad_sessions += 1
+        percentage = bad_sessions / total_amount
+        if percentage > threshold:
+            # Remove all sessions from the list of subjects
+            for session in self.sessions:
+                self.sessions.remove(session)
+                del session
+        return percentage
 
 class Session:
     """
@@ -117,14 +159,37 @@ class Session:
         self.session_id = session_id
         self.session_path = subject.get_subject_path_derivatives() / f"ses-{self.session_id}"
         self.behavior_path = subject.get_subject_path() / f"ses-{self.session_id}" / "behavioral"
-        self.events_path = self.session_path / f"{self.detection_algorithm}_events"
+
 
         if not self.session_path.exists():
             raise FileNotFoundError(f"Session path not found: {self.session_path}")
             
     def __repr__(self):
-      return f"'Session = {self.session_id}'," + self.subject.__repr__() 
+      return f"'Session = {self.session_id}'," + self.subject.__repr__()
     
+    def drop_trials_with_nan_threshold(self, threshold=0.5):
+        """Drop trials with a percentage of NaN values above a certain threshold.
+
+        Args:
+            threshold (float): The threshold percentage of NaN values.
+
+        Returns:
+            None
+        """
+        # Group samples by trial_number and count the percentage of NaN values
+        nan_percentage = self.samples.groupby("trial_number").apply(lambda x: x.isna().sum().sum() / x.size)
+        # Get the trial indices with NaN percentage above the threshold
+        bad_trials = nan_percentage[nan_percentage > threshold].index
+        # Drop the bad trials
+        total_trials = self.samples["trial_number"].nunique()
+        self.samples = self.samples[~self.samples["trial_number"].isin(bad_trials)]
+        self.fix = self.fix[~self.fix["trial_number"].isin(bad_trials)]
+        self.sacc = self.sacc[~self.sacc["trial_number"].isin(bad_trials)]
+        if self.blink is not None:
+            self.blink = self.blink[~self.blink["trial_number"].isin(bad_trials)]
+        # Return the percentage of bad trials
+        return len(bad_trials) / total_trials
+        
     
     def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
         """Filter fixation data by duration and bad data exclusion.
@@ -135,7 +200,7 @@ class Session:
         Returns:
             None
         """
-        self.fix = self.fix.loc[(self.fix["duration"] > min_fix_dur) & (self.fix["duration"] < max_fix_dur) & (self.fix["bad"] == False) & (self.fix["trial_index"] > -1)].reset_index(drop=True)
+        self.fix = self.fix.loc[(self.fix["duration"] > min_fix_dur) & (self.fix["duration"] < max_fix_dur) & (self.fix["bad"] == False) & (self.fix["trial_number"] > -1)].reset_index(drop=True)
 
     def filter_saccades(self, max_sacc_dur=100):
         """Filter saccades data by duration and bad data exclusion.
@@ -146,11 +211,12 @@ class Session:
         Returns:
             None
         """
-        self.sacc = self.sacc.loc[(self.sacc["duration"] < max_sacc_dur) & (self.sacc["bad"] == False) & (self.sacc["trial_index"] > -1)].reset_index(drop=True)
+        self.sacc = self.sacc.loc[(self.sacc["duration"] < max_sacc_dur) & (self.sacc["bad"] == False) & (self.sacc["trial_number"] > -1)].reset_index(drop=True)
 
         
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
+        self.events_path = self.session_path / f"{self.detection_algorithm}_events"
 
         if self.behavior_path.exists() and len(list(self.behavior_path.glob("*.csv"))) == 1:
             behavior_data = pd.read_csv(next(self.behavior_path.glob("*.csv")))
@@ -206,4 +272,4 @@ class Session:
             raise FileNotFoundError(f"Algorithm events path not found: {self.events_path}")
 
         vis = Visualization(self.events_path, self.detection_algorithm)
-        vis.scanpath(fixations=self.fix, saccades=self.sacc, samples=self.samples, screen_height=1080, screen_width=1920 , trial_index=trial,img_path=img_path, **kwargs)
+        vis.scanpath(fixations=self.fix, saccades=self.sacc, samples=self.samples, screen_height=1080, screen_width=1920 , trial_number=trial,img_path=img_path, **kwargs)

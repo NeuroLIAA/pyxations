@@ -71,7 +71,7 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
         None
     """
     # Create a metadata tsv file
-    metadata = pd.DataFrame(columns=['subject_ids', 'old_subject_ids'])
+    metadata = pd.DataFrame(columns=['subject_id', 'old_subject_id'])
     files_folder_path = Path(files_folder_path)
     # List all file paths in the folder
     file_paths = []
