@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 import shutil
 import subprocess
 import numpy as np
@@ -71,18 +71,18 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
     Returns:
         None
     """
-
+    files_folder_path = Path(files_folder_path)
     # List all file paths in the folder
     file_paths = []
-    for root, _, files in os.walk(files_folder_path):
-        for file in files:
-            file_paths.append(os.path.join(root, file))
+    for file_path in files_folder_path.rglob('*'):  # Recursively go through all files
+        if file_path.is_file():
+            file_paths.append(file_path)
     
-    file_paths = [file for file in file_paths if file.lower().endswith(".edf") or file.lower().endswith(".bdf") or file.lower().endswith(".log") or file.lower().endswith(".csv")]
+    file_paths = [file for file in file_paths if file.suffix.lower() == '.edf' or file.suffix.lower() == '.bdf' or file.suffix.lower() == '.log' or file.suffix.lower() == '.csv']
 
-    bids_folder_path = os.path.join(target_folder_path, dataset_name)
+    bids_folder_path = Path(target_folder_path) / dataset_name
 
-    subj_ids = list(set([os.path.basename(file).split("_")[0] for file in file_paths if file.lower().endswith(".edf") or file.lower().endswith(".bdf")]))
+    subj_ids = list(set([Path(file).name.split("_")[0] for file in file_paths if file.suffix.lower() == '.edf' or file.suffix.lower() == '.bdf']))
 
     # If all of the subjects have numerical IDs, sort them numerically, else sort them alphabetically
     if all(subject_id.isdigit() for subject_id in subj_ids):
@@ -95,7 +95,7 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
     for subject_id in new_subj_ids:
         old_subject_id = subj_ids[int(subject_id) - 1]
         for file in file_paths:
-            file_name = os.path.basename(file)
+            file_name = Path(file).name
             file_lower = file_name.lower()
             session_id = "_".join("".join(file_name.split(".")[:-1]).split("_")[1:session_substrings+1])
             if file_lower.endswith(".edf") and file_name.split("_")[0] == old_subject_id:
@@ -107,10 +107,10 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
     return bids_folder_path
 
 def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id,tag):
-    session_folder_path = os.path.join(bids_folder_path, "sub-" + subject_id, "ses-" + session_id,tag)
-    os.makedirs(session_folder_path, exist_ok=True)
-    new_file_path = os.path.join(session_folder_path, os.path.basename(file_path))
-    if not os.path.exists(new_file_path):
+    session_folder_path = bids_folder_path / ("sub-" + subject_id) / ("ses-" + session_id) / tag
+    session_folder_path.mkdir(parents=True, exist_ok=True)
+    new_file_path = session_folder_path / file_path.name
+    if not new_file_path.exists():
         shutil.copy(file_path, session_folder_path)
     
 
@@ -134,12 +134,12 @@ def convert_edf_to_ascii(edf_file_path, output_dir):
         raise ValueError("Output directory must be specified.")
 
     # Generate output file path
-    edf_file_name = os.path.basename(edf_file_path)
-    ascii_file_name = os.path.splitext(edf_file_name)[0] + ".asc"
-    ascii_file_path = os.path.join(output_dir, ascii_file_name)
+    edf_file_name = edf_file_path.name
+    ascii_file_name = Path(edf_file_name).with_suffix('.asc')
+    ascii_file_path = output_dir / ascii_file_name
 
     # Run edf2asc command with the -failsafe flag, only run it if the file does not already exist
-    if not os.path.exists(ascii_file_path):
+    if not ascii_file_path.exists():
         subprocess.run(["edf2asc", "-failsafe", edf_file_path, ascii_file_path])
 
     return ascii_file_path
@@ -152,7 +152,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
 
     # Check if all files exist, to avoid unnecessary reprocessing
     existing_files = all([
-        os.path.exists(os.path.join(session_folder_path, file_name)) 
+        (session_folder_path / file_name).exists()
         for file_name in ['header.hdf5', 'msg.hdf5', 'calib.hdf5', 'samples.hdf5']
     ])
     if existing_files and not overwrite:
@@ -324,48 +324,48 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_
                             'saccades_direction': {},})
 
     if not keep_ascii:
-        os.remove(ascii_file_path)
+        ascii_file_path.unlink(missing_ok=True)
 
     # Save DataFrames to disk in one go to minimize memory usage during processing
-    dfHeader.to_hdf(os.path.join(session_folder_path, 'header.hdf5'), key='header', mode='w')
-    dfMsg.to_hdf(os.path.join(session_folder_path, 'msg.hdf5'), key='msg', mode='w')
-    dfCalib.to_hdf(os.path.join(session_folder_path, 'calib.hdf5'), key='calib', mode='w')
-    dfSamples.to_hdf(os.path.join(session_folder_path, 'samples.hdf5'), key='samples', mode='w')
-    dfBlink.to_hdf(os.path.join(session_folder_path, 'eyelink_events', 'blink.hdf5'), key='blink', mode='w')
-    dfFix.to_hdf(os.path.join(session_folder_path, f'{detection_algorithm}_events', 'fix.hdf5'), key='fix', mode='w')
-    dfSacc.to_hdf(os.path.join(session_folder_path, f'{detection_algorithm}_events', 'sacc.hdf5'), key='sacc', mode='w')
+    dfHeader.to_hdf((session_folder_path / 'header.hdf5'), key='header', mode='w')
+    dfMsg.to_hdf((session_folder_path / 'msg.hdf5'), key='msg', mode='w')
+    dfCalib.to_hdf((session_folder_path / 'calib.hdf5'), key='calib', mode='w')
+    dfSamples.to_hdf((session_folder_path / 'samples.hdf5'), key='samples', mode='w')
+    dfBlink.to_hdf((session_folder_path / 'eyelink_events' / 'blink.hdf5'), key='blink', mode='w')
+    dfFix.to_hdf((session_folder_path / f'{detection_algorithm}_events' / 'fix.hdf5'), key='fix', mode='w')
+    dfSacc.to_hdf((session_folder_path / f'{detection_algorithm}_events' / 'sacc.hdf5'), key='sacc', mode='w')
 
 
 
-def process_session(bids_dataset_folder, subject, session, msg_keywords,detection_algorithm,derivatives_folder,force_best_eye,keep_ascii, overwrite, **kwargs):
-    eye_tracking_data_path = os.path.join(bids_dataset_folder, subject, session, 'ET')
-    edf_files = [file for file in os.listdir(eye_tracking_data_path) if file.lower().endswith(".edf")]
+def process_session(eye_tracking_data_path, msg_keywords,detection_algorithm,session_folder_path,force_best_eye,keep_ascii, overwrite, **kwargs):
+    edf_files = [file for file in eye_tracking_data_path.iterdir() if file.suffix.lower() == '.edf']
     if len(edf_files) > 1:
         print(f"More than one EDF file found in {eye_tracking_data_path}. Skipping folder.")
         return
-
-
-    edf_file_path = os.path.join(eye_tracking_data_path, edf_files[0])
-    session_folder_path = os.path.join(derivatives_folder, subject, session)
-    os.makedirs(os.path.join(session_folder_path, 'eyelink_events'), exist_ok=True)
+    edf_file_path = edf_files[0]
+    (session_folder_path / 'eyelink_events').mkdir(parents=True, exist_ok=True)
 
     parse_edf_eyelink(edf_file_path, msg_keywords,detection_algorithm,session_folder_path,force_best_eye,keep_ascii, overwrite, **kwargs)
 
 def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm='eyelink', num_processes=4, force_best_eye=True, keep_ascii=True, overwrite=False, **kwargs):
     derivatives_folder = bids_dataset_folder + "_derivatives"
-    os.makedirs(derivatives_folder, exist_ok=True)
+    derivatives_folder = Path(derivatives_folder)
+    bids_dataset_folder = Path(bids_dataset_folder)
+    derivatives_folder.mkdir(exist_ok=True)
 
-    bids_folders = [folder for folder in os.listdir(bids_dataset_folder) if folder.startswith("sub-")]
+
+    bids_folders = [folder for folder in bids_dataset_folder.iterdir() if folder.is_dir() and folder.name.startswith("sub-")]
     if detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and detection_algorithm != 'eyelink':
         raise ValueError(f"Detection algorithm {detection_algorithm} not found.")
 
 
 
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
+
         futures = [
-            executor.submit(process_session, bids_dataset_folder, subject, session, msg_keywords, detection_algorithm, derivatives_folder, force_best_eye, keep_ascii, overwrite, **kwargs)
+            executor.submit(process_session, session / "ET", msg_keywords, detection_algorithm, derivatives_folder / subject.name / session.name, force_best_eye, keep_ascii, overwrite, **kwargs)
             for subject in bids_folders
-            for session in os.listdir(os.path.join(bids_dataset_folder, subject)) if session.startswith("ses-")
+            for session in (bids_dataset_folder / subject).iterdir() if session.name.startswith("ses-") and (bids_dataset_folder / subject / session).is_dir()
         ]
 
         for future in futures:

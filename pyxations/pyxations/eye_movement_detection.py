@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import math
-import os
 from tqdm import tqdm
 from abc import ABC, abstractmethod
 from remodnav.clf import EyegazeClassifier
@@ -18,7 +17,7 @@ class EyeMovementDetection(ABC):
 class RemodnavDetection(EyeMovementDetection):
     def __init__(self, session_folder_path,samples):
         self.session_folder_path = session_folder_path
-        self.out_folder = os.path.join(session_folder_path, 'remodnav_events')
+        self.out_folder = (session_folder_path / 'remodnav_events')
         self.samples = samples
     
 
@@ -67,7 +66,7 @@ class RemodnavDetection(EyeMovementDetection):
         """
 
         # Move eye data, detections file and image to subject results directory
-        os.makedirs(self.out_folder, exist_ok=True)
+        self.out_folder.mkdir(parents=True, exist_ok=True)
 
         # Dictionaries to store fixations and saccades DataFrames
         fixations = []

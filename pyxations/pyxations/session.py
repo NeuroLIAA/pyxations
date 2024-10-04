@@ -31,7 +31,7 @@ class Session:
             raise FileNotFoundError(f"Session path not found: {base_path}")
             
     def __repr__(self):
-      return f"Session('session_id={self.session_id}', subject_id={self.subject_id}, dataset={str(self.dataset_path).split('/')[-1]})"
+      return f"Session('session_id={self.session_id}', subject_id={self.subject_id}, dataset={self.dataset_path.name})"
     
     
     def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
