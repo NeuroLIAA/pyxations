@@ -64,6 +64,10 @@ class Experiment:
                 # Remove from the list of subjects and delete the subject
                 self.subjects.remove(subject)
                 del subject
+    
+    def plot_scanpaths(self):
+        for subject in self.subjects:
+            subject.plot_scanpaths()
 
 
 class Subject:
@@ -139,6 +143,10 @@ class Subject:
                 self.sessions.remove(session)
                 del session
         return percentage
+    
+    def plot_scanpaths(self):
+        for session in self.sessions:
+            session.plot_scanpaths()
 
 class Session:
     """
@@ -266,6 +274,12 @@ class Session:
     
     def get_saccades(self):
         return self.sacc
+    
+    def plot_scanpaths(self):
+        valid_trials = self.samples["trial_number"].unique()
+        valid_trials = valid_trials[valid_trials != -1]
+        for trial in valid_trials:
+            self.plot_scanpath(trial)
 
     def plot_scanpath(self,trial,img_path=None, **kwargs) -> None:
         if not self.events_path.exists():
