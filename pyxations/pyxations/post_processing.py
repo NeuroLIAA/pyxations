@@ -58,12 +58,15 @@ class Experiment:
             subject.filter_saccades(max_sacc_dur)
 
     def drop_trials_with_nan_threshold(self, threshold=0.5):
+        bad_trials_total= {}
         for subject in self.subjects:
-            percentage = subject.drop_trials_with_nan_threshold(threshold)
-            if percentage > threshold:
+            bad_sessions,total_sessions,bad_trials = subject.drop_trials_with_nan_threshold(threshold)
+            if bad_sessions/total_sessions > threshold:
                 # Remove from the list of subjects and delete the subject
                 self.subjects.remove(subject)
                 del subject
+            bad_trials_total[subject.subject_id] = bad_trials
+        return bad_trials_total
     
     def plot_scanpaths(self):
         for subject in self.subjects:
@@ -129,20 +132,22 @@ class Subject:
     def drop_trials_with_nan_threshold(self, threshold=0.5):
         total_amount = len(self.sessions)
         bad_sessions = 0
+        bad_trials = {}
         for session in self.sessions:
-            percentage = session.drop_trials_with_nan_threshold(threshold)
-            if percentage > threshold:
+            bad_trials, total_trials = session.drop_trials_with_nan_threshold(threshold)
+            if bad_trials/total_trials > threshold:
                 # Remove from the list of sessions and delete the session
                 self.sessions.remove(session)
                 del session
                 bad_sessions += 1
-        percentage = bad_sessions / total_amount
+            bad_trials[session.session_id] = (bad_trials, total_trials)
+        percentage = bad_sessions/total_amount
         if percentage > threshold:
             # Remove all sessions from the list of subjects
             for session in self.sessions:
                 self.sessions.remove(session)
                 del session
-        return percentage
+        return bad_sessions, total_amount, bad_trials
     
     def plot_scanpaths(self):
         for session in self.sessions:
@@ -196,7 +201,7 @@ class Session:
         if self.blink is not None:
             self.blink = self.blink[~self.blink["trial_number"].isin(bad_trials)]
         # Return the percentage of bad trials
-        return len(bad_trials) / total_trials
+        return len(bad_trials), total_trials
         
     
     def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
