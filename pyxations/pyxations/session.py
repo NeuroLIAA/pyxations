@@ -4,7 +4,7 @@ from .visualization import Visualization
 
 class Experiment:
 
-    def __init__(self,dataset_path: str, detection_algorithm: str):
+    def __init__(self,dataset_path: str):
         self.dataset_path = Path(dataset_path)
         self.derivatives_path = Path(str(self.dataset_path) + "_derivatives")
         self.metadata = pd.read_csv(self.dataset_path / "participants.tsv", sep="\t")
