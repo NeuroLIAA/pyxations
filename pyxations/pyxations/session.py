@@ -7,7 +7,7 @@ class Session:
     Initialize a Session instance.
 
     Args:
-        dataset_path (str): The path to the dataset directory.
+        derivatives_path (str): The path to the dataset directory.
         subject_id (str): The subject's ID.
         session_id (str): The session ID.
 
@@ -15,23 +15,26 @@ class Session:
         FileNotFoundError: If the dataset path or session path does not exist.
     """
     
-    def __init__(self, dataset_path: str, subject_id: str, session_id: str) -> None:
-        self.dataset_path = Path(dataset_path)
+    def __init__(self, derivatives_path: str, subject_id: str, session_id: str) -> None:
+        self.derivatives_path = Path(derivatives_path)
         self.subject_id = subject_id
         self.session_id = session_id
-        self.session_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}"
-        self.behavior_path = Path(str(self.dataset_path).rsplit('_',1)[0]) / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / "behavioral"
+        self.session_path = self.derivatives_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}"
+        self.dataset_path = Path(str(self.derivatives_path).rsplit('_',1)[0])
+        self.behavior_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / "behavioral"
+        metadata = pd.read_csv(self.dataset_path / "participants.tsv", sep="\t")
+        self.old_subject_id = metadata.loc[metadata["subject_id"] == self.subject_id, "old_subject_id"].values[0]
         
         # Check if the dataset path and session folder exist
-        base_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}"
+        base_path = self.derivatives_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}"
         
-        if not self.dataset_path.exists():
-            raise FileNotFoundError(f"Dataset path not found: {self.dataset_path}")
+        if not self.derivatives_path.exists():
+            raise FileNotFoundError(f"Dataset path not found: {self.derivatives_path}")
         if not base_path.exists():
             raise FileNotFoundError(f"Session path not found: {base_path}")
             
     def __repr__(self):
-      return f"Session('session_id={self.session_id}', subject_id={self.subject_id}, dataset={self.dataset_path.name})"
+      return f"Session('session_id={self.session_id}', subject_id={self.subject_id}, dataset={self.derivatives_path.name})"
     
     
     def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
@@ -60,9 +63,11 @@ class Session:
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
         events_path =  self.session_path / f"{self.detection_algorithm}_events"
-        if self.behavior_path.exists() and list(self.behavior_path.glob("*.csv")):
+        if self.behavior_path.exists() and len(list(self.behavior_path.glob("*.csv"))) == 1:
             behavior_data = pd.read_csv(next(self.behavior_path.glob("*.csv")))
             self.behavior_data = behavior_data
+        elif self.behavior_path.exists() and len(list(self.behavior_path.glob("*.csv"))) > 1:
+            raise ValueError(f"Multiple behavior files found in {self.behavior_path}. Please ensure only one behavior file is present.")
     
         # Check if paths and files exist
         if not events_path.exists():
@@ -102,7 +107,7 @@ class Session:
         self.msg = pd.read_hdf(msg_path)
 
     def plot_scanpath(self,trial,img_path=None, **kwargs) -> None:
-        events_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / f"{self.detection_algorithm}_events"
+        events_path = self.derivatives_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / f"{self.detection_algorithm}_events"
         if not events_path.exists():
             raise FileNotFoundError(f"Algorithm events path not found: {events_path}")
 

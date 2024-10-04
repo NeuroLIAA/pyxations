@@ -7,7 +7,6 @@ from concurrent.futures import ProcessPoolExecutor
 from .pre_processing import PreProcessing
 from .eye_movement_detection import RemodnavDetection
 import inspect
-import json
 
 
 EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection}
@@ -71,8 +70,8 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
     Returns:
         None
     """
-    # Create a metadata json file
-    metadata = {"subject_ids": {}}
+    # Create a metadata tsv file
+    metadata = pd.DataFrame(columns=['subject_ids', 'old_subject_ids'])
     files_folder_path = Path(files_folder_path)
     # List all file paths in the folder
     file_paths = []
@@ -106,10 +105,9 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
                 move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'EEG')
             if (file_lower.endswith(".log") or file_lower.endswith(".csv")) and file_name.split("_")[0] == old_subject_id:                
                 move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'behavioral')
-        metadata['subject_ids'][subject_id] = old_subject_id
-    # Save metadata to json file
-    with open(bids_folder_path / 'metadata.json', 'w') as f:
-        json.dump(metadata, f, indent=4)
+        metadata.loc[len(metadata.index)] = [subject_id, old_subject_id]
+    # Save metadata to tsv file
+    metadata.to_csv(bids_folder_path / "participants.tsv", sep="\t", index=False)
     return bids_folder_path
 
 def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id,tag):
