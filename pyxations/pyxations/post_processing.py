@@ -72,6 +72,20 @@ class Experiment:
         for subject in self.subjects:
             subject.plot_scanpaths()
 
+    def get_subject(self,subject_id):
+        for subject in self.subjects:
+            if subject.get_id() == subject_id:
+                return subject
+        return None
+    
+    def get_session(self,subject_id,session_id):
+        subject = self.get_subject(subject_id)
+        if subject is not None:
+            for session in subject:
+                if session.get_id() == session_id:
+                    return session
+        return None
+
 
 class Subject:
 
@@ -80,6 +94,9 @@ class Subject:
         self.old_subject_id = old_subject_id
         self.experiment = experiment
         self.sessions = self.create_sessions()
+
+    def get_id(self):
+        return self.subject_id
 
     def get_subject_path_derivatives(self):
         return self.experiment.get_derivatives_path() / f"sub-{self.subject_id}"
@@ -105,7 +122,7 @@ class Subject:
         return len(self.sessions)
     
     def __repr__(self):
-        return f"'Subject = {self.subject_id}'," + self.experiment.__repr__()
+        return f"Subject = '{self.subject_id}', " + self.experiment.__repr__()
     
     def __next__(self):
         return next(self.sessions)
@@ -132,22 +149,22 @@ class Subject:
     def drop_trials_with_nan_threshold(self, threshold=0.5):
         total_amount = len(self.sessions)
         bad_sessions = 0
-        bad_trials = {}
+        bad_trials_subject = {}
         for session in self.sessions:
             bad_trials, total_trials = session.drop_trials_with_nan_threshold(threshold)
-            if bad_trials/total_trials > threshold:
+            if len(bad_trials)/total_trials > threshold:
                 # Remove from the list of sessions and delete the session
                 self.sessions.remove(session)
                 del session
                 bad_sessions += 1
-            bad_trials[session.session_id] = (bad_trials, total_trials)
+            bad_trials_subject[session.session_id] = {"bad_trials":bad_trials.to_list(), "total_trials":total_trials}
         percentage = bad_sessions/total_amount
         if percentage > threshold:
             # Remove all sessions from the list of subjects
             for session in self.sessions:
                 self.sessions.remove(session)
                 del session
-        return bad_sessions, total_amount, bad_trials
+        return bad_sessions, total_amount, bad_trials_subject
     
     def plot_scanpaths(self):
         for session in self.sessions:
@@ -178,7 +195,7 @@ class Session:
             raise FileNotFoundError(f"Session path not found: {self.session_path}")
             
     def __repr__(self):
-      return f"'Session = {self.session_id}'," + self.subject.__repr__()
+      return f"Session = '{self.session_id}', " + self.subject.__repr__()
     
     def drop_trials_with_nan_threshold(self, threshold=0.5):
         """Drop trials with a percentage of NaN values above a certain threshold.
@@ -193,6 +210,7 @@ class Session:
         nan_percentage = self.samples.groupby("trial_number").apply(lambda x: x.isna().sum().sum() / x.size)
         # Get the trial indices with NaN percentage above the threshold
         bad_trials = nan_percentage[nan_percentage > threshold].index
+
         # Drop the bad trials
         total_trials = self.samples["trial_number"].nunique()
         self.samples = self.samples[~self.samples["trial_number"].isin(bad_trials)]
@@ -200,10 +218,12 @@ class Session:
         self.sacc = self.sacc[~self.sacc["trial_number"].isin(bad_trials)]
         if self.blink is not None:
             self.blink = self.blink[~self.blink["trial_number"].isin(bad_trials)]
-        # Return the percentage of bad trials
-        return len(bad_trials), total_trials
+        # Return a list with the "trial_number" of the bad trials and the total amount of trials
+        return bad_trials, total_trials
         
-    
+    def get_id(self):    
+        return self.session_id
+
     def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
         """Filter fixation data by duration and bad data exclusion.
 
