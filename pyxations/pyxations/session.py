@@ -20,7 +20,7 @@ class Session:
         self.subject_id = subject_id
         self.session_id = session_id
         self.session_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}"
-        
+        self.behavior_path = Path(str(self.dataset_path).rsplit('_',1)[0]) / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / "behavioral"
         
         # Check if the dataset path and session folder exist
         base_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}"
@@ -29,16 +29,39 @@ class Session:
             raise FileNotFoundError(f"Dataset path not found: {self.dataset_path}")
         if not base_path.exists():
             raise FileNotFoundError(f"Session path not found: {base_path}")
+            
     def __repr__(self):
       return f"Session('session_id={self.session_id}', subject_id={self.subject_id}, dataset={str(self.dataset_path).split('/')[-1]})"
+    
+    
+    def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
+        """Filter fixation data by duration and bad data exclusion.
+
+        Args:
+            Session
+
+        Returns:
+            None
+        """
+        self.fix = self.fix.loc[(self.fix["duration"] > min_fix_dur) & (self.fix["duration"] < max_fix_dur) & (self.fix["bad"] == False)].reset_index(drop=True)
+
+    def filter_saccades(self, max_sacc_dur=100):
+        """Filter saccades data by duration and bad data exclusion.
+
+        Args:
+            Session
+
+        Returns:
+            None
+        """
+        self.sacc = self.sacc.loc[(self.sacc["duration"] < max_sacc_dur) & (self.sacc["bad"] == False)].reset_index(drop=True)
 
         
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
         events_path =  self.session_path / f"{self.detection_algorithm}_events"
-        behavior_path = Path(str(self.dataset_path).rsplit('_',1)[0]) / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / "behavioral"
-        if behavior_path.exists() and list(behavior_path.glob("*.csv")):
-            behavior_data = pd.read_csv(next(behavior_path.glob("*.csv")))
+        if self.behavior_path.exists() and list(self.behavior_path.glob("*.csv")):
+            behavior_data = pd.read_csv(next(self.behavior_path.glob("*.csv")))
             self.behavior_data = behavior_data
     
         # Check if paths and files exist
@@ -61,8 +84,6 @@ class Session:
             raise FileNotFoundError(f"Fixations file not found: {fix_path}")
         if not sacc_path.exists():
             raise FileNotFoundError(f"Saccades file not found: {sacc_path}")
-        if not blink_path.exists():
-            raise FileNotFoundError(f"Blinks file not found: {blink_path}")
         if not calib_path.exists():
             raise FileNotFoundError(f"Calibration file not found: {calib_path}")
         if not header_path.exists():
@@ -80,10 +101,10 @@ class Session:
         self.header = pd.read_hdf(header_path)
         self.msg = pd.read_hdf(msg_path)
 
-    def plot_scanpath(self, **kwargs) -> None:
+    def plot_scanpath(self,trial,img_path=None, **kwargs) -> None:
         events_path = self.dataset_path / f"sub-{self.subject_id}" / f"ses-{self.session_id}" / f"{self.detection_algorithm}_events"
         if not events_path.exists():
             raise FileNotFoundError(f"Algorithm events path not found: {events_path}")
 
         vis = Visualization(events_path, self.detection_algorithm)
-        vis.scanpath(fixations=self.fix, saccades=self.sacc, samples=self.samples, screen_height=1080, screen_width=1920, **kwargs)
+        vis.scanpath(fixations=self.fix, saccades=self.sacc, samples=self.samples, screen_height=1080, screen_width=1920 , trial_index=trial,img_path=img_path, **kwargs)
