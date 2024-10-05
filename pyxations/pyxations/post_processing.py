@@ -42,12 +42,14 @@ class Experiment:
         for subject in self.subjects:
             subject.load_data(detection_algorithm)
 
-    def plot_multipanel(self):
+    def plot_multipanel(self,phase,display):
         fixations = pd.concat(subject.get_fixations() for subject in self.subjects)
         saccades = pd.concat(subject.get_saccades() for subject in self.subjects)
+        fixations = fixations[fixations["phase"] == phase]
+        saccades = saccades[saccades["phase"] == phase]
 
         vis = Visualization(self.derivatives_path, self.detection_algorithm)
-        vis.plot_multipanel(pd.concat(fixations),pd.concat(saccades))
+        vis.plot_multipanel(pd.concat(fixations),pd.concat(saccades),display)
 
     def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
         for subject in self.subjects:
@@ -309,6 +311,5 @@ class Session:
     def plot_scanpath(self,trial,img_path=None, **kwargs) -> None:
         if not self.events_path.exists():
             raise FileNotFoundError(f"Algorithm events path not found: {self.events_path}")
-
         vis = Visualization(self.events_path, self.detection_algorithm)
         vis.scanpath(fixations=self.fix, saccades=self.sacc, samples=self.samples, screen_height=1080, screen_width=1920 , trial_number=trial,img_path=img_path, **kwargs)

@@ -107,7 +107,7 @@ class Visualization():
         """
         plot_saccades = not saccades is None
         plot_samples = not samples is None
-
+        # TODO: do this for every phase in the trials
         
         if folder_path:
             scanpath_file_name = 'scanpath' + f'_{trial_index}'*(trial_index is not None) + f'_{trial_label}'*(trial_label is not None) + f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) + '.png'
