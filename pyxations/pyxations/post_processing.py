@@ -1,6 +1,7 @@
 from pathlib import Path
 import pandas as pd
 from .visualization import Visualization
+from concurrent.futures import ProcessPoolExecutor
 
 class Experiment:
 
@@ -70,8 +71,20 @@ class Experiment:
         return bad_trials_total
     
     def plot_scanpaths(self):
+        with ProcessPoolExecutor() as executor:
+            futures = [executor.submit(subject.plot_scanpaths) for subject in self.subjects]
+            for future in futures:
+                future.result()
+
+    def get_rts(self):
+        rts = []
         for subject in self.subjects:
-            subject.plot_scanpaths()
+            df = subject.get_rts()
+            # Add subject to df
+            df["subject_id"] = subject.get_id()
+            rts.append(df)
+        return pd.concat(rts)
+        
 
     def get_subject(self,subject_id):
         for subject in self.subjects:
@@ -171,6 +184,15 @@ class Subject:
         for session in self.sessions:
             session.plot_scanpaths()
 
+    def get_rts(self):
+        rts = []
+        for session in self.sessions:
+            df = session.get_rts()
+            # Add session to df
+            df["session_id"] = session.get_id()
+            rts.append(df)
+        return pd.concat(rts)
+
 class Session:
     """
     Initialize a Session instance.
@@ -207,6 +229,7 @@ class Session:
         Returns:
             None
         """
+        self.save_rts()
         # Group samples by trial_number and count the percentage of NaN values
         nan_percentage = self.samples.groupby("trial_number").apply(lambda x: x.isna().sum().sum() / x.size)
         # Get the trial indices with NaN percentage above the threshold
@@ -246,6 +269,22 @@ class Session:
             None
         """
         self.sacc = self.sacc.loc[(self.sacc["duration"] < max_sacc_dur) & (self.sacc["bad"] == False) & (self.sacc["trial_number"] > -1)].reset_index(drop=True)
+
+    def save_rts(self):
+        if hasattr(self, "rts"):
+            return
+        # Get samples with trial_number > -1 and phase != "", group by "trial_number" and "phase" and get the last - first timestamp of each trial and phase
+        rts = self.samples.loc[(self.samples["trial_number"] > -1) & (self.samples["phase"] != "")].groupby(["trial_number","phase"])["tSample"].agg(lambda x: x.iloc[-1] - x.iloc[0])
+        # Rename the column to rt
+        self.rts = rts.reset_index().rename(columns={"tSample":"rt"})
+
+    def get_rts(self):
+        # if rts is not an attribute, save it
+        if not hasattr(self, "rts"):
+            self.save_rts()
+
+        return self.rts
+
 
         
     def load_data(self, detection_algorithm: str):
