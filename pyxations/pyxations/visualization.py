@@ -15,57 +15,6 @@ class Visualization():
             raise ValueError(f"Detection algorithm {events_detection_algorithm} not found.")
         self.events_detection_folder = Path(events_detection_algorithm+'_events')
 
-    def get_data_and_plot_scanpaths(self,session_folder_path:Path,phase:str,trial_image_mapper:dict=None):
-        header = pd.read_hdf(session_folder_path /'header.hdf5')
-        screen_size = header['line'].iloc[-1].split()
-        screen_height = int(screen_size[-1])
-        screen_width = int(screen_size[-2])
-        samples = pd.read_hdf(session_folder_path / 'samples.hdf5')
-        fixations = pd.read_hdf(session_folder_path / self.events_detection_folder / 'fix.hdf5')
-        saccades = pd.read_hdf(session_folder_path / self.events_detection_folder / 'sacc.hdf5')
-        samples = samples[samples['phase'] == phase]
-        samples = samples[samples['trial_number'] != -1]
-        samples = samples[samples['bad'] == False]
-        fixations = fixations[fixations['phase'] == phase]
-        fixations = fixations[fixations['trial_number'] != -1]
-        fixations = fixations[fixations['bad'] == False]
-        saccades = saccades[saccades['phase'] == phase]
-        saccades = saccades[saccades['trial_number'] != -1]
-        saccades = saccades[saccades['bad'] == False]
-        unique_trials = fixations['trial_number'].unique()
-        folder_path = session_folder_path / self.events_detection_folder / 'plots'
-        folder_path.mkdir(parents=True, exist_ok=True)
-        for trial in unique_trials:
-            self.scanpath(fixations,screen_height,screen_width,folder_path,trial_index=trial,saccades=saccades,samples=samples,img_path=trial_image_mapper[trial] if trial_image_mapper is not None else None, display=False)
-        return fixations[['duration']],saccades[['ampDeg','vPeak','deg','dir']]
-    
-    def process_session(self, session_info):
-        subject, session,phase, trial_image_mapper = session_info
-        return self.get_data_and_plot_scanpaths(
-            self.derivatives_folder_path / subject / session,phase,trial_image_mapper
-        )
-
-    def global_plots(self,phase:str,max_workers:int=8,image_path_mapper:dict=None):
-        bids_folders = [folder for folder in self.derivatives_folder_path.iterdir() if folder.name.startswith("sub-") and folder.is_dir()]
-        fixations = []
-        saccades = []
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            results = executor.map(
-                self.process_session,
-                [
-                    (subject.name, session.name,phase,image_path_mapper[subject.name][session.name] if image_path_mapper is not None else None)
-                    for subject in bids_folders
-                    for session in (self.derivatives_folder_path / subject).iterdir()
-                    if session.name.startswith("ses-") and session.is_dir()
-                ]
-            )
-
-            for result in results:
-                fixations.append(result[0])
-                saccades.append(result[1])
-        self.plot_multipanel(pd.concat(fixations),pd.concat(saccades))
-
-
     def scanpath(self,fixations:pd.DataFrame,screen_height:int, screen_width:int,folder_path:str=None,trial_index:int=None,trial_label:str=None,
                  tmin:int=None, tmax:int=None, img_path:str=None,saccades:pd.DataFrame=None,samples:pd.DataFrame=None, display:bool=True):
         """
@@ -110,8 +59,8 @@ class Visualization():
         # TODO: do this for every phase in the trials
         
         if folder_path:
-            scanpath_file_name = 'scanpath' + f'_{trial_index}'*(trial_index is not None) + f'_{trial_label}'*(trial_label is not None) + f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) + '.png'
-            file_path = folder_path / scanpath_file_name
+            scanpath_file_name = 'scanpath' + f'_{trial_index}'*(trial_index is not None) + f'_{trial_label}'*(trial_label is not None) + f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) 
+            
 
         if all(v is None for v in [trial_index, trial_label, tmin, tmax]): 
             raise ValueError("Either trial_index or trial_label or tmix and tmax must be provided.")
@@ -138,104 +87,119 @@ class Visualization():
                 filtered_saccades = saccades[saccades['trial_label'] == trial_label]
             if plot_samples:
                 filtered_samples = samples[samples['trial_label'] == trial_label]
-
-        #----- Define figure and axes -----#
+        
+        # Filter the data where the "phase" is not empty
+        filtered_fixations = filtered_fixations[filtered_fixations['phase'] != '']
+        if plot_saccades:
+            filtered_saccades = filtered_saccades[filtered_saccades['phase'] != '']
         if plot_samples:
-            fig, axs = plt.subplots(nrows=2, ncols=1, height_ratios=(4, 1),figsize=(10, 6))
-            ax_main = axs[0]
-            ax_gaze = axs[1]
-        else:
-            fig, ax_main = plt.subplots(figsize=(10, 6))
-
-        ax_main.set_xlim(0, screen_width)
-        ax_main.set_ylim(0, screen_height)
-
-
-        #----- Plot fixations as dots if any in time interval -----#
-        # Colormap: Get fixation durations for scatter circle size
-        sizes = filtered_fixations['duration']
+            filtered_samples = filtered_samples[filtered_samples['phase'] != '']
         
-        # Define rainwbow cmap for fixations
-        cmap = plt.cm.rainbow
-        
-        # Define the bins and normalize
-        fix_num = list(range(1,len(filtered_fixations)+1))
-        bounds = np.linspace(1, fix_num[-1] + 1, fix_num[-1] + 1)
-        norm = mplcolors.BoundaryNorm(bounds, cmap.N)
+        for phase in filtered_fixations['phase'].unique():
+            phase_fixations = filtered_fixations[filtered_fixations['phase'] == phase]
+            if plot_saccades:
+                phase_saccades = filtered_saccades[filtered_saccades['phase'] == phase]
+            if plot_samples:
+                phase_samples = filtered_samples[filtered_samples['phase'] == phase]
 
-        
-        # Plot
-        ax_main.scatter(filtered_fixations['xAvg'], filtered_fixations['yAvg'], c=fix_num, s=sizes, cmap=cmap, norm=norm, alpha=0.5, zorder=2)
+            #----- Define figure and axes -----#
+            if plot_samples:
+                fig, axs = plt.subplots(nrows=2, ncols=1, height_ratios=(4, 1),figsize=(10, 6))
+                ax_main = axs[0]
+                ax_gaze = axs[1]
+            else:
+                fig, ax_main = plt.subplots(figsize=(10, 6))
 
-        # Colorbar
-        PCM = ax_main.get_children()[0]  # When the fixations dots for color mappable were ploted (first)
-        cb = plt.colorbar(PCM, ax=ax_main, ticks=[fix_num[0], fix_num[int(len(fix_num)/2)], fix_num[-1] + 1], fraction=0.046, pad=0.04)
-        cb.ax.set_yticklabels([fix_num[0], fix_num[int(len(fix_num)/2)], fix_num[-1]])
-        cb.set_label('# of fixation')
+            ax_main.set_xlim(0, screen_width)
+            ax_main.set_ylim(0, screen_height)
 
 
-        #----- Plot image if provided -----#
-        if img_path is not None:
-            # Load search image
-            img = mpimg.imread(img_path)
+            #----- Plot fixations as dots if any in time interval -----#
+            # Colormap: Get fixation durations for scatter circle size
+            sizes = phase_fixations['duration']
             
-            # Get image size
-            img_res_x = img.shape[1]
-            img_res_y = img.shape[0]
+            # Define rainwbow cmap for fixations
+            cmap = plt.cm.rainbow
             
-            # Define box in axes to plot image
-            image_box_extent = ((screen_width - img_res_x) / 2, img_res_x + (screen_width - img_res_x) / 2, (screen_height - img_res_y) / 2, img_res_y + (screen_height - img_res_y) / 2) 
+            # Define the bins and normalize
+            fix_num = list(range(1,len(phase_fixations)+1))
+            bounds = np.linspace(1, fix_num[-1] + 1, fix_num[-1] + 1)
+            norm = mplcolors.BoundaryNorm(bounds, cmap.N)
+
             
             # Plot
-            ax_main.imshow(img, extent=image_box_extent, zorder=0)
+            ax_main.scatter(phase_fixations['xAvg'], phase_fixations['yAvg'], c=fix_num, s=sizes, cmap=cmap, norm=norm, alpha=0.5, zorder=2)
 
-        #----- Plot scanpath and gaze if samples provided -----#
-        if plot_samples:
-            starting_time = filtered_samples['tSample'].iloc[0]
-            tSamples_from_start = (filtered_samples['tSample'] - starting_time)
-            # Left eye
-            try:
-                ax_main.plot(filtered_samples['LX'], filtered_samples['LY'], '--', color='C0', zorder=1)
-                ax_gaze.plot(tSamples_from_start, filtered_samples['LX'], label='Left X')
-                ax_gaze.plot(tSamples_from_start, filtered_samples['LY'], label='Left Y')
-            except:
-                pass
-            # Right eye
-            try:
-                ax_main.plot(filtered_samples['X'], filtered_samples['Y'], '--', color='black', zorder=1)
-                ax_gaze.plot(tSamples_from_start, filtered_samples['X'], label='Right X')
-                ax_gaze.plot(tSamples_from_start, filtered_samples['RY'], label='Right Y')
-            except:
-                pass
-            try:
-                ax_main.plot(filtered_samples['X'], filtered_samples['Y'], '--', color='black', zorder=1)
-                ax_gaze.plot(tSamples_from_start, filtered_samples['X'], label='X')
-                ax_gaze.plot(tSamples_from_start, filtered_samples['Y'], label='Y')
-            except:
-                pass
-            plot_min, plot_max = ax_gaze.get_ylim()
-            # Plot fixations as color span in gaze axes
-            for fix_idx,(_, fixation) in enumerate(filtered_fixations.iterrows()):
-                color = cmap(norm(fix_idx + 1))
-                ax_gaze.axvspan(ymin=0, ymax=1, xmin=(fixation['tStart'] - starting_time), xmax=(fixation['tStart'] - starting_time + fixation['duration']), color=color, alpha=0.4, label='fix')
-            
-            # Plor saccades as vlines in gaze axes
-            if plot_saccades:
-                for _, saccade in filtered_saccades.iterrows():
-                    ax_gaze.vlines(x=(saccade['tStart']- starting_time), ymin=plot_min, ymax=plot_max, colors='red', linestyles='--', label='sac', linewidth=0.8)
+            # Colorbar
+            PCM = ax_main.get_children()[0]  # When the fixations dots for color mappable were ploted (first)
+            cb = plt.colorbar(PCM, ax=ax_main, ticks=[fix_num[0], fix_num[int(len(fix_num)/2)], fix_num[-1] + 1], fraction=0.046, pad=0.04)
+            cb.ax.set_yticklabels([fix_num[0], fix_num[int(len(fix_num)/2)], fix_num[-1]])
+            cb.set_label('# of fixation')
 
-            # Legend
-            handles, labels = plt.gca().get_legend_handles_labels()
-            by_label = dict(zip(labels, handles))
-            plt.legend(by_label.values(), by_label.keys(),  loc='center left', bbox_to_anchor=(1, 0.5))
-            ax_gaze.set_ylabel('Gaze')
-            ax_gaze.set_xlabel('Time [ms]')
-        plt.tight_layout()  
-        if folder_path:
-            fig.savefig(file_path)
-        if display:
-            plt.show()
-        plt.close()
+
+            #----- Plot image if provided -----#
+            if img_path is not None:
+                # Load search image
+                img = mpimg.imread(img_path)
+                
+                # Get image size
+                img_res_x = img.shape[1]
+                img_res_y = img.shape[0]
+                
+                # Define box in axes to plot image
+                image_box_extent = ((screen_width - img_res_x) / 2, img_res_x + (screen_width - img_res_x) / 2, (screen_height - img_res_y) / 2, img_res_y + (screen_height - img_res_y) / 2) 
+                
+                # Plot
+                ax_main.imshow(img, extent=image_box_extent, zorder=0)
+
+            #----- Plot scanpath and gaze if samples provided -----#
+            if plot_samples:
+                starting_time = phase_samples['tSample'].iloc[0]
+                tSamples_from_start = (phase_samples['tSample'] - starting_time)
+                # Left eye
+                try:
+                    ax_main.plot(phase_samples['LX'], phase_samples['LY'], '--', color='C0', zorder=1)
+                    ax_gaze.plot(tSamples_from_start, phase_samples['LX'], label='Left X')
+                    ax_gaze.plot(tSamples_from_start, phase_samples['LY'], label='Left Y')
+                except:
+                    pass
+                # Right eye
+                try:
+                    ax_main.plot(phase_samples['X'], phase_samples['Y'], '--', color='black', zorder=1)
+                    ax_gaze.plot(tSamples_from_start, phase_samples['X'], label='Right X')
+                    ax_gaze.plot(tSamples_from_start, phase_samples['RY'], label='Right Y')
+                except:
+                    pass
+                try:
+                    ax_main.plot(phase_samples['X'], phase_samples['Y'], '--', color='black', zorder=1)
+                    ax_gaze.plot(tSamples_from_start, phase_samples['X'], label='X')
+                    ax_gaze.plot(tSamples_from_start, phase_samples['Y'], label='Y')
+                except:
+                    pass
+                plot_min, plot_max = ax_gaze.get_ylim()
+                # Plot fixations as color span in gaze axes
+                for fix_idx,(_, fixation) in enumerate(phase_fixations.iterrows()):
+                    color = cmap(norm(fix_idx + 1))
+                    ax_gaze.axvspan(ymin=0, ymax=1, xmin=(fixation['tStart'] - starting_time), xmax=(fixation['tStart'] - starting_time + fixation['duration']), color=color, alpha=0.4, label='fix')
+                
+                # Plor saccades as vlines in gaze axes
+                if plot_saccades:
+                    for _, saccade in phase_saccades.iterrows():
+                        ax_gaze.vlines(x=(saccade['tStart']- starting_time), ymin=plot_min, ymax=plot_max, colors='red', linestyles='--', label='sac', linewidth=0.8)
+
+                # Legend
+                handles, labels = plt.gca().get_legend_handles_labels()
+                by_label = dict(zip(labels, handles))
+                plt.legend(by_label.values(), by_label.keys(),  loc='center left', bbox_to_anchor=(1, 0.5))
+                ax_gaze.set_ylabel('Gaze')
+                ax_gaze.set_xlabel('Time [ms]')
+            plt.tight_layout()  
+            if folder_path:
+                file_path = folder_path / (scanpath_file_name + f'_{phase}.png')
+                fig.savefig(file_path)
+            if display:
+                plt.show()
+            plt.close()
 
 
     def fix_duration(self,fixations:pd.DataFrame,axs=None):
@@ -322,15 +286,22 @@ class Visualization():
         folder_path = self.derivatives_folder_path / self.events_detection_folder / "plots"
         plt.rcParams.update({'font.size': 12})
         fig, axs = plt.subplots(2, 2, figsize=(12, 7))
-        
-        self.fix_duration(fixations,axs=axs[0, 0])
-        self.sacc_main_sequence(saccades,axs=axs[1, 1])
-        self.sacc_direction(saccades,axs=axs[1, 0],figs=fig)
-        self.sacc_amplitude(saccades,axs=axs[0, 1])
+        fixations = fixations[fixations["trial_number"] != -1]
+        saccades = saccades[saccades["trial_number"] != -1]
+        valid_phases = fixations['phase'].unique()
+        valid_phases = [phase for phase in valid_phases if phase != '']
+        for phase in fixations['phase'].unique():
+            fixations_phase = fixations[fixations['phase'] == phase]
+            saccades_phase = saccades[saccades['phase'] == phase]
 
-        fig.tight_layout()
-        folder_path.mkdir(parents=True, exist_ok=True)
-        plt.savefig(folder_path / 'multipanel.png')
-        if display:
-            plt.show()
-        plt.close()
+            self.fix_duration(fixations_phase,axs=axs[0, 0])
+            self.sacc_main_sequence(saccades_phase,axs=axs[1, 1])
+            self.sacc_direction(saccades_phase,axs=axs[1, 0],figs=fig)
+            self.sacc_amplitude(saccades_phase,axs=axs[0, 1])
+
+            fig.tight_layout()
+            folder_path.mkdir(parents=True, exist_ok=True)
+            plt.savefig(folder_path / f'multipanel_{phase}.png')
+            if display:
+                plt.show()
+            plt.close()

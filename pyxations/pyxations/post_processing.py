@@ -42,14 +42,13 @@ class Experiment:
         for subject in self.subjects:
             subject.load_data(detection_algorithm)
 
-    def plot_multipanel(self,phase,display):
+    def plot_multipanel(self,display:bool):
         fixations = pd.concat(subject.get_fixations() for subject in self.subjects)
         saccades = pd.concat(subject.get_saccades() for subject in self.subjects)
-        fixations = fixations[fixations["phase"] == phase]
-        saccades = saccades[saccades["phase"] == phase]
+
 
         vis = Visualization(self.derivatives_path, self.detection_algorithm)
-        vis.plot_multipanel(pd.concat(fixations),pd.concat(saccades),display)
+        vis.plot_multipanel(fixations,saccades,display)
 
     def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
         for subject in self.subjects:
@@ -135,10 +134,10 @@ class Subject:
             session.load_data(detection_algorithm)
 
     def get_fixations(self):
-        return [session.get_fixations() for session in self.sessions]
+        return pd.concat(session.get_fixations() for session in self.sessions)
     
     def get_saccades(self):
-        return [session.get_saccades() for session in self.sessions]
+        return pd.concat(session.get_saccades() for session in self.sessions)
     
     def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
         for session in self.sessions:
@@ -302,14 +301,17 @@ class Session:
     def get_saccades(self):
         return self.sacc
     
-    def plot_scanpaths(self):
+    def plot_scanpaths(self,display:bool=False):
         valid_trials = self.samples["trial_number"].unique()
         valid_trials = valid_trials[valid_trials != -1]
         for trial in valid_trials:
-            self.plot_scanpath(trial)
+            self.plot_scanpath(trial,display=display)
 
     def plot_scanpath(self,trial,img_path=None, **kwargs) -> None:
         if not self.events_path.exists():
             raise FileNotFoundError(f"Algorithm events path not found: {self.events_path}")
         vis = Visualization(self.events_path, self.detection_algorithm)
-        vis.scanpath(fixations=self.fix, saccades=self.sacc, samples=self.samples, screen_height=1080, screen_width=1920 , trial_number=trial,img_path=img_path, **kwargs)
+        # Create the plots folder if it does not exist
+        (self.events_path / "plots").mkdir(parents=True, exist_ok=True)
+
+        vis.scanpath(fixations=self.fix, saccades=self.sacc, samples=self.samples, screen_height=1080, screen_width=1920 , trial_index=trial,img_path=img_path,folder_path=self.events_path/"plots", **kwargs)
