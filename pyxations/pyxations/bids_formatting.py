@@ -352,7 +352,7 @@ def process_session(eye_tracking_data_path, msg_keywords,detection_algorithm,ses
     parse_edf_eyelink(edf_file_path, msg_keywords,detection_algorithm,session_folder_path,force_best_eye,keep_ascii, overwrite, **kwargs)
 
 def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm='eyelink', num_processes=4, force_best_eye=True, keep_ascii=True, overwrite=False, **kwargs):
-    derivatives_folder = bids_dataset_folder + "_derivatives"
+    derivatives_folder = str(bids_dataset_folder) + "_derivatives"
     derivatives_folder = Path(derivatives_folder)
     bids_dataset_folder = Path(bids_dataset_folder)
     derivatives_folder.mkdir(exist_ok=True)

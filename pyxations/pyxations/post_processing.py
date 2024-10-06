@@ -41,8 +41,10 @@ class Experiment:
                   expected_response_column: str = "expected_response", stimulus_column: str = "stimulus", 
                   trial_number_column: str = "trial_number"):
         self.detection_algorithm = detection_algorithm
-        for subject in self.subjects:
-            subject.load_data(detection_algorithm, response_column, expected_response_column, stimulus_column, trial_number_column)
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(subject.load_data, detection_algorithm, response_column, expected_response_column, stimulus_column, trial_number_column) for subject in self.subjects]
+            for future in as_completed(futures):
+                future.result()
 
     def plot_multipanel(self, display: bool):
         fixations = pd.concat([subject.get_fixations() for subject in self.subjects], ignore_index=True)
@@ -145,12 +147,9 @@ class Subject:
     def load_data(self, detection_algorithm: str, response_column: str, 
                   expected_response_column: str, stimulus_column: str, trial_number_column: str):
         self.detection_algorithm = detection_algorithm
-        with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(session.load_data, detection_algorithm, response_column, 
-                                       expected_response_column, stimulus_column, trial_number_column) 
-                       for session in self.sessions]
-            for future in as_completed(futures):
-                future.result()
+        for session in self.sessions:
+            session.load_data(detection_algorithm, response_column, expected_response_column, stimulus_column, trial_number_column)
+
 
     def get_fixations(self):
         return pd.concat([session.get_fixations() for session in self.sessions], ignore_index=True)
@@ -210,7 +209,7 @@ class Subject:
 
     def get_session(self, session_id):
         for session in self.sessions:
-            if session.get_id() == session_id:
+            if session.get_session_id() == session_id:
                 return session
         raise ValueError(f"Session {session_id} not found for subject {self.subject_id}")
 
