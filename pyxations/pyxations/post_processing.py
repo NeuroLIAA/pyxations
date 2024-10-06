@@ -96,8 +96,11 @@ class Experiment:
         return pd.DataFrame(correct_trials)
     
     def get_accuracy(self):
-        accuracy = [(subject.get_id(), subject.get_accuracy()) for subject in self.subjects]
-        return pd.DataFrame(accuracy, columns=["subject_id", "session_id", "accuracy"])
+        correct_trials = self.get_correct_trials().drop(columns=["session_id"])
+        correct_trials.index = correct_trials["subject_id"]
+        accuracy = correct_trials.sum().sum() / correct_trials.size
+
+        return accuracy
 
 class Subject:
 
@@ -202,9 +205,10 @@ class Subject:
         return correct_trials
 
     def get_accuracy(self):
-        accuracy = [(session.get_session_id(), session.get_accuracy()) for session in self.sessions]
-        accuracy = pd.DataFrame(accuracy, columns=["session_id", "accuracy"])
-        accuracy["subject_id"] = self.subject_id
+        correct_trials = self.get_correct_trials().drop(columns=["subject_id"])
+        correct_trials.index = correct_trials["session_id"]
+        accuracy = correct_trials.sum().sum() / correct_trials.size
+
         return accuracy
 
     def get_session(self, session_id):
@@ -334,7 +338,7 @@ class Session:
 
     def get_accuracy(self):
         correct_trials = len(self.get_correct_trials())
-        return self.session_id, correct_trials / len(self.trials)
+        return correct_trials / len(self.trials)
 
 
 class Trial:
