@@ -15,7 +15,7 @@ class Visualization():
             raise ValueError(f"Detection algorithm {events_detection_algorithm} not found.")
         self.events_detection_folder = Path(events_detection_algorithm+'_events')
 
-    def scanpath(self,fixations:pd.DataFrame,screen_height:int, screen_width:int,folder_path:str=None,trial_index:int=None,trial_label:str=None,
+    def scanpath(self,fixations:pd.DataFrame,screen_height:int, screen_width:int,folder_path:str=None,
                  tmin:int=None, tmax:int=None, img_path:str=None,saccades:pd.DataFrame=None,samples:pd.DataFrame=None, display:bool=True):
         """
         Plots the scanpath, including fixations, saccades, and optionally an image background and gaze samples.
@@ -31,10 +31,6 @@ class Visualization():
             Vertical resolution of the screen in pixels.
         folder_path : str
             Path to the folder where the plots will be saved.
-        trial_index : int, optional
-            Index of the trial.
-        trial_label : str, optional
-            Label of the trial.
         tmin : int, optional
             The minimum time for filtering the data.
         tmax : int, optional
@@ -56,15 +52,12 @@ class Visualization():
         """
         plot_saccades = not saccades is None
         plot_samples = not samples is None
-        # TODO: do this for every phase in the trials
+        trial_index = fixations['trial_number'].iloc[0]
         
         if folder_path:
-            scanpath_file_name = 'scanpath' + f'_{trial_index}'*(trial_index is not None) + f'_{trial_label}'*(trial_label is not None) + f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) 
+            scanpath_file_name = 'scanpath' + f'_{trial_index}'+ f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) 
             
-
-        if all(v is None for v in [trial_index, trial_label, tmin, tmax]): 
-            raise ValueError("Either trial_index or trial_label or tmix and tmax must be provided.")
-        
+       
         #----- Filter saccades, fixations and samples to defined time interval -----#
         if tmax is not None and tmin is not None:
             filtered_fixations = fixations[(fixations['tStart'] >= tmin) & (fixations['tStart'] <= tmax)]
@@ -72,21 +65,6 @@ class Visualization():
                 filtered_saccades = saccades[(saccades['tStart'] >= tmin) & (saccades['tStart'] <= tmax)]
             if plot_samples:
                 filtered_samples = samples[(samples['tSample'] >= tmin) & (samples['tSample'] <= tmax)]
-        
-        #----- Filter saccades, fixations and samples to defined trial -----#
-        if trial_index is not None:
-            filtered_fixations = fixations[fixations['trial_number'] == trial_index]
-            if plot_saccades:
-                filtered_saccades = saccades[saccades['trial_number'] == trial_index]
-            if plot_samples:
-                filtered_samples = samples[samples['trial_number'] == trial_index]
-
-        if trial_label is not None:
-            filtered_fixations = fixations[fixations['trial_label'] == trial_label]
-            if plot_saccades:
-                filtered_saccades = saccades[saccades['trial_label'] == trial_label]
-            if plot_samples:
-                filtered_samples = samples[samples['trial_label'] == trial_label]
         
         # Filter the data where the "phase" is not empty
         filtered_fixations = filtered_fixations[filtered_fixations['phase'] != '']
