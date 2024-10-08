@@ -369,7 +369,7 @@ def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection
         futures = [
             executor.submit(process_session, session / "ET", msg_keywords, detection_algorithm, derivatives_folder / subject.name / session.name, force_best_eye, keep_ascii, overwrite, **kwargs)
             for subject in bids_folders
-            for session in (bids_dataset_folder / subject).iterdir() if session.name.startswith("ses-") and (bids_dataset_folder / subject / session).is_dir()
+            for session in (bids_dataset_folder / subject.name).iterdir() if session.name.startswith("ses-") and (bids_dataset_folder / subject.name / session.name).is_dir()
         ]
 
         for future in futures:
