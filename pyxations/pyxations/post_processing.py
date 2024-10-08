@@ -37,12 +37,10 @@ class Experiment:
     def __next__(self):
         return next(self.subjects)
     
-    def load_data(self, detection_algorithm: str, response_column: str = "response", 
-                  expected_response_column: str = "expected_response", stimulus_column: str = "stimulus", 
-                  trial_number_column: str = "trial_number"):
+    def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
         with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(subject.load_data, detection_algorithm, response_column, expected_response_column, stimulus_column, trial_number_column) for subject in self.subjects]
+            futures = [executor.submit(subject.load_data, detection_algorithm) for subject in self.subjects]
             for future in as_completed(futures):
                 future.result()
 
@@ -67,9 +65,9 @@ class Experiment:
         self.subjects = [subject for subject in self.subjects if sessions_results[subject.get_id()][0]/sessions_results[subject.get_id()][1] <= threshold]
         return bad_trials_total
     
-    def plot_scanpaths(self):
+    def plot_scanpaths(self,screen_height,screen_width,display: bool = False):
         with ProcessPoolExecutor() as executor:
-            futures = [executor.submit(subject.plot_scanpaths) for subject in self.subjects]
+            futures = [executor.submit(subject.plot_scanpaths,screen_height,screen_width,display) for subject in self.subjects]
             for future in as_completed(futures):
                 future.result()
 
@@ -90,17 +88,6 @@ class Experiment:
     def get_trial(self, subject_id, session_id, trial_number):
         session = self.get_session(subject_id, session_id)
         return session.get_trial(trial_number)
-    
-    def get_correct_trials(self):
-        correct_trials = {subject.get_id(): subject.get_correct_trials() for subject in self.subjects}
-        return pd.DataFrame(correct_trials)
-    
-    def get_accuracy(self):
-        correct_trials = self.get_correct_trials().drop(columns=["session_id"])
-        correct_trials.index = correct_trials["subject_id"]
-        accuracy = correct_trials.sum().sum() / correct_trials.size
-
-        return accuracy
 
 class Subject:
 
@@ -147,11 +134,10 @@ class Subject:
     def __next__(self):
         return next(self.sessions)
     
-    def load_data(self, detection_algorithm: str, response_column: str, 
-                  expected_response_column: str, stimulus_column: str, trial_number_column: str):
+    def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
         for session in self.sessions:
-            session.load_data(detection_algorithm, response_column, expected_response_column, stimulus_column, trial_number_column)
+            session.load_data(detection_algorithm)
 
 
     def get_fixations(self):
@@ -188,28 +174,15 @@ class Subject:
 
         return bad_sessions_count, total_sessions, bad_trials_subject
 
-    def plot_scanpaths(self):
+    def plot_scanpaths(self,screen_height,screen_width, display: bool = False):
         for session in self.sessions:
-            session.plot_scanpaths()
+            session.plot_scanpaths(screen_height,screen_width,display)
 
     def get_rts(self):
         rts = [session.get_rts() for session in self.sessions]
         rts = pd.concat(rts, ignore_index=True)
         rts["subject_id"] = self.subject_id
         return rts
-
-    def get_correct_trials(self):
-        correct_trials = {session.get_session_id(): session.get_correct_trials() for session in self.sessions}
-        correct_trials = pd.DataFrame(correct_trials)
-        correct_trials["subject_id"] = self.subject_id
-        return correct_trials
-
-    def get_accuracy(self):
-        correct_trials = self.get_correct_trials().drop(columns=["subject_id"])
-        correct_trials.index = correct_trials["session_id"]
-        accuracy = correct_trials.sum().sum() / correct_trials.size
-
-        return accuracy
 
     def get_session(self, session_id):
         for session in self.sessions:
@@ -233,6 +206,7 @@ class Session:
 
         if not self.session_path.exists():
             raise FileNotFoundError(f"Session path not found: {self.session_path}")
+        
     
     @property
     def trials(self):
@@ -259,8 +233,7 @@ class Session:
             trial.session = None
         return bad_trials, total_trials
     
-    def load_data(self, detection_algorithm: str, response_column: str, 
-                  expected_response_column: str, stimulus_column: str, trial_number_column: str):
+    def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
         events_path = self.session_path / f"{self.detection_algorithm}_events"
         
@@ -278,17 +251,11 @@ class Session:
         if self.behavior_path.exists():
             behavior_files = list(self.behavior_path.glob("*.csv"))
             if len(behavior_files) == 1:
-                self.behavior_data = pd.read_csv(behavior_files[0], dtype={trial_number_column: int})
+                self.behavior_data = pd.read_csv(behavior_files[0])
 
         # Initialize trials
         self._trials = [
-            Trial(trial, self, samples, fix, sacc, blink, events_path, 
-                  self.behavior_data[self.behavior_data[trial_number_column] == trial][expected_response_column].values[0] 
-                  if self.behavior_data is not None else None,
-                  self.behavior_data[self.behavior_data[trial_number_column] == trial][response_column].values[0] 
-                  if self.behavior_data is not None else None,
-                  self.behavior_data[self.behavior_data[trial_number_column] == trial][stimulus_column].values[0] 
-                  if self.behavior_data is not None else None)
+            Trial(trial, self, samples, fix, sacc, blink, events_path)
             for trial in samples["trial_number"].unique() 
             if trial != -1 and trial not in self.excluded_trials
         ]
@@ -299,9 +266,9 @@ class Session:
     def get_saccades(self):
         return pd.concat([trial.get_saccades() for trial in self.trials], ignore_index=True)
 
-    def plot_scanpaths(self, display: bool = False):
+    def plot_scanpaths(self,screen_height,screen_width, display: bool = False):
         for trial in self.trials:
-            trial.plot_scanpath(display=display)
+            trial.plot_scanpath(screen_height,screen_width,display=display)
 
     def __iter__(self):
         return iter(self.trials)
@@ -332,29 +299,18 @@ class Session:
         rts["session_id"] = self.session_id
         return rts
 
-    def get_correct_trials(self):
-        correct_trials = [trial.get_trial_number() for trial in self.trials if trial.is_correct()]
-        return pd.Series(correct_trials, name=self.session_id)
-
-    def get_accuracy(self):
-        correct_trials = len(self.get_correct_trials())
-        return correct_trials / len(self.trials)
 
 
 class Trial:
 
     def __init__(self, trial_number: int, session: Session, samples: pd.DataFrame, fix: pd.DataFrame, 
-                 sacc: pd.DataFrame, blink: pd.DataFrame, events_path: str, expected_response: str, 
-                 response: str, stimulus: str):
+                 sacc: pd.DataFrame, blink: pd.DataFrame, events_path: str):
         self.trial_number = trial_number
         self.session = session
         self.samples = samples[samples["trial_number"] == trial_number].reset_index(drop=True)
         self.fix = fix[fix["trial_number"] == trial_number].reset_index(drop=True)
         self.sacc = sacc[sacc["trial_number"] == trial_number].reset_index(drop=True)
         self.blink = blink[blink["trial_number"] == trial_number].reset_index(drop=True) if blink is not None else None
-        self.expected_response = expected_response
-        self.response = response
-        self.stimulus_path = (session.subject.experiment.get_dataset_path().parent / "stimuli" / stimulus) if stimulus else None
         self.events_path = events_path
         self.detection_algorithm = events_path.name[:-7]
 
@@ -369,17 +325,12 @@ class Trial:
     
     def get_saccades(self):
         return self.sacc
-    
-    def is_correct(self):
-        if self.expected_response is None or self.response is None:
-            raise ValueError("Expected response or response is None. Please provide the expected response and response from the behavior file.")
-        return self.expected_response == self.response
 
-    def plot_scanpath(self, **kwargs):
+    def plot_scanpath(self,screen_height,screen_width, **kwargs):
         vis = Visualization(self.events_path, self.detection_algorithm)
         (self.events_path / "plots").mkdir(parents=True, exist_ok=True)
-        vis.scanpath(fixations=self.fix, saccades=self.sacc, samples=self.samples, screen_height=1080, screen_width=1920, 
-                     img_path=self.stimulus_path, folder_path=self.events_path / "plots", **kwargs)
+        vis.scanpath(fixations=self.fix, saccades=self.sacc, samples=self.samples, screen_height=screen_height, screen_width=screen_width, 
+                      folder_path=self.events_path / "plots", **kwargs)
 
     def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
         self.fix = self.fix.query(f"{min_fix_dur} < duration < {max_fix_dur} and bad == False").reset_index(drop=True)
