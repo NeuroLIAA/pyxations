@@ -338,7 +338,7 @@ class Trial:
     def save_rts(self):
         if hasattr(self, "rts"):
             return
-        rts = self._samples[self._samples["phase"] != ""].groupby(["phase"])["tSample"].agg(lambda x: x.iloc[-1])
+        rts = self._samples[self._samples["phase"] != ""].groupby(["phase"])["tSample"].agg(lambda x: x.iloc[-1] - x.iloc[0])
         self.rts = rts.reset_index().rename(columns={"tSample": "rt"})
         self.rts["trial_number"] = self.trial_number
 
