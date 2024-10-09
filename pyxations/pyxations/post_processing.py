@@ -326,7 +326,7 @@ class Trial:
     def plot_scanpath(self,screen_height,screen_width, **kwargs):
         vis = Visualization(self.events_path, self.detection_algorithm)
         (self.events_path / "plots").mkdir(parents=True, exist_ok=True)
-        vis.scanpath(fixations=self.fix, saccades=self.sacc, samples=self.samples, screen_height=screen_height, screen_width=screen_width, 
+        vis.scanpath(fixations=self._fix, saccades=self._sacc, samples=self._samples, screen_height=screen_height, screen_width=screen_width, 
                       folder_path=self.events_path / "plots", **kwargs)
 
     def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
@@ -350,5 +350,5 @@ class Trial:
     def is_trial_bad(self, threshold=0.5):
         nan_values = self._samples.isna().sum().sum()
         bad_values = self._samples["bad"].sum()
-        bad_and_nan_percentage = (nan_values + bad_values) / len(self.samples)
+        bad_and_nan_percentage = (nan_values + bad_values) / len(self._samples)
         return bad_and_nan_percentage > threshold
