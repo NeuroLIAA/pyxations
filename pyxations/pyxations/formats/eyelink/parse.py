@@ -11,6 +11,8 @@ import pandas as pd
 import inspect
 
 
+
+
 def process_session(eye_tracking_data_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
     edf_files = [file for file in eye_tracking_data_path.iterdir() if file.suffix.lower() == '.edf']
     if len(edf_files) > 1:
@@ -55,6 +57,9 @@ def convert_edf_to_ascii(edf_file_path, output_dir):
 
 
 def parse_edf_eyelink(edf_file_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+    from pyxations.bids_formatting import find_besteye, EYE_MOVEMENT_DETECTION_DICT, keep_eye
+    from pyxations.pre_processing import PreProcessing
+    
     # Convert EDF to ASCII (only if necessary)
     ascii_file_path = convert_edf_to_ascii(edf_file_path, session_folder_path)
 

@@ -11,7 +11,7 @@ class TestComputeDerivatives(unittest.TestCase):
         start_msgs = {'search':['beginning_of_stimuli']}
         end_msgs = {'search':['end_of_stimuli']}
         detection_algorithm = 'eyelink'
-        compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm, start_msgs=start_msgs, end_msgs=end_msgs)
+        compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm, start_msgs=start_msgs, end_msgs=end_msgs, overwrite=True)
         self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-0001")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-0001", "ses-second")))
