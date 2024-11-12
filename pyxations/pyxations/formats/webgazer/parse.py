@@ -6,7 +6,7 @@ Created on Oct 31, 2024
 import pandas as pd
 
 
-def process_session(eye_tracking_data_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+def process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
     csv_files = [file for file in eye_tracking_data_path.iterdir() if file.suffix.lower() == '.csv']
     if len(csv_files) > 1:
         print(f"More than one csv file found in {eye_tracking_data_path}. Skipping folder.")
@@ -14,13 +14,13 @@ def process_session(eye_tracking_data_path, msg_keywords, detection_algorithm, s
     edf_file_path = csv_files[0]
     (session_folder_path / 'events').mkdir(parents=True, exist_ok=True)
 
-    parse_webgazer(edf_file_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+    parse_webgazer(edf_file_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
 
 
-def parse_webgazer(file_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+def parse_webgazer(file_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
     # Convert EDF to ASCII (only if necessary)
     # ascii_file_path = convert_edf_to_ascii(edf_file_path, session_folder_path)
-    
+    detection_algorithm = 'webgazer'
     df = pd.read_csv(file_path)
     
     

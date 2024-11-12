@@ -11,6 +11,8 @@ from pyxations.formats.webgazer.bids import WebGazerBidsConverter
 from pyxations.formats.eyelink.bids import EyeLinkBidsConverter
 import pyxations.formats.eyelink.parse as eyelink_parser 
 import pyxations.formats.webgazer.parse as webgazer_parser
+import pyxations.formats.tobii.parse as tobii_parser
+from pyxations.formats.tobii.bids import TobiiBidsConverter
 
 
 EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection}
@@ -64,6 +66,8 @@ def get_converter(format_name):
         return WebGazerBidsConverter()
     elif format_name == 'eyelink':
         return EyeLinkBidsConverter()
+    elif format_name == 'tobii':
+        return TobiiBidsConverter()
     return None
 
 def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session_substrings=1, format_name='eyelink'):
@@ -91,7 +95,7 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
         if file_path.is_file():
             file_paths.append(file_path)
     
-    file_paths = [file for file in file_paths if file.suffix.lower() == '.edf' or file.suffix.lower() == '.bdf' or file.suffix.lower() == '.log' or file.suffix.lower() == '.csv']
+    file_paths = [file for file in file_paths if file.suffix.lower() in converter.relevant_extensions()]
 
     bids_folder_path = Path(target_folder_path) / dataset_name
 
@@ -132,10 +136,12 @@ def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id
 def process_session(eye_tracking_data_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
 
     if detection_algorithm == 'eyelink':
-        eyelink_parser.process_session(eye_tracking_data_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite)
+        eyelink_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite)
         
     elif detection_algorithm == 'webgazer':
-        webgazer_parser.process_session(eye_tracking_data_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite)
+        webgazer_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite)
+    elif detection_algorithm == 'tobii':
+        tobii_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite)
 
 def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm='eyelink', num_processes=4, force_best_eye=True, keep_ascii=True, overwrite=False, **kwargs):
     derivatives_folder = str(bids_dataset_folder) + "_derivatives"
@@ -145,7 +151,7 @@ def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection
 
 
     bids_folders = [folder for folder in bids_dataset_folder.iterdir() if folder.is_dir() and folder.name.startswith("sub-")]
-    if detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and detection_algorithm not in ['eyelink', 'webgazer']:
+    if detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and detection_algorithm not in ['eyelink', 'webgazer', 'tobii']:
         raise ValueError(f"Detection algorithm {detection_algorithm} not found.")
 
     with ProcessPoolExecutor(max_workers=num_processes) as executor:

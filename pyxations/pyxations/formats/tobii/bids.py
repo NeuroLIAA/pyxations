@@ -7,19 +7,19 @@ from pathlib import Path
 
 
 
-class WebGazerBidsConverter():
+class TobiiBidsConverter():
     
     def relevant_extensions(self):
-        return ['.log', '.csv']
+        return ['.txt', '.log']
 
     def get_subject_ids(self, file_paths):
-        return list(set([Path(file).name.split("_")[0] for file in file_paths if file.suffix.lower() == '.csv' ]))
+        return list(set([Path(file).name.split("_")[0] for file in file_paths if file.suffix.lower() == '.txt' ]))
 
     def move_file_to_bids_folder(self, file, bids_folder_path, subject_id, old_subject_id, session_id):
         from pyxations.bids_formatting import move_file_to_bids_folder
         file_name = Path(file).name
         file_lower = file_name.lower()
-        if file_lower.endswith(".csv") and file_name.split("_")[0] == old_subject_id:
+        if file_lower.endswith(".txt") and file_name.split("_")[0] == old_subject_id:
             move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'ET')
         if (file_lower.endswith(".log") or file_lower.endswith(".csv")) and file_name.split("_")[0] == old_subject_id:                
             move_file_to_bids_folder(file, bids_folder_path, subject_id, session_id, 'behavioral')        

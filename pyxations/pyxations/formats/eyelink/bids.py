@@ -8,6 +8,9 @@ from pathlib import Path
 
 
 class EyeLinkBidsConverter():
+    
+    def relevant_extensions(self):
+        return ['.edf', '.bdf', '.log', '.csv']
 
     def get_subject_ids(self, file_paths):
         return list(set([Path(file).name.split("_")[0] for file in file_paths if file.suffix.lower() == '.edf' or file.suffix.lower() == '.bdf']))
