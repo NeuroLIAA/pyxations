@@ -48,6 +48,21 @@ class TestComputeDerivatives(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(current_folder, "tobii_dataset_derivatives", "sub-0001", "ses-sceneviewing")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "tobii_dataset_derivatives", "sub-0001", "ses-sceneviewing", "samples.hdf5")))
 
+    def test_compute_derivatives_gazepoint(self):
+        current_folder = os.getcwd()
+        current_folder = os.path.dirname(current_folder)
+        bids_dataset_folder = os.path.join(current_folder,"gazepoint_dataset")
+        msg_keywords = ["begin","end","press"]
+        start_msgs = {'search':['beginning_of_stimuli']}
+        end_msgs = {'search':['end_of_stimuli']}
+        detection_algorithm = 'gaze'
+        compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm, start_msgs=start_msgs, end_msgs=end_msgs)
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "gazepoint_dataset_derivatives")))
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "gazepoint_dataset_derivatives", "sub-0001")))
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A")))
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A", "samples.hdf5")))
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A", "blink.hdf5")))
+
 
 
 if __name__ == "__main__":
