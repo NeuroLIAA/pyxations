@@ -9,7 +9,7 @@ class TestScanpaths(unittest.TestCase):
         # Create an experiment
         exp = Experiment(os.path.join(current_folder,"example_dataset"))
         exp.load_data("eyelink")
-        exp.plot_scanpaths()
+        exp.plot_scanpaths(screen_height=1080, screen_width=1920)
 
         # Assert that the scanpath file exists
         self.assertTrue(os.path.exists(os.path.join(path_to_derivatives,'sub-0001','ses-second','eyelink_events','plots', "scanpath_0_search.png")))

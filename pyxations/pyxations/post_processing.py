@@ -35,10 +35,12 @@ class Experiment:
     
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
-        with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(subject.load_data, detection_algorithm) for subject in self.subjects.values()]
-            for future in as_completed(futures):
-                future.result()
+        #with ThreadPoolExecutor() as executor:
+            #futures = [executor.submit(subject.load_data, detection_algorithm) for subject in self.subjects.values()]
+            #for future in as_completed(futures):
+                #future.result()
+        for subject in self.subjects.values():
+            subject.load_data(detection_algorithm)
 
     def plot_multipanel(self, display: bool):
         fixations = pd.concat([subject.fixations() for subject in self.subjects.values()], ignore_index=True)

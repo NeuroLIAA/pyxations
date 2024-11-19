@@ -65,6 +65,12 @@ class Visualization():
                 filtered_saccades = saccades[(saccades['tStart'] >= tmin) & (saccades['tStart'] <= tmax)]
             if plot_samples:
                 filtered_samples = samples[(samples['tSample'] >= tmin) & (samples['tSample'] <= tmax)]
+        else:
+            filtered_fixations = fixations
+            if plot_saccades:
+                filtered_saccades = saccades
+            if plot_samples:
+                filtered_samples = samples
         
         # Filter the data where the "phase" is not empty
         filtered_fixations = filtered_fixations[filtered_fixations['phase'] != '']
