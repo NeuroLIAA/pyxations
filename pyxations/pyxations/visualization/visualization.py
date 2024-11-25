@@ -4,7 +4,7 @@ import matplotlib.colors as mplcolors
 import numpy as np
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
-from .bids_formatting import EYE_MOVEMENT_DETECTION_DICT
+from pyxations.bids_formatting import EYE_MOVEMENT_DETECTION_DICT
 from pathlib import Path
 
 

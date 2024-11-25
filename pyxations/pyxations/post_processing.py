@@ -1,6 +1,6 @@
 from pathlib import Path
 import pandas as pd
-from .visualization import Visualization
+from pyxations.visualization.visualization import Visualization
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
 class Experiment:

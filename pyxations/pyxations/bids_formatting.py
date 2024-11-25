@@ -141,7 +141,7 @@ def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id
 def process_session(eye_tracking_data_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
 
     if detection_algorithm == 'eyelink':
-        eyelink_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite)
+        eyelink_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
         
     elif detection_algorithm == 'webgazer':
         webgazer_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite)
