@@ -35,10 +35,12 @@ class Experiment:
     
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
-        with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(subject.load_data, detection_algorithm) for subject in self.subjects.values()]
-            for future in as_completed(futures):
-                future.result()
+        #with ThreadPoolExecutor() as executor:
+            #futures = [executor.submit(subject.load_data, detection_algorithm) for subject in self.subjects.values()]
+            #for future in as_completed(futures):
+                #future.result()
+        for subject in self.subjects.values():
+            subject.load_data(detection_algorithm)
 
     def plot_multipanel(self, display: bool):
         fixations = pd.concat([subject.fixations() for subject in self.subjects.values()], ignore_index=True)
@@ -81,6 +83,16 @@ class Experiment:
     def get_trial(self, subject_id, session_id, trial_number):
         session = self.get_session(subject_id, session_id)
         return session.get_trial(trial_number)
+    
+    def fixations(self):
+        return pd.concat([subject.fixations() for subject in self.subjects.values()], ignore_index=True)
+    
+    def saccades(self):
+        return pd.concat([subject.saccades() for subject in self.subjects.values()], ignore_index=True)
+    
+    def samples(self):
+        return pd.concat([subject.samples() for subject in self.subjects.values()], ignore_index=True)
+    
 
 class Subject:
 
@@ -170,13 +182,19 @@ class Subject:
         return session.get_trial(trial_number)
     
     def fixations(self):
-        return pd.concat([session.fixations() for session in self.sessions.values()], ignore_index=True)
+        df = pd.concat([session.fixations() for session in self.sessions.values()], ignore_index=True)
+        df["subject_id"] = self.subject_id
+        return df
     
     def saccades(self):
-        return pd.concat([session.saccades() for session in self.sessions.values()], ignore_index=True)
+        df = pd.concat([session.saccades() for session in self.sessions.values()], ignore_index=True)
+        df["subject_id"] = self.subject_id
+        return df
     
     def samples(self):
-        return pd.concat([session.samples() for session in self.sessions.values()], ignore_index=True)
+        df = pd.concat([session.samples() for session in self.sessions.values()], ignore_index=True)
+        df["subject_id"] = self.subject_id
+        return df
 
 class Session:
     
@@ -276,13 +294,20 @@ class Session:
         return rts
 
     def fixations(self):
-        return pd.concat([trial.fixations() for trial in self.trials.values()], ignore_index=True)
+        df = pd.concat([trial.fixations() for trial in self.trials.values()], ignore_index=True)
+        df["session_id"] = self.session_id
+        return df
     
     def saccades(self):
-        return pd.concat([trial.saccades() for trial in self.trials.values()], ignore_index=True)
+        df = pd.concat([trial.saccades() for trial in self.trials.values()], ignore_index=True)
+        df["session_id"] = self.session_id
+        return df
+        
     
     def samples(self):
-        return pd.concat([trial.samples() for trial in self.trials.values()], ignore_index=True)
+        df = pd.concat([trial.samples() for trial in self.trials.values()], ignore_index=True)
+        df["session_id"] = self.session_id
+        return df
 
 
 class Trial:
