@@ -143,6 +143,7 @@ class RemodnavDetection(EyeMovementDetection):
 
             pp = clf.preproc(
                 eye_data,
+                #savgol_length=0.195
 
             )
 

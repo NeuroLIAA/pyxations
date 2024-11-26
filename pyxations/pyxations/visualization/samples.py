@@ -20,11 +20,10 @@ class SampleVisualization():
         self.screen_height = screen_height
         
         
-    def plot(self, screen_width, screen_height):
+    def plot(self, display=True, scanpath_file_name='scanpath', in_percent=False):
         df = self.samples
         folder_path = Path('.')
-        scanpath_file_name = 'scanpath'
-        display = True
+
         
         fig, axs = plt.subplots(nrows=2, ncols=1, height_ratios=(4, 1),figsize=(10, 6))
         ax_main = axs[0]
@@ -32,10 +31,17 @@ class SampleVisualization():
 
         ax_main.set_xlim(0, self.screen_width)
         ax_main.set_ylim(0, self.screen_height)
+        
+        if in_percent:
+            x = df['X'] * self.screen_width
+            y = df['Y'] * self.screen_height
+        else:
+            x = df['X']
+            y = df['Y']
 
-        ax_main.plot(df['X'] * screen_width, df['Y'] * screen_height, '--', color='C0', zorder=1)
-        ax_gaze.plot(df['tSample'], df['X'], label='Left X')
-        ax_gaze.plot(df['tSample'], df['Y'], label='Left Y')        
+        ax_main.plot(x, y, '--', color='C0', zorder=1)
+        ax_gaze.plot(df['tSample'], x, label='X')
+        ax_gaze.plot(df['tSample'], y, label='Y')        
         
         # Legend
         handles, labels = plt.gca().get_legend_handles_labels()
