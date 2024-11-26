@@ -4,6 +4,7 @@ Created on Oct 31, 2024
 @author: placiana
 '''
 import pandas as pd
+import json
 
 
 def process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
@@ -23,17 +24,34 @@ def parse_webgazer(file_path, msg_keywords, session_folder_path, force_best_eye,
     detection_algorithm = 'webgazer'
     df = pd.read_csv(file_path)
     
-    
+    df['line_number'] = df.index
     # columna importante 
-    dfSamples = df[df['webgazer_data'].notna()]
+    dfSamples = df[df['webgazer_data'].notna()].reset_index()
+    dfSamples['data'] = dfSamples['webgazer_data'].apply(json.loads)
+    df_exploded = dfSamples.explode('data')
+    
+    df_exploded['data'] = df_exploded.apply(
+        lambda row: {**row['data'], 't_acum': row['data']['t'] + row['time_elapsed']}, axis=1
+    )
+    
+    expanded_df = pd.json_normalize(df_exploded['data'])
+    expanded_df = pd.concat(
+    [df_exploded[['line_number', 'trial_index', 'time_elapsed']].reset_index(drop=True),  # Keep desired columns
+     expanded_df],                    # Expand the data
+    axis=1
+    )
+    
+    dfSamples = expanded_df.rename(columns={"x": "X", "y": "Y", 't': 'tSample'})
+
+    # Calibration messages    
     dfCalib = df[df['rastoc-type'] == 'calibration-stimulus']
-    dfSacc =  df[df['isSaccadeExperiment'] == True]
     
     dfCalib.to_hdf((session_folder_path / 'calib.hdf5'), key='calib', mode='w')
     dfSamples.to_hdf((session_folder_path / 'samples.hdf5'), key='samples', mode='w')
     
-    (session_folder_path / f'{detection_algorithm}_events').mkdir(parents=True, exist_ok=True)
-    dfSacc.to_hdf((session_folder_path / f'{detection_algorithm}_events' / 'sacc.hdf5'), key='sacc', mode='w')
+    #dfSacc =  df[df['isSaccadeExperiment'] == True]
+    #(session_folder_path / f'{detection_algorithm}_events').mkdir(parents=True, exist_ok=True)
+    #dfSacc.to_hdf((session_folder_path / f'{detection_algorithm}_events' / 'sacc.hdf5'), key='sacc', mode='w')
     
     old = True
     

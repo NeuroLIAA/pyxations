@@ -14,8 +14,10 @@ import matplotlib.animation as animation
 
 class SampleVisualization():
     
-    def __init__(self, samples_df):
+    def __init__(self, samples_df,screen_width=1366, screen_height=768):
         self.samples = samples_df
+        self.screen_width = screen_width
+        self.screen_height = screen_height
         
         
     def plot(self, screen_width, screen_height):
@@ -28,8 +30,8 @@ class SampleVisualization():
         ax_main = axs[0]
         ax_gaze = axs[1]
 
-        ax_main.set_xlim(0, screen_width)
-        ax_main.set_ylim(0, screen_height)
+        ax_main.set_xlim(0, self.screen_width)
+        ax_main.set_ylim(0, self.screen_height)
 
         ax_main.plot(df['X'] * screen_width, df['Y'] * screen_height, '--', color='C0', zorder=1)
         ax_gaze.plot(df['tSample'], df['X'], label='Left X')
@@ -49,18 +51,20 @@ class SampleVisualization():
             plt.show()
         plt.close()
         
-    def animate(self, display=True, out_file='output.gif'):
+    def animate(self, display=True, in_percent=False, out_file='output.gif'):
         df = self.samples
         
-        screen_width = 1024
-        screen_height = 768
+
         
         fig, ax = plt.subplots()
-        ax.set_xlim(0, screen_width)
-        ax.set_ylim(0, screen_height)
+        ax.set_xlim(0, self.screen_width)
+        ax.set_ylim(0, self.screen_height)
         
-        x = df['X'] * screen_width
-        y = df['Y'] * screen_height
+        x = df['X']
+        y = df['Y']
+        if in_percent:
+            x = df['X'] * self.screen_width
+            y = df['Y'] * self.screen_height
         
         scat = ax.scatter(x[0], y[0], c="b", s=5, label='a')
         line2 = ax.plot(x[0], y[0], label=f'b')[0]
