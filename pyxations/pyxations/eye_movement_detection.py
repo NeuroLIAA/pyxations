@@ -5,23 +5,22 @@ from tqdm import tqdm
 from abc import ABC, abstractmethod
 from remodnav.clf import EyegazeClassifier
 
+
 class EyeMovementDetection(ABC):
 
     @abstractmethod
-    def detect_eye_movements(self,*args,**kwargs):
+    def detect_eye_movements(self, *args, **kwargs):
         pass
-    
-
 
 
 class RemodnavDetection(EyeMovementDetection):
-    def __init__(self, session_folder_path,samples):
+
+    def __init__(self, session_folder_path, samples):
         self.session_folder_path = session_folder_path
         self.out_folder = (session_folder_path / 'remodnav_events')
         self.samples = samples
-    
 
-    def detect_eye_movements(self,min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05, 
+    def detect_eye_movements(self, min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05,
                                  sac_max_vel:float=1000., fix_max_amp:float=1.5, sac_time_thresh:float=0.002,
                                  drop_fix_from_blink:bool=True, screen_size:float=38., screen_width:int=1920, screen_distance:float=60):
         
@@ -82,19 +81,118 @@ class RemodnavDetection(EyeMovementDetection):
         chunks[chunks_start_indexes] = 1
         chunks = np.cumsum(chunks)
 
-
         # Divide samples by chunks and apply to each chunk the detection algorithm
-        for chunk in np.unique(chunks):                
+        for chunk in np.unique(chunks): 
             chunk_samples = self.samples[chunks == chunk].reset_index(drop=True)
-            fixations_chunk, saccades_chunk = self.detect_on_chunk(chunk_samples,min_pursuit_dur, max_pso_dur, min_fix_dur, sac_max_vel, fix_max_amp, sac_time_thresh, drop_fix_from_blink, screen_size, screen_width, screen_distance)
+            fixations_chunk, saccades_chunk = self.detect_on_chunk(chunk_samples, min_pursuit_dur, max_pso_dur, min_fix_dur, 
+                            sac_max_vel, fix_max_amp, sac_time_thresh, drop_fix_from_blink, screen_size, screen_width, screen_distance)
             fixations.append(fixations_chunk)
             saccades.append(saccades_chunk)
 
-        return pd.concat(fixations).sort_values(by='tEnd',ignore_index=True),pd.concat(saccades).sort_values(by='tEnd',ignore_index=True)
-    
+        return pd.concat(fixations).sort_values(by='tEnd', ignore_index=True), pd.concat(saccades).sort_values(by='tEnd', ignore_index=True)
 
+    def run_eye_movement(self, gazex_data, gazey_data, sample_rate,
+             min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05,
+             sac_max_vel:float=1000., fix_max_amp:float=1.5, sac_time_thresh:float=0.002,
+             drop_fix_from_blink:bool=True, screen_size:float=38., screen_width:int=1920, screen_distance:float=60, calib_index=0,
+             eyes_recorded=None, starting_time=None, times=None, pupil_data=None, eye='R'):
 
-    def detect_on_chunk(self,chunk,min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05, 
+        
+        # If not pre run data, run
+        print(f'\nRunning eye movements detection for {eye} eye...')
+        # Define data to save to excel file needed to run the saccades detection program Remodnav
+        eye_data = {'x':gazex_data, 'y':gazey_data}  # eye_data to numpy record array
+        eye_data = np.rec.fromarrays(list(eye_data.values()), names=list(eye_data.keys()))
+        # Remodnav parameters
+        px2deg = math.degrees(math.atan2(.5 * screen_size, screen_distance)) / (.5 * screen_width)  # Pixel to degree conversion
+        # Run Remodnav not considering pursuit class and min fixations 50 ms
+        clf = EyegazeClassifier(px2deg=px2deg,
+            sampling_rate=sample_rate,
+            min_pursuit_duration=min_pursuit_dur,
+            max_pso_duration=max_pso_dur,
+            min_fixation_duration=min_fix_dur)
+        pp = clf.preproc(
+            eye_data)
+            # savgol_length=0.195
+        sac_fix = clf(pp, classify_isp=True, sort_events=True)
+        # sac_fix to pandas DataFrame
+        sac_fix = pd.DataFrame(sac_fix, columns=['start_time', 'end_time', 'label', 'start_x', 'start_y', 'end_x', 'end_y', 'amp', 'peak_vel', 'med_vel', 'avg_vel'])
+        sac_fix['duration'] = sac_fix['end_time'] - sac_fix['start_time']
+        sac_fix.rename(columns={'start_time':'onset'}, inplace=True)
+        # Get saccades and fixations
+        saccades_eye_all = sac_fix.loc[(sac_fix['label'] == 'SACC') | (sac_fix['label'] == 'ISAC')]
+        fixations_eye_all = sac_fix.loc[sac_fix['label'] == 'FIXA']
+        # Drop saccades and fixations based on conditions
+        print(f'Dropping saccades with average vel > {sac_max_vel} deg/s, and fixations with amplitude > {fix_max_amp} deg')
+        fixations_eye = fixations_eye_all[fixations_eye_all['amp'] <= fix_max_amp].sort_values(by='start_x', ignore_index=True)
+        saccades_eye = saccades_eye_all[saccades_eye_all['peak_vel'] <= sac_max_vel].sort_values(by='start_x', ignore_index=True)
+        fixations_eye.drop(columns=['label'], inplace=True)
+        saccades_eye.drop(columns=['label'], inplace=True)
+        print(f'Kept {len(fixations_eye)} out of {len(fixations_eye_all)} fixations')
+        print(f'Kept {len(saccades_eye)} out of {len(saccades_eye_all)} saccades')
+        # Variables to save fixations features
+        mean_x = []
+        mean_y = []
+        pupil_size = []
+        # Drop when no previous saccade detected in sac_time_thresh
+        if drop_fix_from_blink:
+            prev_sac = []
+            # Identify neighbour saccades to each fixation (considering sac_time_thresh)
+            print('Finding previous and next saccades')
+            for fix_idx, fixation in tqdm(fixations_eye.iterrows(), total=len(fixations_eye)):
+                fix_time = fixation['onset']
+                fix_dur = fixation['duration']
+                # Previous and next saccades
+                try:
+                    sac0 = saccades_eye.loc[(saccades_eye['onset'] + saccades_eye['duration'] > fix_time - sac_time_thresh) & (saccades_eye['onset'] + saccades_eye['duration'] < fix_time + sac_time_thresh)].index.values[-1]
+                except:
+                    sac0 = -1
+                prev_sac.append(sac0)
+            
+            # Add columns
+            fixations_eye['prev_sac'] = prev_sac
+            fixations_eye.drop(fixations_eye[fixations_eye['prev_sac'] == -1].index, inplace=True)
+            print(f'\nKept {len(fixations_eye)} fixations with previous saccade')
+            fixations_eye.drop(columns=['prev_sac'], inplace=True)
+        # Fixations features
+        print('Computing average pupil size, and x and y position')
+        for fix_idx, fixation in tqdm(fixations_eye.iterrows(), total=len(fixations_eye)):
+            fix_time = fixation['onset']
+            fix_dur = fixation['duration']
+            # Average pupil size, x and y position
+            fix_time_idx = np.where(np.logical_and(times > fix_time, times < fix_time + fix_dur))[0]
+            pupil_data_fix = pupil_data[fix_time_idx]
+            gazex_data_fix = gazex_data[fix_time_idx]
+            gazey_data_fix = gazey_data[fix_time_idx]
+            pupil_size.append(np.nanmean(pupil_data_fix))
+            mean_x.append(np.nanmean(gazex_data_fix))
+            mean_y.append(np.nanmean(gazey_data_fix))
+        
+        fixations_eye['xAvg'] = mean_x
+        fixations_eye['yAvg'] = mean_y
+        fixations_eye['pupilAvg'] = pupil_size
+        fixations_eye = fixations_eye.astype({'xAvg':float, 'yAvg':float, 'pupilAvg':float})
+        fixations_eye['onset'] = fixations_eye['onset'] * 1000 + starting_time  # Convert to ms
+        fixations_eye['end_time'] = fixations_eye['end_time'] * 1000 + starting_time  # Convert to ms
+        fixations_eye['duration'] = fixations_eye['duration'] * 1000  # Convert to ms
+        saccades_eye['onset'] = saccades_eye['onset'] * 1000 + starting_time  # Convert to ms
+        saccades_eye['end_time'] = saccades_eye['end_time'] * 1000 + starting_time  # Convert to ms
+        saccades_eye['duration'] = saccades_eye['duration'] * 1000  # Convert to ms
+        # Rename columns to match samples columns names
+        fixations_eye.rename(columns={'start_x':'xStart', 'start_y':'yStart', 'end_x':'xEnd', 'end_y':'yEnd', 'onset':'tStart', 'end_time':'tEnd', 'amp':'ampDeg', 'peak_vel':'vPeak'}, inplace=True)
+        saccades_eye.rename(columns={'start_x':'xStart', 'start_y':'yStart', 'end_x':'xEnd', 'end_y':'yEnd', 'onset':'tStart', 'end_time':'tEnd', 'amp':'ampDeg', 'peak_vel':'vPeak'}, inplace=True)
+        fixations_eye['Calib_index'] = calib_index
+        saccades_eye['Calib_index'] = calib_index
+        fixations_eye['Eyes_recorded'] = eyes_recorded
+        saccades_eye['Eyes_recorded'] = eyes_recorded
+        fixations_eye['Rate_recorded'] = sample_rate
+        saccades_eye['Rate_recorded'] = sample_rate
+        fixations_eye['eye'] = eye
+        saccades_eye['eye'] = eye  # Save to dictionary
+        
+        return fixations_eye, saccades_eye
+
+    def detect_on_chunk(self, chunk, min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05,
                                  sac_max_vel:float=1000., fix_max_amp:float=1.5, sac_time_thresh:float=0.002,
                                  drop_fix_from_blink:bool=True, screen_size:float=38., screen_width:int=1920, screen_distance:float=60):
 
@@ -107,145 +205,24 @@ class RemodnavDetection(EyeMovementDetection):
         assert (chunk["Rate_recorded"] == sample_rate).all()
         assert (chunk["Calib_index"] == calib_index).all()
         assert (chunk["Eyes_recorded"] == eyes_recorded).all()
-
         
         times = np.arange(stop=len(chunk)) / sample_rate
 
         fixations = []
         saccades = []
 
-
-        for gazex_data, gazey_data, pupil_data, eye in zip((chunk['LX'], chunk['RX']), 
-                                                        (chunk['LY'], chunk['RY']), 
-                                                        (chunk['LPupil'], chunk['RPupil']),     
+        for gazex_data, gazey_data, pupil_data, eye in zip((chunk['LX'], chunk['RX']),
+                                                        (chunk['LY'], chunk['RY']),
+                                                        (chunk['LPupil'], chunk['RPupil']),
                                                         ('L', 'R')):
 
-            # If not pre run data, run
-            print(f'\nRunning eye movements detection for {eye} eye...')
-
-            # Define data to save to excel file needed to run the saccades detection program Remodnav
-            eye_data = {'x': gazex_data, 'y': gazey_data}
-            # eye_data to numpy record array
-            eye_data = np.rec.fromarrays(list(eye_data.values()), names=list(eye_data.keys()))
-
-            # Remodnav parameters
-            px2deg = math.degrees(math.atan2(.5 * screen_size, screen_distance)) / (.5 * screen_width)  # Pixel to degree conversion
-
-
-            # Run Remodnav not considering pursuit class and min fixations 50 ms
-            clf = EyegazeClassifier(
-                px2deg=px2deg,
-                sampling_rate=sample_rate,
-                min_pursuit_duration=min_pursuit_dur,
-                max_pso_duration=max_pso_dur,
-                min_fixation_duration=min_fix_dur,
-            )
-
-            pp = clf.preproc(
-                eye_data,
-                #savgol_length=0.195
-
-            )
-
-            sac_fix = clf(pp, classify_isp=True, sort_events=True)
-            # sac_fix to pandas DataFrame
-            sac_fix = pd.DataFrame(sac_fix,columns = ['start_time','end_time','label','start_x', 'start_y', 'end_x', 'end_y','amp','peak_vel', 'med_vel', 'avg_vel'])
-            sac_fix['duration'] = sac_fix['end_time'] - sac_fix['start_time']
-            sac_fix.rename(columns={'start_time':'onset'},inplace=True)
-
-            # Get saccades and fixations
-            saccades_eye_all = sac_fix.loc[(sac_fix['label'] == 'SACC') | (sac_fix['label'] == 'ISAC')]
-            fixations_eye_all = sac_fix.loc[sac_fix['label'] == 'FIXA']
-
-            # Drop saccades and fixations based on conditions
-            print(f'Dropping saccades with average vel > {sac_max_vel} deg/s, and fixations with amplitude > {fix_max_amp} deg')
-
-            fixations_eye = fixations_eye_all[(fixations_eye_all['amp'] <= fix_max_amp)].sort_values(by='start_x',ignore_index=True)
-            saccades_eye = saccades_eye_all[saccades_eye_all['peak_vel'] <= sac_max_vel].sort_values(by='start_x',ignore_index=True)
-            fixations_eye.drop(columns=['label'],inplace=True)
-            saccades_eye.drop(columns=['label'],inplace=True)
-
-            print(f'Kept {len(fixations_eye)} out of {len(fixations_eye_all)} fixations')
-            print(f'Kept {len(saccades_eye)} out of {len(saccades_eye_all)} saccades')
-
-            # Variables to save fixations features
-            mean_x = []
-            mean_y = []
-            pupil_size = []
-
-            # Drop when no previous saccade detected in sac_time_thresh
-            if drop_fix_from_blink:
-                prev_sac = []
-                # Identify neighbour saccades to each fixation (considering sac_time_thresh)
-                print('Finding previous and next saccades')
-
-                for fix_idx, fixation in tqdm(fixations_eye.iterrows(), total=len(fixations_eye)):
-
-                    fix_time = fixation['onset']
-                    fix_dur = fixation['duration']
-
-                    # Previous and next saccades
-                    try:
-                        sac0 = saccades_eye.loc[(saccades_eye['onset'] + saccades_eye['duration'] > fix_time - sac_time_thresh) & (
-                                    saccades_eye['onset'] + saccades_eye['duration'] < fix_time + sac_time_thresh)].index.values[-1]
-                    except:
-                        sac0 = -1
-                    prev_sac.append(sac0)
-
-                # Add columns
-                fixations_eye['prev_sac'] = prev_sac
-                fixations_eye.drop(fixations_eye[fixations_eye['prev_sac'] == -1].index, inplace=True)
-                print(f'\nKept {len(fixations_eye)} fixations with previous saccade')
-                fixations_eye.drop(columns=['prev_sac'],inplace=True)
-
-
-            # Fixations features
-            print('Computing average pupil size, and x and y position')
-
-            for fix_idx, fixation in tqdm(fixations_eye.iterrows(), total=len(fixations_eye)):
-
-                fix_time = fixation['onset']
-                fix_dur = fixation['duration']
-
-                # Average pupil size, x and y position
-                fix_time_idx = np.where(np.logical_and(times > fix_time, times < fix_time + fix_dur))[0]
-
-                pupil_data_fix = pupil_data[fix_time_idx]
-                gazex_data_fix = gazex_data[fix_time_idx]
-                gazey_data_fix = gazey_data[fix_time_idx]
-
-                pupil_size.append(np.nanmean(pupil_data_fix))
-                mean_x.append(np.nanmean(gazex_data_fix))
-                mean_y.append(np.nanmean(gazey_data_fix))
-
-            fixations_eye['xAvg'] = mean_x
-            fixations_eye['yAvg'] = mean_y
-            fixations_eye['pupilAvg'] = pupil_size
-            fixations_eye = fixations_eye.astype({'xAvg': float, 'yAvg': float, 'pupilAvg': float})
+            fixations_eye, saccades_eye = self.run_eye_movement(
+                gazex_data, gazey_data, sample_rate,
+                min_pursuit_dur, max_pso_dur, min_fix_dur, sac_max_vel, fix_max_amp, sac_time_thresh,
+                drop_fix_from_blink, screen_size, screen_width, screen_distance, 
+                calib_index, eyes_recorded, starting_time, times, pupil_data, eye)
             
-
-            
-            fixations_eye['onset'] = fixations_eye['onset'] * 1000 + starting_time # Convert to ms
-            fixations_eye['end_time'] = fixations_eye['end_time'] * 1000 + starting_time # Convert to ms         
-            fixations_eye['duration'] = fixations_eye['duration'] * 1000 # Convert to ms
-            saccades_eye['onset'] = saccades_eye['onset'] * 1000 + starting_time # Convert to ms
-            saccades_eye['end_time'] = saccades_eye['end_time'] * 1000 + starting_time # Convert to ms
-            saccades_eye['duration'] = saccades_eye['duration'] * 1000 # Convert to ms
-
-            
-            # Rename columns to match samples columns names
-            fixations_eye.rename(columns={'start_x': 'xStart', 'start_y': 'yStart', 'end_x': 'xEnd', 'end_y': 'yEnd', 'onset': 'tStart', 'end_time':'tEnd', 'amp':'ampDeg', 'peak_vel':'vPeak'}, inplace=True)
-            saccades_eye.rename(columns={'start_x': 'xStart', 'start_y': 'yStart', 'end_x': 'xEnd', 'end_y': 'yEnd', 'onset': 'tStart', 'end_time':'tEnd', 'amp':'ampDeg', 'peak_vel':'vPeak'}, inplace=True)
-            fixations_eye['Calib_index'] = calib_index
-            saccades_eye['Calib_index'] = calib_index
-            fixations_eye['Eyes_recorded'] = eyes_recorded
-            saccades_eye['Eyes_recorded'] = eyes_recorded
-            fixations_eye['Rate_recorded'] = sample_rate
-            saccades_eye['Rate_recorded'] = sample_rate
-            fixations_eye['eye'] = eye
-            saccades_eye['eye'] = eye
-            # Save to dictionary
             fixations.append(fixations_eye)
-            saccades.append(saccades_eye)
+            saccades_eye.append(saccades_eye)
 
         return pd.concat(fixations), pd.concat(saccades)
