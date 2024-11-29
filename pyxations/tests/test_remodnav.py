@@ -36,29 +36,25 @@ class TestRemodnav(unittest.TestCase):
         dfSamples = pd.read_hdf(os.path.join(session_folder_path, 'samples.hdf5'))
         dfSamples = dfSamples[dfSamples['trial_number'] == 1]
 
-        eye_data = {
-            'x': dfSamples['X'], 
-            'y': dfSamples['Y']
-        }
-        
-        eye_data = np.rec.fromarrays(list(eye_data.values()), names=list(eye_data.keys()))
-        
-        params = {'px2deg': 0.018303394560752525, 'sampling_rate': 1000.0, 'min_pursuit_duration': 10.0, 'max_pso_duration': 0.0, 'min_fixation_duration': 0.05}
-        
         sample_rate = 1000
-        times = np.arange(stop=len(eye_data['x'])) / sample_rate
 
         remodnav = RemodnavDetection(
             Path(session_folder_path),
             dfSamples
         )
-        
-        remodnav.run_eye_movement(eye_data['x'], eye_data['y'], sample_rate, times=times)
 
+        config = {
+            'savgol_length': 0.195
+        }
+
+        saccades, fixations = remodnav.run_eye_movement_from_samples(dfSamples, sample_rate, config=config)
+
+        self.assertFalse(saccades.empty)
+        self.assertFalse(fixations.empty)
 
 
     def test_webgazer_remodnav(self):
-        return None
+
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
         path_to_derivatives = os.path.join(current_folder, "antisacadas_dataset_derivatives")
@@ -67,16 +63,41 @@ class TestRemodnav(unittest.TestCase):
         df_samples = pd.read_hdf(os.path.join(path_to_derivatives, 'sub-0001/ses-antisacadas/samples.hdf5'))
         df_samples = webgazer_parse.get_samples_for_remodnav(df_samples)
         
-        pass 
         remodnav = RemodnavDetection(
             Path(os.path.join(path_to_derivatives, 'sub-0001', 'ses-antisacadas')),
             df_samples
         )
         
-        result = remodnav.detect_eye_movements()
+        config = {
+            'savgol_length': 0.195
+        }
+        
+        result = remodnav.run_eye_movement_from_samples(df_samples, 60, config=config)
         
         self.assertTrue(result)
 
+    def test_tobii_remodnav(self):
+        current_folder = os.path.dirname(os.getcwd())
+        df_samples = pd.read_hdf(os.path.join(current_folder, 'tobii_dataset_derivatives', 'sub-0001/ses-sceneviewing/samples.hdf5'))
+        
+        remodnav = RemodnavDetection(
+            Path(current_folder),
+            df_samples
+        )
+        
+        config = {
+            'savgol_length': 0.195,
+            'eyes_recorded': 'L',
+            'eye': 'L',
+            'pupil_data': df_samples['PupilDiam_Left']
+        }
+        
+        saccades, fixations = remodnav.run_eye_movement_from_samples(
+            df_samples,  60,
+            x_label='Gaze3d_Left.x', y_label='Gaze3d_Left.y', config=config)
+        
+        self.assertFalse(saccades.empty)
+        self.assertFalse(fixations.empty)
 
 if __name__ == "__main__":
     unittest.main()

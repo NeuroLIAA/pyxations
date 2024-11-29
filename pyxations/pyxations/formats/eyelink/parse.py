@@ -59,7 +59,7 @@ def parse_edf_eyelink(edf_file_path, msg_keywords, session_folder_path, force_be
     from pyxations.bids_formatting import find_besteye, EYE_MOVEMENT_DETECTION_DICT, keep_eye
     from pyxations.pre_processing import PreProcessing
     
-    detection_algorithm = 'remodnav'#'eyelink'
+    detection_algorithm = 'eyelink'
     # Convert EDF to ASCII (only if necessary)
     ascii_file_path = convert_edf_to_ascii(edf_file_path, session_folder_path)
 

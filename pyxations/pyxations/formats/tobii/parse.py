@@ -17,6 +17,8 @@ def process_session(eye_tracking_data_path, msg_keywords, session_folder_path, f
 
 
 def parse_tobii(file_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+    from pyxations.bids_formatting import find_besteye, EYE_MOVEMENT_DETECTION_DICT, keep_eye
+    
     # Convert EDF to ASCII (only if necessary)
     # ascii_file_path = convert_edf_to_ascii(edf_file_path, session_folder_path)
     df = pd.read_csv(file_path, sep="\t")
@@ -35,6 +37,28 @@ def parse_tobii(file_path, msg_keywords, session_folder_path, force_best_eye, ke
             line_data.append(line.replace('\n', '').replace('\t', ' '))
             
             
+    dfSample = dfSample.rename(columns={'Eyetracker timestamp': 'tSample'})
+
+    detection_algorithm = 'remodnav'
+    eye_movement_detector = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path=session_folder_path,samples=dfSample)
+    config = {
+        'savgol_length': 0.195,
+        'eyes_recorded': 'L',
+        'eye': 'L',
+        'pupil_data': dfSample['PupilDiam_Left']
+    }
     
+    dfFix, dfSacc = eye_movement_detector.run_eye_movement_from_samples(
+        dfSample,  60,
+        x_label='Gaze3d_Left.x', y_label='Gaze3d_Left.y', config=config)
+    
+    
+    (session_folder_path / f'{detection_algorithm}_events').mkdir(parents=True, exist_ok=True)
+
     dfSample.to_hdf((session_folder_path / 'samples.hdf5'), key='samples', mode='w')
+    dfFix.to_hdf((session_folder_path / f'{detection_algorithm}_events' / 'fix.hdf5'), key='fix', mode='w')
+    dfSacc.to_hdf((session_folder_path / f'{detection_algorithm}_events' / 'sacc.hdf5'), key='sacc', mode='w')
+
+
+
     return df

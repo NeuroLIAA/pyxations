@@ -91,20 +91,52 @@ class RemodnavDetection(EyeMovementDetection):
 
         return pd.concat(fixations).sort_values(by='tEnd', ignore_index=True), pd.concat(saccades).sort_values(by='tEnd', ignore_index=True)
 
+
+
+    def run_eye_movement_from_samples(self, dfSamples, sample_rate, x_label='X', y_label='Y', config={}):
+        '''
+        Recieves a pandas dataframe, a sample rate, and optional configuration
+        :param dfSamples: Pandas dataframe including x and y columns
+        :param sample_rate: an integer representing the data sample rate.
+        :param x_label: X column name
+        :param y_label: Y column name
+        :param config:
+        '''
+        starting_time = dfSamples['tSample'].min()
+        eye_data = {
+            'x': dfSamples[x_label], 
+            'y': dfSamples[y_label]
+        }
+        eye_data = np.rec.fromarrays(list(eye_data.values()), names=list(eye_data.keys()))
+        
+        return self.simple_run_eye_movement(eye_data, sample_rate, starting_time, config)
+        
+    def simple_run_eye_movement(self, eye_data, sample_rate, starting_time, config={}):
+        if 'pupil_data' not in config.keys():
+            config['pupil_data'] = pd.Series([0]* len(eye_data['x']))
+        #starting_time = dfSamples['tSample'].min()
+        times = np.arange(stop=len(eye_data['x'])) / sample_rate
+        
+        return self.run_eye_movement(eye_data['x'], eye_data['y'], sample_rate, 
+            times=times, starting_time=starting_time, **config)
+
     def run_eye_movement(self, gazex_data, gazey_data, sample_rate,
              min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05,
              sac_max_vel:float=1000., fix_max_amp:float=1.5, sac_time_thresh:float=0.002,
-             drop_fix_from_blink:bool=True, screen_size:float=38., screen_width:int=1920, screen_distance:float=60, calib_index=0,
-             eyes_recorded=None, starting_time=None, times=None, pupil_data=None, eye='R'):
+             drop_fix_from_blink:bool=True, screen_size:float=38., screen_width:int=1920, 
+             screen_distance:float=60, calib_index=0, savgol_length=0.19,
+             eyes_recorded=None, starting_time=None, times=None, pupil_data=None, eye=None):
 
-        
         # If not pre run data, run
         print(f'\nRunning eye movements detection for {eye} eye...')
+        
         # Define data to save to excel file needed to run the saccades detection program Remodnav
         eye_data = {'x':gazex_data, 'y':gazey_data}  # eye_data to numpy record array
         eye_data = np.rec.fromarrays(list(eye_data.values()), names=list(eye_data.keys()))
+        
         # Remodnav parameters
         px2deg = math.degrees(math.atan2(.5 * screen_size, screen_distance)) / (.5 * screen_width)  # Pixel to degree conversion
+        
         # Run Remodnav not considering pursuit class and min fixations 50 ms
         clf = EyegazeClassifier(px2deg=px2deg,
             sampling_rate=sample_rate,
@@ -112,8 +144,10 @@ class RemodnavDetection(EyeMovementDetection):
             max_pso_duration=max_pso_dur,
             min_fixation_duration=min_fix_dur)
         pp = clf.preproc(
-            eye_data)
-            # savgol_length=0.195
+            eye_data,
+            savgol_length=savgol_length
+        )
+        
         sac_fix = clf(pp, classify_isp=True, sort_events=True)
         # sac_fix to pandas DataFrame
         sac_fix = pd.DataFrame(sac_fix, columns=['start_time', 'end_time', 'label', 'start_x', 'start_y', 'end_x', 'end_y', 'amp', 'peak_vel', 'med_vel', 'avg_vel'])
