@@ -3,5 +3,6 @@ pandas==2.0.3
 tables==3.8.0
 tqdm==2.2.3
 pytest==8.3.2
+pyarrow==18.1.0
 matplotlib==3.9.2
 remodnav==1.1.2

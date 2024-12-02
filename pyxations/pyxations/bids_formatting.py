@@ -144,13 +144,14 @@ def process_session(eye_tracking_data_path, msg_keywords, detection_algorithm, s
         eyelink_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
         
     elif detection_algorithm == 'webgazer':
-        webgazer_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite)
+        webgazer_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
     elif detection_algorithm == 'tobii':
-        tobii_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite)
+        tobii_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
     elif detection_algorithm == 'gaze':
-        gaze_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite)
+        gaze_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
 
-def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm='eyelink', num_processes=4, force_best_eye=True, keep_ascii=True, overwrite=False, **kwargs):
+def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm='eyelink', num_processes=4, 
+                                    force_best_eye=True, keep_ascii=True, overwrite=False, **kwargs):
     derivatives_folder = str(bids_dataset_folder) + "_derivatives"
     derivatives_folder = Path(derivatives_folder)
     bids_dataset_folder = Path(bids_dataset_folder)
