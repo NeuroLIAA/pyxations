@@ -1,6 +1,8 @@
 import os
 import unittest
 from pyxations import Experiment
+
+
 class TestScanpaths(unittest.TestCase):
     def test_scanpaths(self):
         current_folder = os.getcwd()
