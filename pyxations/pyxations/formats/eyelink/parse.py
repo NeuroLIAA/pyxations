@@ -15,7 +15,7 @@ from pyxations.formats.generic import BidsParse
 
 
 
-def process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+def process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
     edf_files = [file for file in eye_tracking_data_path.iterdir() if file.suffix.lower() == '.edf']
     if len(edf_files) > 1:
         print(f"More than one EDF file found in {eye_tracking_data_path}. Skipping folder.")
@@ -26,6 +26,8 @@ def process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, s
     exp_format = HDF5_EXPORT
     if 'export_format' in kwargs:
         exp_format = kwargs.get('export_format')
+        
+    msg_keywords = kwargs.pop('msg_keywords')
     
     EyelinkParse(session_folder_path, exp_format).parse(edf_file_path, detection_algorithm, msg_keywords, force_best_eye,
                          keep_ascii, overwrite, **kwargs)
@@ -63,11 +65,11 @@ def convert_edf_to_ascii(edf_file_path, output_dir):
 
 class EyelinkParse(BidsParse):
     
-    def parse(self, edf_file_path, msg_keywords, force_best_eye, keep_ascii, overwrite, **kwargs):
+    def parse(self, edf_file_path, detection_algorithm, msg_keywords, force_best_eye, keep_ascii, overwrite, **kwargs):
         from pyxations.bids_formatting import find_besteye, EYE_MOVEMENT_DETECTION_DICT, keep_eye
         from pyxations.pre_processing import PreProcessing
         
-        detection_algorithm = 'eyelink'
+        #detection_algorithm = 'eyelink'
         # Convert EDF to ASCII (only if necessary)
         ascii_file_path = convert_edf_to_ascii(edf_file_path, self.session_folder_path)
     
@@ -219,7 +221,7 @@ class EyelinkParse(BidsParse):
             dfSacc = dfSacc[['eye', 'tStart', 'tEnd', 'duration', 'xStart', 'yStart', 'xEnd', 'yEnd', 'ampDeg', 'vPeak', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
     
         else:
-            eye_movement_detector = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path=session_folder_path,samples=dfSamples)
+            eye_movement_detector = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path=self.session_folder_path,samples=dfSamples)
             dfFix, dfSacc = eye_movement_detector.detect_eye_movements(**{arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(eye_movement_detector.detect_eye_movements).parameters.keys()})
     
         # Optimization for selecting best eye
@@ -248,10 +250,10 @@ class EyelinkParse(BidsParse):
             ascii_file_path.unlink(missing_ok=True)
     
         # Save DataFrames to disk in one go to minimize memory usage during processing
-        self.save_dataframe(dfHeader, session_folder_path, 'header', key='header')
-        self.save_dataframe(dfMsg, session_folder_path, 'msg', key='msg')
-        self.save_dataframe(dfCalib, session_folder_path, 'calib', key='calib')
-        self.save_dataframe(dfSamples, session_folder_path, 'samples', key='samples')
-        self.save_dataframe(dfBlink, (session_folder_path / f'{detection_algorithm}_events'), 'blink', key='blink')
-        self.save_dataframe(dfFix, (session_folder_path / f'{detection_algorithm}_events'), 'fix', key='fix')
-        self.save_dataframe(dfSacc, (session_folder_path / f'{detection_algorithm}_events'), 'sacc', key='sacc')
+        self.save_dataframe(dfHeader, self.session_folder_path, 'header', key='header')
+        self.save_dataframe(dfMsg, self.session_folder_path, 'msg', key='msg')
+        self.save_dataframe(dfCalib, self.session_folder_path, 'calib', key='calib')
+        self.save_dataframe(dfSamples, self.session_folder_path, 'samples', key='samples')
+        self.save_dataframe(dfBlink, (self.session_folder_path / f'{detection_algorithm}_events'), 'blink', key='blink')
+        self.save_dataframe(dfFix, (self.session_folder_path / f'{detection_algorithm}_events'), 'fix', key='fix')
+        self.save_dataframe(dfSacc, (self.session_folder_path / f'{detection_algorithm}_events'), 'sacc', key='sacc')

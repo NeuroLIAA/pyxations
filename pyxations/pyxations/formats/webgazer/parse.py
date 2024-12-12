@@ -11,7 +11,7 @@ from pyxations.pre_processing import PreProcessing
 import inspect
 
 
-def process_session(eye_tracking_data_path, detection_algorithm,msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+def process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, **kwargs):
     csv_files = [file for file in eye_tracking_data_path.iterdir() if file.suffix.lower() == '.csv']
     if len(csv_files) > 1:
         print(f"More than one csv file found in {eye_tracking_data_path}. Skipping folder.")
@@ -23,8 +23,8 @@ def process_session(eye_tracking_data_path, detection_algorithm,msg_keywords, se
     if 'export_format' in kwargs:
         exp_format = kwargs.get('export_format')
     
-    WebGazerParse(session_folder_path, exp_format).parse(edf_file_path, detection_algorithm, msg_keywords, force_best_eye,
-                         keep_ascii, overwrite, **kwargs)
+    WebGazerParse(session_folder_path, exp_format).parse(edf_file_path, detection_algorithm,
+                         overwrite, **kwargs)
 
 
 
@@ -34,7 +34,7 @@ def process_session(eye_tracking_data_path, detection_algorithm,msg_keywords, se
 
 class WebGazerParse(BidsParse):
 
-    def parse(self, file_path, detection_algorithm, msg_keywords, force_best_eye, keep_ascii, overwrite, **kwargs):
+    def parse(self, file_path, detection_algorithm, overwrite, **kwargs):
         # Convert EDF to ASCII (only if necessary)
         # ascii_file_path = convert_edf_to_ascii(edf_file_path, session_folder_path)
         from pyxations.bids_formatting import find_besteye, EYE_MOVEMENT_DETECTION_DICT, keep_eye

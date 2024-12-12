@@ -5,6 +5,7 @@ from tqdm import tqdm
 from abc import ABC, abstractmethod
 from remodnav.clf import EyegazeClassifier
 import os
+from pathlib import Path
 
 
 class EyeMovementDetection(ABC):
@@ -156,6 +157,7 @@ class RemodnavDetection(EyeMovementDetection):
         # Show gaze
         #clf.show_gaze(pp=pp, events=sac_fix, show_vels=False)
         self.show_gaze(pp, sac_fix, clf, eye_data, sample_rate)
+        self.show_gaze_pylab(eye_data, pp, sac_fix, show_vels)
         
         # sac_fix to pandas DataFrame
         sac_fix = pd.DataFrame(sac_fix, columns=['start_time', 'end_time', 'label', 'start_x', 'start_y', 'end_x', 'end_y', 'amp', 'peak_vel', 'med_vel', 'avg_vel'])
@@ -275,7 +277,7 @@ class RemodnavDetection(EyeMovementDetection):
         args_outfile = 'remodnav_gaze'
         
         import matplotlib
-        matplotlib.use('agg')
+        #matplotlib.use('agg')
         import pylab as pl
     
         # one inch per second, or as big as PNG software/browsers can handle
@@ -300,6 +302,10 @@ class RemodnavDetection(EyeMovementDetection):
         # ))
         pl.ylabel('coordinates (pixel)')
         pl.xlabel('time (seconds)')
+        
+        
+        
+        Path(self.out_folder).mkdir(parents=True, exist_ok=True)
         pl.savefig(
             os.path.join(
                 self.out_folder,
@@ -309,3 +315,49 @@ class RemodnavDetection(EyeMovementDetection):
             ),
             bbox_inches='tight', format='png', dpi=100)
     
+
+    def show_gaze_pylab(self, data=None, pp=None, events=None, show_vels=True):
+        colors = {
+            'FIXA': 'xkcd:beige',
+            'PURS': 'xkcd:burnt sienna',
+            'SACC': 'xkcd:spring green',
+            'ISAC': 'xkcd:pea green',
+            'HPSO': 'xkcd:azure',
+            'IHPS': 'xkcd:azure',
+            'LPSO': 'xkcd:faded blue',
+            'ILPS': 'xkcd:faded blue',
+        }
+
+        import pylab as pl
+        if events is not None:
+            for ev in events:
+                pl.axvspan(
+                    ev['start_time'],
+                    ev['end_time'],
+                    color=colors[ev['label']],
+                    alpha=0.8)
+        ntimepoints = len(pp) if pp is not None else len(data)
+        timepoints = np.linspace(0, ntimepoints / self.sr, ntimepoints)
+        if data is not None:
+            pl.plot(
+                timepoints,
+                data['x'],
+                color='xkcd:pig pink', lw=1)
+            pl.plot(
+                timepoints,
+                data['y'],
+                color='xkcd:pig pink', lw=1)
+        if pp is not None:
+            if show_vels:
+                pl.plot(
+                    timepoints,
+                    pp['vel'],
+                    color='xkcd:gunmetal', lw=1)
+            pl.plot(
+                timepoints,
+                pp['x'],
+                color='black', lw=1)
+            pl.plot(
+                timepoints,
+                pp['y'],
+                color='black', lw=1)

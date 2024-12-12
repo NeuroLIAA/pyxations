@@ -8,7 +8,7 @@ from pyxations.formats.generic import BidsParse
 from pyxations.export import HDF5_EXPORT
 
 
-def process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+def process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, **kwargs):
     csv_files = [file for file in eye_tracking_data_path.iterdir() if file.suffix.lower() == '.txt']
     if len(csv_files) > 1:
         print(f"More than one csv file found in {eye_tracking_data_path}. Skipping folder.")
@@ -21,12 +21,12 @@ def process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, s
         exp_format = kwargs.get('export_format')
 
     TobiiParse(session_folder_path, exp_format).parse(
-        edf_file_path, msg_keywords, force_best_eye, keep_ascii, overwrite, **kwargs)
+        edf_file_path, detection_algorithm, overwrite, **kwargs)
 
 
 class TobiiParse(BidsParse):
 
-    def parse(self, file_path, msg_keywords,  force_best_eye, keep_ascii, overwrite, **kwargs):
+    def parse(self, file_path, detection_algorithm, overwrite, **kwargs):
         from pyxations.bids_formatting import find_besteye, EYE_MOVEMENT_DETECTION_DICT, keep_eye
         
         # Convert EDF to ASCII (only if necessary)
@@ -48,7 +48,6 @@ class TobiiParse(BidsParse):
                 
         dfSample = dfSample.rename(columns={'Eyetracker timestamp': 'tSample'})
     
-        detection_algorithm = 'remodnav'
         eye_movement_detector = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path=self.session_folder_path, samples=dfSample)
         config = {
             'savgol_length': 0.195,

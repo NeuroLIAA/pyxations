@@ -136,20 +136,20 @@ def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id
         shutil.copy(file_path, session_folder_path)
 
 
-def process_session(eye_tracking_data_path, dataset_format, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+def process_session(eye_tracking_data_path, dataset_format, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
 
     if dataset_format == 'eyelink':
-        eyelink_parser.process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+        eyelink_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
         
     elif dataset_format == 'webgazer':
-        webgazer_parser.process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+        webgazer_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, **kwargs)
     elif dataset_format == 'tobii':
-        tobii_parser.process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+        tobii_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, **kwargs)
     elif dataset_format == 'gaze':
-        gaze_parser.process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+        gaze_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
 
 
-def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, msg_keywords, detection_algorithm='remodnav', num_processes=4,
+def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detection_algorithm='remodnav', num_processes=4,
                                     force_best_eye=True, keep_ascii=True, overwrite=False, **kwargs):
     derivatives_folder = str(bids_dataset_folder) + "_derivatives"
     derivatives_folder = Path(derivatives_folder)
@@ -163,7 +163,7 @@ def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, msg_key
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
 
         futures = [
-            executor.submit(process_session, session / "ET", dataset_format, msg_keywords, detection_algorithm, derivatives_folder / subject.name / session.name, force_best_eye, keep_ascii, overwrite, **kwargs)
+            executor.submit(process_session, session / "ET", dataset_format, detection_algorithm, derivatives_folder / subject.name / session.name, force_best_eye, keep_ascii, overwrite, **kwargs)
             for subject in bids_folders
             for session in (bids_dataset_folder / subject.name).iterdir() if session.name.startswith("ses-") and (bids_dataset_folder / subject.name / session.name).is_dir()
         ]
