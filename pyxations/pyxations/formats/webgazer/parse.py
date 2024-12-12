@@ -7,9 +7,11 @@ import pandas as pd
 import json
 from pyxations.export import HDF5_EXPORT
 from pyxations.formats.generic import BidsParse
+from pyxations.pre_processing import PreProcessing
+import inspect
 
 
-def process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+def process_session(eye_tracking_data_path, detection_algorithm,msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
     csv_files = [file for file in eye_tracking_data_path.iterdir() if file.suffix.lower() == '.csv']
     if len(csv_files) > 1:
         print(f"More than one csv file found in {eye_tracking_data_path}. Skipping folder.")
@@ -21,7 +23,7 @@ def process_session(eye_tracking_data_path, msg_keywords, session_folder_path, f
     if 'export_format' in kwargs:
         exp_format = kwargs.get('export_format')
     
-    WebGazerParse(exp_format).parse(edf_file_path, msg_keywords, session_folder_path,force_best_eye,
+    WebGazerParse(session_folder_path, exp_format).parse(edf_file_path, detection_algorithm, msg_keywords, force_best_eye,
                          keep_ascii, overwrite, **kwargs)
 
 
@@ -32,12 +34,13 @@ def process_session(eye_tracking_data_path, msg_keywords, session_folder_path, f
 
 class WebGazerParse(BidsParse):
 
-    def parse(self, file_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+    def parse(self, file_path, detection_algorithm, msg_keywords, force_best_eye, keep_ascii, overwrite, **kwargs):
         # Convert EDF to ASCII (only if necessary)
         # ascii_file_path = convert_edf_to_ascii(edf_file_path, session_folder_path)
         from pyxations.bids_formatting import find_besteye, EYE_MOVEMENT_DETECTION_DICT, keep_eye
-        detection_algorithm = 'remodnav'
         df = pd.read_csv(file_path)
+        
+        session_folder_path = self.session_folder_path
         
         df['line_number'] = df.index
         # columna importante 
@@ -69,19 +72,25 @@ class WebGazerParse(BidsParse):
         
         dfFix, dfSacc = eye_movement_detector.run_eye_movement_from_samples(dfSamples, 60, config=config)
 
-        # Persist
-        #dfCalib.to_hdf((session_folder_path / 'calib.hdf5'), key='calib', mode='w')
-        #dfSamples.to_hdf((session_folder_path / 'samples.hdf5'), key='samples', mode='w')
-        #dfFix.to_hdf((session_folder_path / f'{detection_algorithm}_events' / 'fix.hdf5'), key='fix', mode='w')
-        #dfSacc.to_hdf((session_folder_path / f'{detection_algorithm}_events' / 'sacc.hdf5'), key='sacc', mode='w')
+        dfBlink = pd.DataFrame()
+        dfMsg = pd.DataFrame()
+
+        pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg)
+        pre_processing.process({'bad_samples': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.bad_samples).parameters.keys()},
+                                #'split_all_into_trials_by_msgs': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.split_all_into_trials_by_msgs).parameters.keys()},
+                                'saccades_direction': {},})
+    
+
+        self.detection_algorithm = detection_algorithm
+        self.store_dataframes(dfSamples, dfCalib, dfFix, dfSacc, dfBlink, dfMsg)
 
         # Save DataFrames to disk in one go to minimize memory usage during processing
-        self.save_dataframe(dfCalib, session_folder_path, 'calib', key='calib')
-        self.save_dataframe(dfSamples, session_folder_path, 'samples', key='samples')
+        #self.save_dataframe(dfCalib, session_folder_path, 'calib', key='calib')
+        #self.save_dataframe(dfSamples, session_folder_path, 'samples', key='samples')
         
-        (session_folder_path / f'{detection_algorithm}_events').mkdir(parents=True, exist_ok=True)
-        self.save_dataframe(dfFix, (session_folder_path / f'{detection_algorithm}_events'), 'fix', key='fix')
-        self.save_dataframe(dfSacc, (session_folder_path / f'{detection_algorithm}_events'), 'sac', key='sacc')
+        #(session_folder_path / f'{detection_algorithm}_events').mkdir(parents=True, exist_ok=True)
+        #self.save_dataframe(dfFix, (session_folder_path / f'{detection_algorithm}_events'), 'fix', key='fix')
+        #self.save_dataframe(dfSacc, (session_folder_path / f'{detection_algorithm}_events'), 'sacc', key='sacc')
     
 
 def get_samples_for_remodnav(df_samples, rate_recorded=60, r_pupil=1, l_pupil=1):

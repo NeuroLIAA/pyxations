@@ -16,9 +16,7 @@ import pyxations.formats.gazepoint.parse as gaze_parser
 from pyxations.formats.tobii.bids import TobiiBidsConverter
 from pyxations.formats.gazepoint.bids import GazepointBidsConverter
 
-
 EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection}
-
 
 
 def find_besteye(df_cal):
@@ -45,15 +43,16 @@ def find_besteye(df_cal):
 
     return 'L' if left_error < right_error else 'R'
 
-def keep_eye(eye,df_samples,df_fix,df_blink,df_sacc):
+
+def keep_eye(eye, df_samples, df_fix, df_blink, df_sacc):
     if eye == 'R':
-        df_samples = df_samples[['tSample', 'RX', 'RY', 'RPupil','Line_number','Eyes_recorded','Rate_recorded','Calib_index']].copy()
+        df_samples = df_samples[['tSample', 'RX', 'RY', 'RPupil', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].copy()
         df_fix = df_fix[df_fix['eye'] == 'R'].reset_index(drop=True)
         df_blink = df_blink[df_blink['eye'] == 'R'].reset_index(drop=True)
         df_sacc = df_sacc[df_sacc['eye'] == 'R'].reset_index(drop=True)
         df_samples.rename(columns={'RX': 'X', 'RY': 'Y', 'RPupil': 'Pupil'}, inplace=True)
     else:
-        df_samples = df_samples[['tSample', 'LX', 'LY', 'LPupil','Line_number','Eyes_recorded','Rate_recorded','Calib_index']].copy()
+        df_samples = df_samples[['tSample', 'LX', 'LY', 'LPupil', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].copy()
         df_fix = df_fix[df_fix['eye'] == 'L'].reset_index(drop=True)
         df_blink = df_blink[df_blink['eye'] == 'L'].reset_index(drop=True)
         df_sacc = df_sacc[df_sacc['eye'] == 'L'].reset_index(drop=True)
@@ -61,7 +60,8 @@ def keep_eye(eye,df_samples,df_fix,df_blink,df_sacc):
     df_blink.dropna(inplace=True)
     df_fix.dropna(inplace=True)
     df_sacc.dropna(inplace=True)
-    return df_samples,df_fix,df_blink,df_sacc
+    return df_samples, df_fix, df_blink, df_sacc
+
 
 def get_converter(format_name):
     if format_name == 'webgazer':
@@ -73,6 +73,7 @@ def get_converter(format_name):
     elif format_name == 'gaze':
         return GazepointBidsConverter()
     return None
+
 
 def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session_substrings=1, format_name='eyelink'):
     """
@@ -104,21 +105,21 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
     bids_folder_path = Path(target_folder_path) / dataset_name
     bids_folder_path.mkdir(parents=True, exist_ok=True)
 
-    subj_ids =  converter.get_subject_ids(file_paths)
+    subj_ids = converter.get_subject_ids(file_paths)
 
     # If all of the subjects have numerical IDs, sort them numerically, else sort them alphabetically
     if all(subject_id.isdigit() for subject_id in subj_ids):
         subj_ids.sort(key=int)
     else:
         subj_ids.sort()
-    new_subj_ids = [str(subject_index).zfill(4) for subject_index in range(1,len(subj_ids)+1)]
+    new_subj_ids = [str(subject_index).zfill(4) for subject_index in range(1, len(subj_ids) + 1)]
 
     # Create subfolders for each session for each subject
     for subject_id in new_subj_ids:
         old_subject_id = subj_ids[int(subject_id) - 1]
         for file in file_paths:
             file_name = Path(file).name
-            session_id = "_".join("".join(file_name.split(".")[:-1]).split("_")[1:session_substrings+1])
+            session_id = "_".join("".join(file_name.split(".")[:-1]).split("_")[1:session_substrings + 1])
             converter.move_file_to_bids_folder(file, bids_folder_path, subject_id, old_subject_id, session_id)
 
         metadata.loc[len(metadata.index)] = [subject_id, old_subject_id]
@@ -127,45 +128,42 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
     return bids_folder_path
 
 
-def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id,tag):
+def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id, tag):
     session_folder_path = bids_folder_path / ("sub-" + subject_id) / ("ses-" + session_id) / tag
     session_folder_path.mkdir(parents=True, exist_ok=True)
     new_file_path = session_folder_path / file_path.name
     if not new_file_path.exists():
         shutil.copy(file_path, session_folder_path)
-    
 
 
+def process_session(eye_tracking_data_path, dataset_format, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
 
-
-def process_session(eye_tracking_data_path, msg_keywords, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
-
-    if detection_algorithm == 'eyelink':
-        eyelink_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+    if dataset_format == 'eyelink':
+        eyelink_parser.process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
         
-    elif detection_algorithm == 'webgazer':
-        webgazer_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
-    elif detection_algorithm == 'tobii':
-        tobii_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
-    elif detection_algorithm == 'gaze':
-        gaze_parser.process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+    elif dataset_format == 'webgazer':
+        webgazer_parser.process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+    elif dataset_format == 'tobii':
+        tobii_parser.process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+    elif dataset_format == 'gaze':
+        gaze_parser.process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
 
-def compute_derivatives_for_dataset(bids_dataset_folder, msg_keywords, detection_algorithm='eyelink', num_processes=4, 
+
+def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, msg_keywords, detection_algorithm='remodnav', num_processes=4,
                                     force_best_eye=True, keep_ascii=True, overwrite=False, **kwargs):
     derivatives_folder = str(bids_dataset_folder) + "_derivatives"
     derivatives_folder = Path(derivatives_folder)
     bids_dataset_folder = Path(bids_dataset_folder)
     derivatives_folder.mkdir(exist_ok=True)
 
-
     bids_folders = [folder for folder in bids_dataset_folder.iterdir() if folder.is_dir() and folder.name.startswith("sub-")]
-    #if detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and detection_algorithm not in ['eyelink', 'webgazer', 'tobii', 'gaze']:
+    # if detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and detection_algorithm not in ['eyelink', 'webgazer', 'tobii', 'gaze']:
     #    raise ValueError(f"Detection algorithm {detection_algorithm} not found.")
 
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
 
         futures = [
-            executor.submit(process_session, session / "ET", msg_keywords, detection_algorithm, derivatives_folder / subject.name / session.name, force_best_eye, keep_ascii, overwrite, **kwargs)
+            executor.submit(process_session, session / "ET", dataset_format, msg_keywords, detection_algorithm, derivatives_folder / subject.name / session.name, force_best_eye, keep_ascii, overwrite, **kwargs)
             for subject in bids_folders
             for session in (bids_dataset_folder / subject.name).iterdir() if session.name.startswith("ses-") and (bids_dataset_folder / subject.name / session.name).is_dir()
         ]

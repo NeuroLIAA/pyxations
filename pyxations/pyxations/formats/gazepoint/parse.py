@@ -7,7 +7,8 @@ import pandas as pd
 from pyxations.formats.generic import BidsParse
 from pyxations.export import HDF5_EXPORT
 
-def process_session(eye_tracking_data_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+
+def process_session(eye_tracking_data_path, detection_algorithm, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
     csv_files = [file for file in eye_tracking_data_path.iterdir() if file.suffix.lower() == '.csv']
     if len(csv_files) > 1:
         print(f"More than one csv file found in {eye_tracking_data_path}. Skipping folder.")
@@ -18,14 +19,13 @@ def process_session(eye_tracking_data_path, msg_keywords, session_folder_path, f
     exp_format = HDF5_EXPORT
     if 'export_format' in kwargs:
         exp_format = kwargs.get('export_format')
-    GazePointParse(exp_format).parse(edf_file_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+    GazePointParse(session_folder_path, exp_format).parse(edf_file_path, detection_algorithm, msg_keywords,force_best_eye, keep_ascii, overwrite, **kwargs)
 
 class GazePointParse(BidsParse):
 
-    def parse(self, file_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
-        # Convert EDF to ASCII (only if necessary)
-        # ascii_file_path = convert_edf_to_ascii(edf_file_path, session_folder_path)
-        detection_algorithm = 'remodnav'
+    def parse(self, file_path, detection_algorithm, msg_keywords, force_best_eye, keep_ascii, overwrite, **kwargs):
+        from pyxations.bids_formatting import EYE_MOVEMENT_DETECTION_DICT
+        
         df = pd.read_csv(file_path)
         
         dfSample = df.reset_index().rename(columns={
@@ -42,14 +42,16 @@ class GazePointParse(BidsParse):
             "BKDUR": "duration"
         })
         dfBlink['tStart'] = dfBlink['tEnd'] - dfBlink['duration']
-        
-        #dfSample.to_hdf((session_folder_path / 'samples.hdf5'), key='samples', mode='w')
-        #dfBlink.to_hdf((session_folder_path / 'blink.hdf5'), key='samples', mode='w')
-        (session_folder_path / f'{detection_algorithm}_events').mkdir(parents=True, exist_ok=True)
-        self.save_dataframe(dfSample, session_folder_path, 'samples', key='samples')
-        self.save_dataframe(dfBlink, (session_folder_path / f'{detection_algorithm}_events'), 'blink', key='blink')
 
-        #(session_folder_path / f'{detection_algorithm}_events').mkdir(parents=True, exist_ok=True)
-        #self.save_dataframe(dfFix, (session_folder_path / f'{detection_algorithm}_events'), 'fix', key='fix')
-        #self.save_dataframe(dfSacc, (session_folder_path / f'{detection_algorithm}_events'), 'sac', key='sacc')
+        eye_movement_detector = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path=self.session_folder_path,samples=dfSample)
+        config = {
+            'savgol_length': 0.19,
+        }
+        self.detection_algorithm = detection_algorithm
+        dfFix, dfSacc = eye_movement_detector.run_eye_movement_from_samples(dfSample, 60, config=config)
+
+        
+        
+        self.store_dataframes(dfSample, dfBlink=dfBlink, dfFix=dfFix, dfSacc=dfSacc)
+
     

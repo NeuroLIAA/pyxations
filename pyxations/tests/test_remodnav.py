@@ -72,7 +72,7 @@ class TestRemodnav(unittest.TestCase):
             'savgol_length': 0.195
         }
         
-        result = remodnav.run_eye_movement_from_samples(df_samples, 60, config=config)
+        result = remodnav.run_eye_movement_from_samples(df_samples, 30, config=config)
         
         self.assertTrue(result)
 
@@ -98,6 +98,15 @@ class TestRemodnav(unittest.TestCase):
         
         self.assertFalse(saccades.empty)
         self.assertFalse(fixations.empty)
+
+    def rest_remodnav_show_gaze(self):
+        
+        
+        #clf.show_gaze(pp=pp, events=events, show_vels=False)
+        
+        self.assertTrue(False)
+        
+
 
 if __name__ == "__main__":
     unittest.main()
