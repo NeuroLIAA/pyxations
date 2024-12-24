@@ -3,6 +3,17 @@ import pandas as pd
 from pyxations.visualization.visualization import Visualization
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from pyxations.export import FEATHER_EXPORT, HDF5_EXPORT
+from abc import ABC, abstractmethod
+
+STIMULI_FOLDER = "stimuli"
+
+# Abstract Session class
+class BaseSession(ABC):
+    @abstractmethod
+    def load_behavior_data(self):
+        # This should be implemented for each type of experiment
+        pass
+
 class Experiment:
 
     def __init__(self, dataset_path: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
@@ -198,7 +209,7 @@ class Subject:
         df["subject_id"] = self.subject_id
         return df
 
-class Session:
+class Session(BaseSession):
     
     def __init__(self, session_id: str, subject: Subject, session_path: Path, behavior_path: Path, excluded_trials: list = [],export_format = FEATHER_EXPORT):
         self.session_id = session_id
@@ -237,7 +248,8 @@ class Session:
         for trial in bad_trials:
             self.trials[trial].unlink_session()
         return bad_trials, total_trials
-    
+
+
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
         events_path = self.session_path / f"{self.detection_algorithm}_events"
@@ -251,7 +263,7 @@ class Session:
         else:
             raise ValueError(f"Export format {self.export_format} not found.")
 
-
+        
         # Check paths and load files efficiently
         samples_path = self.session_path / ("samples." + file_extension)
         fix_path = events_path / ("fix." + file_extension)
@@ -269,12 +281,14 @@ class Session:
                 self.behavior_data = pd.read_csv(behavior_files[0])
 
         # Initialize trials
+        self.init_trials(samples,fix,sacc,blink,events_path)
+
+    def init_trials(self,samples,fix,sacc,blink,events_path):
         self._trials = {trial:
             Trial(trial, self, samples, fix, sacc, blink, events_path)
             for trial in samples["trial_number"].unique() 
             if trial != -1 and trial not in self.excluded_trials
-        }
-
+        } 
 
     def plot_scanpaths(self,screen_height,screen_width, display: bool = False):
         for trial in self.trials.values():
@@ -390,3 +404,91 @@ class Trial:
         bad_values = self._samples["bad"].sum()
         bad_and_nan_percentage = (nan_values + bad_values) / len(self._samples)
         return bad_and_nan_percentage > threshold
+    
+
+
+
+
+class VisualSearchExperiment(Experiment):
+    def __init__(self, dataset_path: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
+        self.dataset_path = Path(dataset_path)
+        self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
+        self.metadata = pd.read_csv(self.dataset_path / "participants.tsv", sep="\t", 
+                                    dtype={"subject_id": str, "old_subject_id": str})
+        self.subjects = { subject_id:
+            VisualSearchSubject(subject_id, old_subject_id, self, self.dataset_path / f"sub-{subject_id}",
+                    self.derivatives_path / f"sub-{subject_id}",
+                     excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}),export_format)
+            for subject_id, old_subject_id in zip(self.metadata["subject_id"], self.metadata["old_subject_id"])
+            if subject_id not in excluded_subjects and old_subject_id not in excluded_subjects
+        }
+        self.export_format = export_format
+
+class VisualSearchSubject(Subject):
+    def __init__(self, subject_id: str, old_subject_id: str, experiment: VisualSearchExperiment, subject_dataset_path: Path, subject_derivatives_path: Path,
+                 excluded_sessions: list = [], excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
+        super().__init__(subject_id, old_subject_id, experiment, subject_dataset_path, subject_derivatives_path, excluded_sessions, excluded_trials, export_format)
+
+class VisualSearchSession(Session):
+    def __init__(self, session_id: str, subject: VisualSearchSubject, session_path: Path, behavior_path: Path, excluded_trials: list = [],export_format = FEATHER_EXPORT):
+        super().__init__(session_id, subject, session_path, behavior_path, excluded_trials, export_format)
+
+    BEH_COLUMNS = ["trial_number", "stimulus","memory_set", "memory_set_locations" "target_present", "target", "target_location","correct_response"]
+    '''Columns explanation:
+    - trial_number: The number of the trial, in the order they were presented.
+    - stimulus: The filename of the stimulus presented.
+    - memory_set: The set of items memorized by the participant. It should be a list of strings. Each string should be the filename of the stimulus.
+    - memory_set_locations: The locations of the items memorized by the participant. It should be a list of tuples. Each tuple should contain bounding
+    boxes of the items memorized by the participant. The bounding boxes should be in the format (x1, y1, x2, y2), where (x1, y1) is the top-left corner and
+    (x2, y2) is the bottom-right corner.
+    - target_present: Whether one of the items is present in the stimulus. It should be a boolean.
+    - target: The filename of the target item. It should be a string.
+    - target_location: The location of the target item. It should be a tuple containing the bounding box of the target item. The bounding box should be in
+    the format (x1, y1, x2, y2), where (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner. If target_present is False, the value for this column will
+    not be taken into account.
+    - correct_response: The correct response for the trial. It should be a boolean.
+
+    Notice that you can get the actual response of the user by using the "correct_response" and "target_present" columns.
+    '''
+    def load_behavior_data(self):
+        self.behavior_data = pd.read_csv(self.behavior_path / "behavior_data.csv", dtype={"trial_number": int, "stimulus": str, "memory_set": list, "memory_set_locations": list, "target_present": bool, "target": str, "target_location": tuple, "correct_response": bool})
+
+    def init_trials(self,samples,fix,sacc,blink,events_path):
+        self._trials = {trial:
+            VisualSearchTrial(trial, self, samples, fix, sacc, blink, events_path, self.behavior_data)
+            for trial in samples["trial_number"].unique() 
+            if trial != -1 and trial not in self.excluded_trials
+        }
+    
+    def load_data(self, detection_algorithm: str):
+        self.load_behavior_data()
+        super().load_data(detection_algorithm)
+        del self.behavior_data
+        
+
+class VisualSearchTrial(Trial):
+
+    def __init__(self, trial_number, session, samples, fix, sacc, blink, events_path, behavior_data):
+        super().__init__(trial_number, session, samples, fix, sacc, blink, events_path)
+        self._target_present = behavior_data.loc[behavior_data["trial_number"] == trial_number, "target_present"].values[0]
+        self._target = behavior_data.loc[behavior_data["trial_number"] == trial_number, "target"].values[0]
+        if self._target_present:            
+            self._target_location = behavior_data.loc[behavior_data["trial_number"] == trial_number, "target_location"].values[0]
+        self._correct_response = behavior_data.loc[behavior_data["trial_number"] == trial_number, "correct_response"].values[0]
+        self._stimulus = behavior_data.loc[behavior_data["trial_number"] == trial_number, "stimulus"].values[0]
+        self._stimulus_height = behavior_data.loc[behavior_data["trial_number"] == trial_number, "stimulus_height"].values[0]
+        self._stimulus_width = behavior_data.loc[behavior_data["trial_number"] == trial_number, "stimulus_width"].values[0]
+        self._memory_set = behavior_data.loc[behavior_data["trial_number"] == trial_number, "memory_set"].values[0]
+        self._memory_set_locations = behavior_data.loc[behavior_data["trial_number"] == trial_number, "memory_set_locations"].values[0]
+
+    
+    def plot_scanpath(self, screen_height, screen_width, **kwargs):
+        vis = Visualization(self.events_path, self.detection_algorithm)
+        (self.events_path / "plots").mkdir(parents=True, exist_ok=True)
+        # The stimuli should be on a folder called "stimuli" in the same level of the dataset folder
+        stim_path = self.session.subject.experiment.dataset_path.parent / STIMULI_FOLDER / self._stimulus
+        # If the target is present set bbox to the target location
+        if self._target_present:
+            kwargs["bbox"] = self._target_location
+        vis.scanpath(fixations=self._fix,img_path=stim_path, saccades=self._sacc, samples=self._samples, screen_height=screen_height, screen_width=screen_width, 
+                      folder_path=self.events_path / "plots", **kwargs)
