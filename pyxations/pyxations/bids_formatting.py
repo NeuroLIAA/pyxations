@@ -1,12 +1,9 @@
 from pathlib import Path
 import shutil
-import subprocess
-import numpy as np
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
-from .pre_processing import PreProcessing
 from .eye_movement_detection import RemodnavDetection
-import inspect
+
 from pyxations.formats.webgazer.bids import WebGazerBidsConverter
 from pyxations.formats.eyelink.bids import EyeLinkBidsConverter
 import pyxations.formats.eyelink.parse as eyelink_parser 
@@ -15,6 +12,7 @@ import pyxations.formats.tobii.parse as tobii_parser
 import pyxations.formats.gazepoint.parse as gaze_parser
 from pyxations.formats.tobii.bids import TobiiBidsConverter
 from pyxations.formats.gazepoint.bids import GazepointBidsConverter
+from pyxations.export import FEATHER_EXPORT
 
 EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection}
 
@@ -136,34 +134,37 @@ def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id
         shutil.copy(file_path, session_folder_path)
 
 
-def process_session(eye_tracking_data_path, dataset_format, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
-
+def process_session(eye_tracking_data_path, dataset_format, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs):
+    # If session folder path has files and overwrite is False, return
+    if not overwrite and session_folder_path.exists() and any(session_folder_path.iterdir()):
+        return
+    
     if dataset_format == 'eyelink':
-        eyelink_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+        eyelink_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
         
     elif dataset_format == 'webgazer':
-        webgazer_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, **kwargs)
+        webgazer_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, exp_format, **kwargs)
     elif dataset_format == 'tobii':
-        tobii_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, **kwargs)
+        tobii_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, exp_format, **kwargs)
     elif dataset_format == 'gaze':
-        gaze_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
+        gaze_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
+    else:
+        raise ValueError(f"Dataset format {dataset_format} not found.")
 
 
 def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detection_algorithm='remodnav', num_processes=4,
-                                    force_best_eye=True, keep_ascii=True, overwrite=False, **kwargs):
+                                    force_best_eye=True, keep_ascii=True, overwrite=False,exp_format=FEATHER_EXPORT, **kwargs):
     derivatives_folder = str(bids_dataset_folder) + "_derivatives"
     derivatives_folder = Path(derivatives_folder)
     bids_dataset_folder = Path(bids_dataset_folder)
     derivatives_folder.mkdir(exist_ok=True)
 
     bids_folders = [folder for folder in bids_dataset_folder.iterdir() if folder.is_dir() and folder.name.startswith("sub-")]
-    # if detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and detection_algorithm not in ['eyelink', 'webgazer', 'tobii', 'gaze']:
-    #    raise ValueError(f"Detection algorithm {detection_algorithm} not found.")
 
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
-
+        
         futures = [
-            executor.submit(process_session, session / "ET", dataset_format, detection_algorithm, derivatives_folder / subject.name / session.name, force_best_eye, keep_ascii, overwrite, **kwargs)
+            executor.submit(process_session, session / "ET", dataset_format, detection_algorithm, derivatives_folder / subject.name / session.name, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
             for subject in bids_folders
             for session in (bids_dataset_folder / subject.name).iterdir() if session.name.startswith("ses-") and (bids_dataset_folder / subject.name / session.name).is_dir()
         ]

@@ -9,13 +9,12 @@ import subprocess
 import numpy as np
 import pandas as pd
 import inspect
-from pyxations.export import get_exporter, HDF5_EXPORT
 from pyxations.formats.generic import BidsParse
 
 
 
 
-def process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+def process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs):
     edf_files = [file for file in eye_tracking_data_path.iterdir() if file.suffix.lower() == '.edf']
     if len(edf_files) > 1:
         print(f"More than one EDF file found in {eye_tracking_data_path}. Skipping folder.")
@@ -23,10 +22,7 @@ def process_session(eye_tracking_data_path, detection_algorithm, session_folder_
     edf_file_path = edf_files[0]
     (session_folder_path / 'eyelink_events').mkdir(parents=True, exist_ok=True)
 
-    exp_format = HDF5_EXPORT
-    if 'export_format' in kwargs:
-        exp_format = kwargs.get('export_format')
-        
+       
     msg_keywords = kwargs.pop('msg_keywords')
     
     EyelinkParse(session_folder_path, exp_format).parse(edf_file_path, detection_algorithm, msg_keywords, force_best_eye,
@@ -178,7 +174,7 @@ class EyelinkParse(BidsParse):
     
         # Optimized processing of dfMsg to extract timestamp and message
         if dfMsg.empty:
-            raise ValueError(f"No messages {msg_keywords} found in the ASC file for session {session_folder_path}.")
+            raise ValueError(f"No messages {msg_keywords} found in the ASC file for session {self.session_folder_path}.")
         # Extracting timestamp and message in a single step
         dfMsg[['timestamp', 'message']] = dfMsg['line'].str.replace('MSG ', '').str.split(n=1,expand=True).values
         dfMsg.drop(columns=['line'], inplace=True)

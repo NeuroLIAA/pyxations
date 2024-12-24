@@ -5,10 +5,9 @@ Created on Nov 7, 2024
 '''
 import pandas as pd
 from pyxations.formats.generic import BidsParse
-from pyxations.export import HDF5_EXPORT
 
 
-def process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs):
+def process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs):
     csv_files = [file for file in eye_tracking_data_path.iterdir() if file.suffix.lower() == '.csv']
     if len(csv_files) > 1:
         print(f"More than one csv file found in {eye_tracking_data_path}. Skipping folder.")
@@ -16,9 +15,7 @@ def process_session(eye_tracking_data_path, detection_algorithm, session_folder_
     edf_file_path = csv_files[0]
     (session_folder_path / 'events').mkdir(parents=True, exist_ok=True)
 
-    exp_format = HDF5_EXPORT
-    if 'export_format' in kwargs:
-        exp_format = kwargs.get('export_format')
+
     GazePointParse(session_folder_path, exp_format).parse(edf_file_path, detection_algorithm, overwrite, **kwargs)
 
 class GazePointParse(BidsParse):

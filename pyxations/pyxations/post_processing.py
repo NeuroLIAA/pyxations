@@ -2,10 +2,10 @@ from pathlib import Path
 import pandas as pd
 from pyxations.visualization.visualization import Visualization
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-
+from pyxations.export import FEATHER_EXPORT, HDF5_EXPORT
 class Experiment:
 
-    def __init__(self, dataset_path: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}):
+    def __init__(self, dataset_path: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
         self.dataset_path = Path(dataset_path)
         self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
         self.metadata = pd.read_csv(self.dataset_path / "participants.tsv", sep="\t", 
@@ -13,10 +13,11 @@ class Experiment:
         self.subjects = { subject_id:
             Subject(subject_id, old_subject_id, self, self.dataset_path / f"sub-{subject_id}",
                     self.derivatives_path / f"sub-{subject_id}",
-                     excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}))
+                     excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}),export_format)
             for subject_id, old_subject_id in zip(self.metadata["subject_id"], self.metadata["old_subject_id"])
             if subject_id not in excluded_subjects and old_subject_id not in excluded_subjects
         }
+        self.export_format = export_format
 
     def __iter__(self):
         return iter(self.subjects)
@@ -97,7 +98,7 @@ class Experiment:
 class Subject:
 
     def __init__(self, subject_id: str, old_subject_id: str, experiment: Experiment, subject_dataset_path: Path, subject_derivatives_path: Path,
-                 excluded_sessions: list = [], excluded_trials: dict = {}):
+                 excluded_sessions: list = [], excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
         self.subject_id = subject_id
         self.old_subject_id = old_subject_id
         self.experiment = experiment
@@ -106,13 +107,14 @@ class Subject:
         self.excluded_trials = excluded_trials
         self.subject_dataset_path = subject_dataset_path
         self.subject_derivatives_path = subject_derivatives_path
+        self.export_format = export_format
 
     @property
     def sessions(self):
         if self._sessions is None:
             self._sessions = { session_folder.name.split("-")[-1] :
                 Session(session_folder.name.split("-")[-1], self, session_folder, self.subject_dataset_path / session_folder.name / "behavioral",
-                        self.excluded_trials.get(session_folder.name.split("-")[-1], {})) 
+                        self.excluded_trials.get(session_folder.name.split("-")[-1], {}),self.export_format) 
                 for session_folder in self.subject_derivatives_path.glob("ses-*") 
                 if session_folder.name.split("-")[-1] not in self.excluded_sessions
             }
@@ -198,13 +200,14 @@ class Subject:
 
 class Session:
     
-    def __init__(self, session_id: str, subject: Subject, session_path: Path, behavior_path: Path, excluded_trials: list = []):
+    def __init__(self, session_id: str, subject: Subject, session_path: Path, behavior_path: Path, excluded_trials: list = [],export_format = FEATHER_EXPORT):
         self.session_id = session_id
         self.subject = subject
         self.excluded_trials = excluded_trials
         self.session_path = session_path
         self.behavior_path = behavior_path
         self._trials = None  # Lazy load trials
+        self.export_format = export_format
 
         if not self.session_path.exists():
             raise FileNotFoundError(f"Session path not found: {self.session_path}")
@@ -239,15 +242,25 @@ class Session:
         self.detection_algorithm = detection_algorithm
         events_path = self.session_path / f"{self.detection_algorithm}_events"
         
+        if self.export_format == FEATHER_EXPORT:
+            file_extension = "feather"
+            reader = pd.read_feather
+        elif self.export_format == HDF5_EXPORT:
+            file_extension = "hdf5"
+            reader = pd.read_hdf
+        else:
+            raise ValueError(f"Export format {self.export_format} not found.")
+
+
         # Check paths and load files efficiently
-        samples_path = self.session_path / "samples.hdf5"
-        fix_path = events_path / "fix.hdf5"
-        sacc_path = events_path / "sacc.hdf5"
+        samples_path = self.session_path / ("samples." + file_extension)
+        fix_path = events_path / ("fix." + file_extension)
+        sacc_path = events_path / ("sacc." + file_extension)
         
-        samples = pd.read_hdf(samples_path, memory_map=True)
-        fix = pd.read_hdf(fix_path, memory_map=True)
-        sacc = pd.read_hdf(sacc_path, memory_map=True)
-        blink = pd.read_hdf(events_path / "blink.hdf5", memory_map=True) if (events_path / "blink.hdf5").exists() else None
+        samples = reader(samples_path)
+        fix = reader(fix_path)
+        sacc = reader(sacc_path)
+        blink = reader(events_path / ("blink." + file_extension)) if (events_path / ("blink." + file_extension)).exists() else None
 
         self.behavior_data = None
         if self.behavior_path.exists():
