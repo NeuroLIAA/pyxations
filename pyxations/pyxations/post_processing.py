@@ -6,6 +6,7 @@ from pyxations.export import FEATHER_EXPORT, HDF5_EXPORT
 from abc import ABC, abstractmethod
 
 STIMULI_FOLDER = "stimuli"
+ITEMS_FOLDER = "items"
 
 # Abstract Session class
 class BaseSession(ABC):
@@ -433,10 +434,11 @@ class VisualSearchSession(Session):
     def __init__(self, session_id: str, subject: VisualSearchSubject, session_path: Path, behavior_path: Path, excluded_trials: list = [],export_format = FEATHER_EXPORT):
         super().__init__(session_id, subject, session_path, behavior_path, excluded_trials, export_format)
 
-    BEH_COLUMNS = ["trial_number", "stimulus","memory_set", "memory_set_locations" "target_present", "target", "target_location","correct_response"]
+    BEH_COLUMNS = ["trial_number", "stimulus", "stimulus_height","stimulus_width","memory_set", "memory_set_locations" "target_present", "target", "target_location","correct_response"]
     '''Columns explanation:
     - trial_number: The number of the trial, in the order they were presented.
     - stimulus: The filename of the stimulus presented.
+    - stimulus_coords: The coordinates of the stimulus presented. It should be a tuple containing the top-left corner of the stimulus and the bottom-right corner.
     - memory_set: The set of items memorized by the participant. It should be a list of strings. Each string should be the filename of the stimulus.
     - memory_set_locations: The locations of the items memorized by the participant. It should be a list of tuples. Each tuple should contain bounding
     boxes of the items memorized by the participant. The bounding boxes should be in the format (x1, y1, x2, y2), where (x1, y1) is the top-left corner and
@@ -449,6 +451,7 @@ class VisualSearchSession(Session):
     - correct_response: The correct response for the trial. It should be a boolean.
 
     Notice that you can get the actual response of the user by using the "correct_response" and "target_present" columns.
+    For all of the heights, widths and locations of the items, the values should be in pixels and according to the screen itself.
     '''
     def load_behavior_data(self):
         self.behavior_data = pd.read_csv(self.behavior_path / "behavior_data.csv", dtype={"trial_number": int, "stimulus": str, "memory_set": list, "memory_set_locations": list, "target_present": bool, "target": str, "target_location": tuple, "correct_response": bool})
@@ -476,8 +479,7 @@ class VisualSearchTrial(Trial):
             self._target_location = behavior_data.loc[behavior_data["trial_number"] == trial_number, "target_location"].values[0]
         self._correct_response = behavior_data.loc[behavior_data["trial_number"] == trial_number, "correct_response"].values[0]
         self._stimulus = behavior_data.loc[behavior_data["trial_number"] == trial_number, "stimulus"].values[0]
-        self._stimulus_height = behavior_data.loc[behavior_data["trial_number"] == trial_number, "stimulus_height"].values[0]
-        self._stimulus_width = behavior_data.loc[behavior_data["trial_number"] == trial_number, "stimulus_width"].values[0]
+        self._stimulus_coords = behavior_data.loc[behavior_data["trial_number"] == trial_number, "stimulus_coords"].values[0]
         self._memory_set = behavior_data.loc[behavior_data["trial_number"] == trial_number, "memory_set"].values[0]
         self._memory_set_locations = behavior_data.loc[behavior_data["trial_number"] == trial_number, "memory_set_locations"].values[0]
 
@@ -485,10 +487,16 @@ class VisualSearchTrial(Trial):
     def plot_scanpath(self, screen_height, screen_width, **kwargs):
         vis = Visualization(self.events_path, self.detection_algorithm)
         (self.events_path / "plots").mkdir(parents=True, exist_ok=True)
-        # The stimuli should be on a folder called "stimuli" in the same level of the dataset folder
-        stim_path = self.session.subject.experiment.dataset_path.parent / STIMULI_FOLDER / self._stimulus
-        # If the target is present set bbox to the target location
+
+        
+        phase_data = {"search":{}, "mem":{}}
+        phase_data["search"]["img_paths"] = [self.session.subject.experiment.dataset_path.parent / STIMULI_FOLDER / self._stimulus]
+        phase_data["mem"]["img_paths"] = [self.session.subject.experiment.dataset_path.parent / ITEMS_FOLDER / img for img in self._memory_set]
+        phase_data["search"]["img_plot_coords"] = [self._stimulus_coords]
+        phase_data["mem"]["img_plot_coords"] = self._memory_set_locations
+
+        # If the target is present add the "bbox" to the "search" phase as a key-value pair
         if self._target_present:
-            kwargs["bbox"] = self._target_location
-        vis.scanpath(fixations=self._fix,img_path=stim_path, saccades=self._sacc, samples=self._samples, screen_height=screen_height, screen_width=screen_width, 
+            phase_data["search"]["bbox"] = self._target_location
+        vis.scanpath(fixations=self._fix,phase_data=phase_data, saccades=self._sacc, samples=self._samples, screen_height=screen_height, screen_width=screen_width, 
                       folder_path=self.events_path / "plots", **kwargs)

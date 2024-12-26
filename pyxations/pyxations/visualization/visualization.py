@@ -43,10 +43,13 @@ class Visualization():
             'tSample', 'LX', 'LY', 'RX', 'RY'.
         phase_data: dict, optional
             This dictionary should have the phase as key and as value it should have a dictionary with the following:
-                img_path : str, optional
-                    Path to an image file to be used as a background.
+                img_paths : list of strs, optional
+                    Paths to image files to be plotted.
+                img_plot_coords : list of tuples, optional
+                    Tuples with the coordinates of the images to plot. The tuples should be in the format (x1, y1, x2, y2) where
+                    (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner.
                 bbox : tuple, optional
-                    Tuple with the coordinates of the bounding box to plot. The tuple should be in the format (x1, x2, y1, y2) where
+                    Tuple with the coordinates of the bounding box to plot. The tuple should be in the format (x1, y1, x2, y2) where
                     (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner.
         display: bool
             Show plot
