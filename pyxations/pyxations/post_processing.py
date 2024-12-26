@@ -434,7 +434,7 @@ class VisualSearchSession(Session):
     def __init__(self, session_id: str, subject: VisualSearchSubject, session_path: Path, behavior_path: Path, excluded_trials: list = [],export_format = FEATHER_EXPORT):
         super().__init__(session_id, subject, session_path, behavior_path, excluded_trials, export_format)
 
-    BEH_COLUMNS = ["trial_number", "stimulus", "stimulus_height","stimulus_width","memory_set", "memory_set_locations" "target_present", "target", "target_location","correct_response"]
+    BEH_COLUMNS = ["trial_number", "stimulus", "stimulus_coords","memory_set", "memory_set_locations" "target_present", "target", "target_location","correct_response"]
     '''Columns explanation:
     - trial_number: The number of the trial, in the order they were presented.
     - stimulus: The filename of the stimulus presented.
@@ -454,7 +454,14 @@ class VisualSearchSession(Session):
     For all of the heights, widths and locations of the items, the values should be in pixels and according to the screen itself.
     '''
     def load_behavior_data(self):
-        self.behavior_data = pd.read_csv(self.behavior_path / "behavior_data.csv", dtype={"trial_number": int, "stimulus": str, "memory_set": list, "memory_set_locations": list, "target_present": bool, "target": str, "target_location": tuple, "correct_response": bool})
+        # Get the name of the only csv file in the behavior path
+        behavior_files = list(self.behavior_path.glob("*.csv"))
+        # Make sure there is only one file, otherwise throw an exception stating that there should only be one csv file
+        if len(behavior_files) != 1:
+            raise ValueError(f"There should only be one csv file in the behavior path for session {self.session_id} of subject {self.subject.subject_id}.")
+        else:
+            name = behavior_files[0].name
+        self.behavior_data = pd.read_csv(self.behavior_path / name, dtype={"trial_number": int, "stimulus": str, "memory_set": list, "memory_set_locations": list, "target_present": bool, "target": str, "target_location": tuple, "correct_response": bool})
 
     def init_trials(self,samples,fix,sacc,blink,events_path):
         self._trials = {trial:

@@ -109,7 +109,9 @@ class EyelinkParse(BidsParse):
                 elif '!MODE RECORD' in line and calibration_flag:
                     calibration_flag = False
                     start_flag = True
-                elif calibration_flag:
+                elif calibration_flag and not(line.split()[0] == 'MSG' and any(keyword in line for keyword in msg_keywords)):
+                    # The failsafe is in place because some messages might kick off after the calibration is done.
+                    # This will only take into account the messages, not the samples.
                     line_type = 'Calibration'
                 elif not start_flag: # Data before the first successful calibration is discarded. 
                     # After the first successul calibration, EVERY sample is taken into account.
@@ -237,7 +239,7 @@ class EyelinkParse(BidsParse):
     
     
         
-        pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg)
+        pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg, self.session_folder_path)
         pre_processing.process({'bad_samples': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.bad_samples).parameters.keys()},
                                 'split_all_into_trials_by_msgs': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.split_all_into_trials_by_msgs).parameters.keys()},
                                 'saccades_direction': {},})

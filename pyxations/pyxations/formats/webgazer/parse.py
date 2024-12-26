@@ -70,7 +70,7 @@ class WebGazerParse(BidsParse):
         dfBlink = pd.DataFrame()
         dfMsg = pd.DataFrame()
 
-        pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg)
+        pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg, session_folder_path)
         pre_processing.process({'bad_samples': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.bad_samples).parameters.keys()},
                                 #'split_all_into_trials_by_msgs': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.split_all_into_trials_by_msgs).parameters.keys()},
                                 'saccades_direction': {},})
