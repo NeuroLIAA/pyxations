@@ -131,24 +131,25 @@ class Visualization():
             #----- Plot image if provided -----#
             if phase_data is not None:
                 phase_data_current = phase_data.get(phase, {})
-                img_path = phase_data_current.get('img_path',None)
+                img_paths = phase_data_current.get('img_paths',None)
                 bbox = phase_data_current.get('bbox',None)
-                if img_path is not None:
-                    # Load search image
-                    img = mpimg.imread(img_path)
-                    
-                    # Get image size
-                    img_res_x = img.shape[1]
-                    img_res_y = img.shape[0]
-                    
-                    # Define box in axes to plot image, because the image should be centered even if it doesn't have the same resolution as the screen
-                    image_box_extent = ((screen_width - img_res_x) / 2, img_res_x + (screen_width - img_res_x) / 2, (screen_height - img_res_y) / 2, img_res_y + (screen_height - img_res_y) / 2) 
-                    
-                    # Plot
-                    ax_main.imshow(img, extent=image_box_extent, zorder=0)
+                if img_paths is not None:
+                    for i, img_path in enumerate(img_paths):
+                        # Load search image
+                        img = mpimg.imread(img_path)
+                        img_bbox = phase_data_current.get('img_plot_coords', None)[i]
+
+                        # Define box in axes to plot image, because the image should be centered even if it doesn't have the same resolution as the screen
+                        image_box_extent = [img_bbox[0], img_bbox[2], img_bbox[1], img_bbox[3]]
+                        # Plot
+                        ax_main.imshow(img, extent=image_box_extent, zorder=0)
                 if bbox is not None:
                     # Define the bounding box in red
-                    x1, x2, y1, y2 = bbox
+                    x1, y1, x2, y2 = bbox
+                    # The bounding box was defined as if the top left corner was the origin, so we need to adjust it to the bottom left corner
+                    y1 = screen_height - y1
+                    y2 = screen_height - y2
+
                     ax_main.plot([x1, x2, x2, x1, x1], [y1, y1, y2, y2, y1], color='red', linewidth=1.5, zorder=3)
 
             #----- Plot scanpath and gaze if samples provided -----#
@@ -284,12 +285,13 @@ class Visualization():
     def plot_multipanel(self,fixations:pd.DataFrame,saccades:pd.DataFrame, display:bool=True):
         folder_path = self.derivatives_folder_path / self.events_detection_folder / "plots"
         plt.rcParams.update({'font.size': 12})
-        fig, axs = plt.subplots(2, 2, figsize=(12, 7))
+        
         fixations = fixations[fixations["trial_number"] != -1]
         saccades = saccades[saccades["trial_number"] != -1]
         valid_phases = fixations['phase'].unique()
         valid_phases = [phase for phase in valid_phases if phase != '']
         for phase in fixations['phase'].unique():
+            fig, axs = plt.subplots(2, 2, figsize=(12, 7))
             fixations_phase = fixations[fixations['phase'] == phase]
             saccades_phase = saccades[saccades['phase'] == phase]
 
