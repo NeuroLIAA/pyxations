@@ -60,8 +60,6 @@ class SampleVisualization():
     def animate(self, display=True, in_percent=False, out_file='output.gif'):
         df = self.samples
         
-
-        
         fig, ax = plt.subplots()
         ax.set_xlim(0, self.screen_width)
         ax.set_ylim(0, self.screen_height)
