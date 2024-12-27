@@ -24,9 +24,6 @@ class TestComputeDerivatives(unittest.TestCase):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
         bids_dataset_folder = os.path.join(current_folder,"antisacadas_dataset")
-        msg_keywords = ["begin","end","press"]
-        start_msgs = {'search':['beginning_of_stimuli']}
-        end_msgs = {'search':['end_of_stimuli']}
         detection_algorithm = 'remodnav'
         compute_derivatives_for_dataset(bids_dataset_folder, 'webgazer', detection_algorithm, screen_height=768, screen_width=1024)
         self.assertTrue(os.path.exists(os.path.join(current_folder, "antisacadas_dataset_derivatives")))
@@ -40,9 +37,7 @@ class TestComputeDerivatives(unittest.TestCase):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
         bids_dataset_folder = os.path.join(current_folder,"tobii_dataset")
-        msg_keywords = ["begin","end","press"]
-        start_msgs = {'search':['beginning_of_stimuli']}
-        end_msgs = {'search':['end_of_stimuli']}
+
         detection_algorithm = 'remodnav'
         compute_derivatives_for_dataset(bids_dataset_folder, 'tobii', detection_algorithm, )
         self.assertTrue(os.path.exists(os.path.join(current_folder, "tobii_dataset_derivatives")))
@@ -84,9 +79,7 @@ class TestComputeDerivatives(unittest.TestCase):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
         bids_dataset_folder = os.path.join(current_folder,"antisacadas_dataset")
-        msg_keywords = ["begin","end","press"]
-        start_msgs = {'search':['beginning_of_stimuli']}
-        end_msgs = {'search':['end_of_stimuli']}
+
         detection_algorithm = 'webgazer'
         compute_derivatives_for_dataset(bids_dataset_folder, detection_algorithm, 
                                         export_format=FEATHER_EXPORT, screen_height=768, screen_width=1024)
