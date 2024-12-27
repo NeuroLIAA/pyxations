@@ -19,14 +19,18 @@ class TestSplitIntoTrials(unittest.TestCase):
         
         start_times = {
             0: [100, 501, 1001],
-            1: [2001]
+            1: [2001, 0]
         }
         end_times = {
             0: [500, 1000, 2000],
-            1: [2500]
+            1: [2500, 0]
         }
-        trial_labels = {0:['first', 'second', 'third'], 1: ['fourth']}
+        #trial_labels = {0:['first', 'second', 'third'], 
+        #                1: ['first', 'second', 'third']}
+
+
         
+        trial_labels = ['first', 'second', 'third']
         pp.split_all_into_trials(start_times, end_times, trial_labels)
         
         
