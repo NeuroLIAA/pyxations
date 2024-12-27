@@ -441,6 +441,7 @@ class VisualSearchExperiment(Experiment):
         return accuracy
     
     def plot_accuracy(self):
+        #TODO: fix when there is only one memory set size or one target present
         accuracy = self.accuracy()
         # There should be an ax for each pair of target present and memory set size
         n_cols = len(accuracy["target_present"].unique())
