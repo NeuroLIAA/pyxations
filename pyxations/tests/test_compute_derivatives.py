@@ -1,7 +1,7 @@
 import unittest
 from pyxations import compute_derivatives_for_dataset
 import os
-from pyxations.export import FEATHER_EXPORT
+from pyxations.export import FEATHER_EXPORT, HDF5_EXPORT
 
 class TestComputeDerivatives(unittest.TestCase):
     def test_compute_derivatives_eyelink(self):
@@ -24,13 +24,23 @@ class TestComputeDerivatives(unittest.TestCase):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
         bids_dataset_folder = os.path.join(current_folder,"antisacadas_dataset")
+        start_times = {
+            0: [100, 501, 1001],
+        }
+        end_times = {
+            0: [500, 1000, 2000],
+        }
+        trial_labels = {0:['first', 'second', 'third'], 1: ['fourth']}
+        
         detection_algorithm = 'remodnav'
-        compute_derivatives_for_dataset(bids_dataset_folder, 'webgazer', detection_algorithm, screen_height=768, screen_width=1024)
+        compute_derivatives_for_dataset(
+            bids_dataset_folder, 'webgazer', detection_algorithm, overwrite=True, 
+            exp_format=HDF5_EXPORT, screen_height=768, screen_width=1024,
+            start_times=start_times, end_times=end_times, trial_labels=trial_labels)
         self.assertTrue(os.path.exists(os.path.join(current_folder, "antisacadas_dataset_derivatives")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "antisacadas_dataset_derivatives", "sub-0001")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas", "samples.hdf5")))
-
 
 
     def test_compute_derivatives_tobii(self):
@@ -39,7 +49,7 @@ class TestComputeDerivatives(unittest.TestCase):
         bids_dataset_folder = os.path.join(current_folder,"tobii_dataset")
 
         detection_algorithm = 'remodnav'
-        compute_derivatives_for_dataset(bids_dataset_folder, 'tobii', detection_algorithm, )
+        compute_derivatives_for_dataset(bids_dataset_folder, 'tobii', detection_algorithm, exp_format=HDF5_EXPORT )
         self.assertTrue(os.path.exists(os.path.join(current_folder, "tobii_dataset_derivatives")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "tobii_dataset_derivatives", "sub-0001")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "tobii_dataset_derivatives", "sub-0001", "ses-sceneviewing")))
@@ -51,12 +61,13 @@ class TestComputeDerivatives(unittest.TestCase):
         bids_dataset_folder = os.path.join(current_folder,"gazepoint_dataset")
 
         detection_algorithm = 'remodnav'
-        compute_derivatives_for_dataset(bids_dataset_folder, 'gaze', detection_algorithm, overwrite=True)
+        compute_derivatives_for_dataset(bids_dataset_folder, 'gaze', detection_algorithm, 
+                                        overwrite=True, exp_format=HDF5_EXPORT)
         self.assertTrue(os.path.exists(os.path.join(current_folder, "gazepoint_dataset_derivatives")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "gazepoint_dataset_derivatives", "sub-0001")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A", "samples.hdf5")))
-        self.assertTrue(os.path.exists(os.path.join(current_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A", "blink.hdf5")))
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A", "remodnav_events", "blink.hdf5")))
 
     def test_compute_derivatives_feather_format(self):
         current_folder = os.getcwd()
@@ -80,8 +91,9 @@ class TestComputeDerivatives(unittest.TestCase):
         current_folder = os.path.dirname(current_folder)
         bids_dataset_folder = os.path.join(current_folder,"antisacadas_dataset")
 
-        detection_algorithm = 'webgazer'
-        compute_derivatives_for_dataset(bids_dataset_folder, detection_algorithm, 
+        dataset_type = 'webgazer'
+        detection_algorithm = 'remodnav'
+        compute_derivatives_for_dataset(bids_dataset_folder, dataset_type, detection_algorithm, 
                                         export_format=FEATHER_EXPORT, screen_height=768, screen_width=1024)
         self.assertTrue(os.path.exists(os.path.join(current_folder, "antisacadas_dataset_derivatives")))
         self.assertTrue(os.path.exists(os.path.join(current_folder, "antisacadas_dataset_derivatives", "sub-0001")))

@@ -22,11 +22,6 @@ def process_session(eye_tracking_data_path, detection_algorithm, session_folder_
                          overwrite, **kwargs)
 
 
-
-    #parse_webgazer(edf_file_path, msg_keywords, session_folder_path, force_best_eye, keep_ascii, overwrite, **kwargs)
-
-
-
 class WebGazerParse(BidsParse):
 
     def parse(self, file_path, detection_algorithm, overwrite, **kwargs):
@@ -63,17 +58,27 @@ class WebGazerParse(BidsParse):
         eye_movement_detector = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path=session_folder_path,samples=dfSamples)
         config = {
             'savgol_length': 0.195,
+            'max_pso_dur': 0.1
         }
         
-        dfFix, dfSacc = eye_movement_detector.run_eye_movement_from_samples(dfSamples, 60, config=config)
+        dfFix, dfSacc = eye_movement_detector.run_eye_movement_from_samples(dfSamples, 30, config=config)
 
-        dfBlink = pd.DataFrame()
-        dfMsg = pd.DataFrame()
+        dfBlink = pd.DataFrame(columns=dfSamples.columns)
+        dfMsg = pd.DataFrame(columns=dfSamples.columns)
+
 
         pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg, session_folder_path)
-        pre_processing.process({'bad_samples': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.bad_samples).parameters.keys()},
-                                #'split_all_into_trials_by_msgs': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.split_all_into_trials_by_msgs).parameters.keys()},
-                                'saccades_direction': {},})
+        preprocessing_parameters = inspect.signature(pre_processing.split_all_into_trials).parameters.keys()
+        if all([arg in kwargs for arg in preprocessing_parameters]):
+            pre_processing.process({
+                #'bad_samples': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.bad_samples).parameters.keys()},
+                'split_all_into_trials': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.split_all_into_trials).parameters.keys()},
+                #'saccades_direction': {},
+            })
+        else:
+            print('Skipping preprocessing: not enough parameters.')
+
+
     
 
         self.detection_algorithm = detection_algorithm

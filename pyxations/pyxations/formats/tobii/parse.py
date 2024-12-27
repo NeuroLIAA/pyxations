@@ -5,6 +5,8 @@ Created on Nov 7, 2024
 '''
 import pandas as pd
 from pyxations.formats.generic import BidsParse
+from pyxations.pre_processing import PreProcessing
+import inspect
 
 
 def process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, exp_format, **kwargs):
@@ -43,18 +45,39 @@ class TobiiParse(BidsParse):
                 
         dfSample = dfSample.rename(columns={'Eyetracker timestamp': 'tSample'})
     
+        
+        # Eye movement detect
         eye_movement_detector = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path=self.session_folder_path, samples=dfSample)
         config = {
             'savgol_length': 0.195,
             'eyes_recorded': 'L',
             'eye': 'L',
-            'pupil_data': dfSample['PupilDiam_Left']
+            'pupil_data': dfSample['PupilDiam_Left'],
+            'max_pso_dur': 0.3
         }
         
         dfFix, dfSacc = eye_movement_detector.run_eye_movement_from_samples(
             dfSample, 60,
-            x_label='Gaze3d_Left.x', y_label='Gaze3d_Left.y', config=config)
+            x_label='Gaze3d_Left.x', y_label='Gaze3d_Left.y', config=config, eye='Left')
         
+
+        # Split into trials
+        #placeholder
+        dfMsg = dfBlink = pd.DataFrame(columns=dfSample.columns)
+
+        pre_processing = PreProcessing(dfSample, dfFix,dfSacc,dfBlink, dfMsg, self.session_folder_path)
+        preprocessing_parameters = inspect.signature(pre_processing.split_all_into_trials).parameters.keys()
+        if all([arg in kwargs for arg in preprocessing_parameters]):
+            pre_processing.process({
+                #'bad_samples': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.bad_samples).parameters.keys()},
+                'split_all_into_trials': {arg:kwargs[arg] for arg in kwargs if arg in preprocessing_parameters},
+                #'saccades_direction': {},
+            })
+        else:
+            print('Skipping preprocessing: not enough parameters.')
+        
+        
+
         
         self.detection_algorithm = detection_algorithm
         self.store_dataframes(dfSample, dfFix=dfFix, dfSacc=dfSacc)

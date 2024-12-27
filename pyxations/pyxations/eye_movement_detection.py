@@ -95,7 +95,7 @@ class RemodnavDetection(EyeMovementDetection):
 
 
 
-    def run_eye_movement_from_samples(self, dfSamples, sample_rate, x_label='X', y_label='Y', config={}):
+    def run_eye_movement_from_samples(self, dfSamples, sample_rate, x_label='X', y_label='Y', config={}, **kwargs):
         '''
         Recieves a pandas dataframe, a sample rate, and optional configuration
         :param dfSamples: Pandas dataframe including x and y columns
@@ -111,19 +111,20 @@ class RemodnavDetection(EyeMovementDetection):
         }
         eye_data = np.rec.fromarrays(list(eye_data.values()), names=list(eye_data.keys()))
         
-        return self.simple_run_eye_movement(eye_data, sample_rate, starting_time, config)
+        return self.simple_run_eye_movement(eye_data, sample_rate, starting_time, config, **kwargs)
         
-    def simple_run_eye_movement(self, eye_data, sample_rate, starting_time, config={}):
+    def simple_run_eye_movement(self, eye_data, sample_rate, starting_time, config={}, **kwargs):
         if 'pupil_data' not in config.keys():
             config['pupil_data'] = pd.Series([0]* len(eye_data['x']))
         #starting_time = dfSamples['tSample'].min()
         times = np.arange(stop=len(eye_data['x'])) / sample_rate
         
         return self.run_eye_movement(eye_data['x'], eye_data['y'], sample_rate, 
-            times=times, starting_time=starting_time, **config)
+            times=times, starting_time=starting_time, **config, **kwargs)
 
     def run_eye_movement(self, gazex_data, gazey_data, sample_rate,
              min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05,
+             min_saccade_duration=0.04,
              sac_max_vel:float=1000., fix_max_amp:float=1.5, sac_time_thresh:float=0.002,
              drop_fix_from_blink:bool=True, screen_size:float=38., screen_width:int=1920, 
              screen_distance:float=60, calib_index=0, savgol_length=0.19,
@@ -144,7 +145,8 @@ class RemodnavDetection(EyeMovementDetection):
             sampling_rate=sample_rate,
             min_pursuit_duration=min_pursuit_dur,
             max_pso_duration=max_pso_dur,
-            min_fixation_duration=min_fix_dur)
+            min_fixation_duration=min_fix_dur,
+            min_saccade_duration=min_saccade_duration)
         pp = clf.preproc(
             eye_data,
             savgol_length=savgol_length
@@ -157,7 +159,7 @@ class RemodnavDetection(EyeMovementDetection):
         # Show gaze
         #clf.show_gaze(pp=pp, events=sac_fix, show_vels=False)
         self.show_gaze(pp, sac_fix, clf, eye_data, sample_rate)
-        self.show_gaze_pylab(eye_data, pp, sac_fix, show_vels)
+        #self.show_gaze_pylab(eye_data, pp, sac_fix)
         
         # sac_fix to pandas DataFrame
         sac_fix = pd.DataFrame(sac_fix, columns=['start_time', 'end_time', 'label', 'start_x', 'start_y', 'end_x', 'end_y', 'amp', 'peak_vel', 'med_vel', 'avg_vel'])

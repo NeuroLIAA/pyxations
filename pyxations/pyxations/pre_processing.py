@@ -139,9 +139,10 @@ class PreProcessing:
 
         return timestamps_dict
     
-    def split_into_trials(self,data:pd.DataFrame, start_times: dict[list[int]], end_times: dict[list[int]],trial_labels:dict[list[str]] = None):
+    def split_into_trials(self, data:pd.DataFrame, start_times: dict[list[int]], end_times: dict[list[int]],trial_labels:dict[list[str]] = None):
         data['phase'] = [''] * len(data)
         data['trial_number'] = [-1] * len(data)
+        data['trial_label'] = [''] * len(data)
         for key in start_times.keys():
             start_times_list = start_times[key]
             end_times_list = end_times[key]
@@ -178,6 +179,6 @@ class PreProcessing:
                 raise ValueError("The DataFrame must contain either the 'tSample' column or the 'tStart' and 'tEnd' columns.")
 
             if trial_labels_list:
-                data['trial_label'] = [''] * len(data)
+                #data['trial_label'] = [''] * len(data)
                 for i in range(len(start_times_list)):
                     data.loc[data['trial_number'] == i, 'trial_label'] = trial_labels_list[i]

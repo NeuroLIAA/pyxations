@@ -153,7 +153,7 @@ def process_session(eye_tracking_data_path, dataset_format, detection_algorithm,
 
 
 def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detection_algorithm='remodnav', num_processes=4,
-                                    force_best_eye=True, keep_ascii=True, overwrite=False,exp_format=FEATHER_EXPORT, **kwargs):
+                                    force_best_eye=True, keep_ascii=True, overwrite=False, exp_format=FEATHER_EXPORT, **kwargs):
     derivatives_folder = str(bids_dataset_folder) + "_derivatives"
     derivatives_folder = Path(derivatives_folder)
     bids_dataset_folder = Path(bids_dataset_folder)
