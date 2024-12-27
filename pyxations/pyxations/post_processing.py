@@ -4,6 +4,8 @@ from pyxations.visualization.visualization import Visualization
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from pyxations.export import FEATHER_EXPORT, HDF5_EXPORT
 import ast
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 STIMULI_FOLDER = "stimuli"
 ITEMS_FOLDER = "items"
@@ -64,9 +66,9 @@ class Experiment:
             subject.filter_saccades(max_sacc_dur)
 
     def drop_trials_with_nan_threshold(self, threshold=0.5):
+        #TODO: TEST after the changes
         sessions_results = {subject: self.subjects[subject].drop_trials_with_nan_threshold(threshold) for subject in self.subjects}
-        bad_trials_total = {subject: sessions_results[subject][2] for subject in self.subjects}
-        self.subjects = [subject for subject in self.subjects if sessions_results[subject][0]/sessions_results[subject][1] <= threshold]
+        bad_trials_total = {subject: sessions_results[subject][2] for subject in sessions_results.keys()}
         return bad_trials_total
     
     def plot_scanpaths(self,screen_height,screen_width,display: bool = False):
@@ -99,7 +101,8 @@ class Experiment:
     def samples(self):
         return pd.concat([subject.samples() for subject in self.subjects.values()], ignore_index=True)
     
-
+    def remove_subject(self, subject_id):
+        del self.subjects[subject_id]
 class Subject:
 
     def __init__(self, subject_id: str, old_subject_id: str, experiment: Experiment, subject_dataset_path: Path, subject_derivatives_path: Path,
@@ -140,6 +143,12 @@ class Subject:
     def __next__(self):
         return next(self.sessions)
     
+    def unlink_experiment(self):
+        for session in self.sessions:
+            self.sessions[session].unlink_subject()
+        self.experiment.remove_subject(self.subject_id)
+        self.experiment = None
+    
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
         for session in self.sessions.values():
@@ -157,18 +166,13 @@ class Subject:
     def drop_trials_with_nan_threshold(self, threshold=0.5):
         total_sessions = len(self.sessions)
         sessions_results = {session: self.sessions[session].drop_trials_with_nan_threshold(threshold) for session in self.sessions}
-        bad_sessions = [session for session in self.sessions if sessions_results[session][0]/sessions_results[session][1] > threshold]
-        bad_sessions_count = len(bad_sessions)
-        bad_trials_subject = {session: {"bad_trials": sessions_results[session][0], "total_trials": sessions_results[session][1]} for session in self.sessions}
+        bad_sessions_count = total_sessions - len(self.sessions)
+        bad_trials_subject = {session: {"bad_trials": sessions_results[session][0], "total_trials": sessions_results[session][1]} for session in sessions_results.keys()}
 
         # If the proportion of bad sessions exceeds the threshold, remove all sessions
         if bad_sessions_count / total_sessions > threshold:
-            for session in bad_sessions:
-                self.sessions[session].unlink_subject()
-            bad_sessions = list(self.sessions.keys())
+            self.unlink_experiment()
 
-        # Update sessions with only the valid sessions
-        self._sessions = [session for session in self.sessions if session not in bad_sessions]
         return bad_sessions_count, total_sessions, bad_trials_subject
 
     def plot_scanpaths(self,screen_height,screen_width, display: bool = False):
@@ -203,6 +207,9 @@ class Subject:
         df["subject_id"] = self.subject_id
         return df
 
+    def remove_session(self, session_id):
+        del self._sessions[session_id]
+
 class Session():
     
     def __init__(self, session_id: str, subject: Subject, session_path: Path, behavior_path: Path, excluded_trials: list = [],export_format = FEATHER_EXPORT):
@@ -227,7 +234,10 @@ class Session():
     def __repr__(self):
         return f"Session = '{self.session_id}', " + self.subject.__repr__()
     
-    def unlink_subject(self):     
+    def unlink_subject(self):
+        for trial in self.trials.values():
+            trial.unlink_session()
+        self.subject.remove_session(self.session_id)
         self.subject = None
 
     def drop_trials_with_nan_threshold(self, threshold=0.5):
@@ -238,9 +248,10 @@ class Session():
         bad_trials = [trial for trial in self.trials.keys() if self.trials[trial].is_trial_bad(threshold)]
         if len(bad_trials)/total_trials > threshold:
             bad_trials = self._trials
-        self._trials = [trial for trial in self.trials.keys() if trial not in bad_trials]
-        for trial in bad_trials:
-            self.trials[trial].unlink_session()
+            self.unlink_subject()
+        else:
+            for trial in bad_trials:
+                self.trials[trial].unlink_session()
         return bad_trials, total_trials
 
     def load_behavior_data(self):
@@ -333,6 +344,8 @@ class Session():
         df["session_id"] = self.session_id
         return df
 
+    def remove_trial(self, trial_number):
+        del self._trials[trial_number]
 
 class Trial:
 
@@ -370,6 +383,7 @@ class Trial:
         return f"Trial = '{self.trial_number}', " + self.session.__repr__()
 
     def unlink_session(self):
+        self.session.remove_trial(self.trial_number)
         self.session = None
 
     def plot_scanpath(self,screen_height,screen_width, **kwargs):
@@ -421,6 +435,35 @@ class VisualSearchExperiment(Experiment):
         }
         self.export_format = export_format
 
+    
+    def accuracy(self):
+        accuracy = pd.concat([subject.accuracy() for subject in self.subjects.values()], ignore_index=True)
+        return accuracy
+    
+    def plot_accuracy(self):
+        accuracy = self.accuracy()
+        # There should be an ax for each pair of target present and memory set size
+        n_cols = len(accuracy["target_present"].unique())
+        n_rows = len(accuracy["memory_set_size"].unique())
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows))
+        for i, row in enumerate(accuracy["memory_set_size"].unique()):
+            for j, col in enumerate(accuracy["target_present"].unique()):
+                data = accuracy[(accuracy["memory_set_size"] == row) & (accuracy["target_present"] == col)]
+                sns.barplot(x="subject_id", y="correct_response", data=data, ax=axs[i, j])
+                axs[i, j].set_title(f"Memory Set Size {row}, Target Present {col}")
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+
+    def remove_poor_accuracy_sessions(self, threshold=0.5):
+        for subject in self.subjects.values():
+            subject.remove_poor_accuracy_sessions(threshold)
+
+    def remove_trials_for_stimuli_with_poor_accuracy(self, threshold=0.5):
+        #TODO: I would need access to the "stimulus" from the trial to be able to do this
+        pass
+
+
 class VisualSearchSubject(Subject):
     def __init__(self, subject_id: str, old_subject_id: str, experiment: VisualSearchExperiment, subject_dataset_path: Path, subject_derivatives_path: Path,
                  excluded_sessions: list = [], excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
@@ -436,6 +479,36 @@ class VisualSearchSubject(Subject):
                 if session_folder.name.split("-")[-1] not in self.excluded_sessions
             }
         return self._sessions
+    
+    def accuracy(self):
+        accuracy = pd.concat([session.accuracy() for session in self.sessions.values()], ignore_index=True)
+        accuracy["subject_id"] = self.subject_id
+
+        return accuracy
+    
+    def plot_accuracy(self):
+        accuracy = self.accuracy()
+        # There should be an ax for each pair of target present and memory set size
+        n_cols = len(accuracy["target_present"].unique())
+        n_rows = len(accuracy["memory_set_size"].unique())
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows))
+        for i, row in enumerate(accuracy["memory_set_size"].unique()):
+            for j, col in enumerate(accuracy["target_present"].unique()):
+                data = accuracy[(accuracy["memory_set_size"] == row) & (accuracy["target_present"] == col)]
+                sns.barplot(x="subject_id", y="correct_response", data=data, ax=axs[i, j])
+                axs[i, j].set_title(f"Memory Set Size {row}, Target Present {col}")
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+
+    def remove_poor_accuracy_sessions(self, threshold=0.5):
+        poor_accuracy_sessions = []
+        for session in self.sessions.values():
+            if session.has_poor_accuracy(threshold):
+                poor_accuracy_sessions.append(session.session_id)
+                session.unlink_subject()
+        if len(poor_accuracy_sessions) == len(self.sessions):
+            self.unlink_experiment()
 
 class VisualSearchSession(Session):
     BEH_COLUMNS: list[str] = [
@@ -522,7 +595,23 @@ class VisualSearchSession(Session):
         self.load_behavior_data()
         super().load_data(detection_algorithm)
         del self.behavior_data
+    
+    def accuracy(self):
+        # Accuracy should be grouped by target present and memory set size
+        accuracy = []
+        for trial in self.trials.values():
+            accuracy.append({
+                "target_present": trial.target_present,
+                "memory_set_size": trial.memory_set_size,
+                "correct_response": trial.correct_response
+            })
+        accuracy = pd.DataFrame(accuracy).groupby(["target_present", "memory_set_size"]).mean().reset_index()
+        accuracy["session_id"] = self.session_id
+        return accuracy
 
+    def has_poor_accuracy(self, threshold=0.5):
+        accuracy = self.accuracy()
+        return accuracy["correct_response"].mean() < threshold
 
 class VisualSearchTrial(Trial):
 
@@ -540,6 +629,17 @@ class VisualSearchTrial(Trial):
         self._memory_set = ast.literal_eval(behavior_data.loc[behavior_data["trial_number"] == trial_number, "memory_set"].values[0])
         self._memory_set_locations = ast.literal_eval(behavior_data.loc[behavior_data["trial_number"] == trial_number, "memory_set_locations"].values[0])
 
+    @property
+    def target_present(self):
+        return self._target_present
+    
+    @property
+    def correct_response(self):
+        return self._correct_response
+    
+    @property
+    def memory_set_size(self):
+        return len(self._memory_set)
     
     def plot_scanpath(self, screen_height, screen_width, search_phase, memorization_phase, **kwargs):
         '''
