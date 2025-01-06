@@ -515,7 +515,8 @@ class VisualSearchExperiment(Experiment):
                 axs[i, j].plot(data_mean,color="black")
                 axs[i, j].fill_between(data_mean.index, data_mean - data_standard_error, data_mean + data_standard_error, alpha=0.5, color="gray")
                 axs[i, j].set_title(f"Memory Set Size {int(row)}, Target Present {bool(col)}")
-                axs[i, j].set_xticklabels(range(columns_starting_with_fix)) 
+                axs[i, j].set_xticklabels(range(max_fixations))
+
 
         plt.tight_layout()
         plt.show()
