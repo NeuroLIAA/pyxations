@@ -6,6 +6,7 @@ from pyxations.export import FEATHER_EXPORT, HDF5_EXPORT
 import ast
 import seaborn as sns
 import matplotlib.pyplot as plt
+import numpy as np
 
 STIMULI_FOLDER = "stimuli"
 ITEMS_FOLDER = "items"
@@ -144,7 +145,8 @@ class Subject:
         return next(self.sessions)
     
     def unlink_experiment(self):
-        for session in self.sessions:
+        keys = list(self.sessions.keys())
+        for session in keys:
             self.sessions[session].unlink_subject()
         self.experiment.remove_subject(self.subject_id)
         self.experiment = None
@@ -235,8 +237,9 @@ class Session():
         return f"Session = '{self.session_id}', " + self.subject.__repr__()
     
     def unlink_subject(self):
-        for trial in self.trials.values():
-            trial.unlink_session()
+        keys = list(self.trials.keys())
+        for trial in keys:
+            self.trials[trial].unlink_session()
         self.subject.remove_session(self.session_id)
         self.subject = None
 
@@ -435,35 +438,90 @@ class VisualSearchExperiment(Experiment):
         }
         self.export_format = export_format
 
-    
+    def correct_trials(self):
+        correct_trials = pd.concat([subject.correct_trials() for subject in self.subjects.values()], ignore_index=True)
+
+        return correct_trials
+
     def accuracy(self):
         accuracy = pd.concat([subject.accuracy() for subject in self.subjects.values()], ignore_index=True)
+
         return accuracy
     
     def plot_accuracy(self):
-        #TODO: fix when there is only one memory set size or one target present
         accuracy = self.accuracy()
+        # Change the name of the correct_response column to accuracy
+        accuracy = accuracy.sort_values(by=["target_present", "accuracy"])
         # There should be an ax for each pair of target present and memory set size
         n_cols = len(accuracy["target_present"].unique())
         n_rows = len(accuracy["memory_set_size"].unique())
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows))
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(12 * n_cols, 8 * n_rows),sharey=True)
+        if n_cols == 1:
+            axs = np.array([axs])
+        if n_rows == 1:
+            axs = np.array([axs])
+
         for i, row in enumerate(accuracy["memory_set_size"].unique()):
             for j, col in enumerate(accuracy["target_present"].unique()):
                 data = accuracy[(accuracy["memory_set_size"] == row) & (accuracy["target_present"] == col)]
-                sns.barplot(x="subject_id", y="correct_response", data=data, ax=axs[i, j])
-                axs[i, j].set_title(f"Memory Set Size {row}, Target Present {col}")
+                sns.barplot(x="subject_id", y="accuracy", data=data, ax=axs[i, j],estimator="mean")
+                axs[i, j].set_title(f"Memory Set Size {row}, Target Present: {bool(col)}")
+                axs[i, j].tick_params(axis='x', rotation=90)
+
         plt.tight_layout()
         plt.show()
         plt.close()
 
     def remove_poor_accuracy_sessions(self, threshold=0.5):
-        for subject in self.subjects.values():
-            subject.remove_poor_accuracy_sessions(threshold)
+        keys = list(self.subjects.keys())
+        for subject in keys:
+            self.subjects[subject].remove_poor_accuracy_sessions(threshold)
 
     def remove_trials_for_stimuli_with_poor_accuracy(self, threshold=0.5):
         #TODO: I would need access to the "stimulus" from the trial to be able to do this
         pass
 
+    def cumulative_correct_trials(self, max_fixations=20):
+        cumulative_correct = pd.concat([subject.cumulative_correct_trials(max_fixations) for subject in self.subjects.values()], ignore_index=True)
+
+        return cumulative_correct
+
+    def cumulative_performance(self, max_fixations=20):
+        cumulative_performance = pd.concat([subject.cumulative_performance(max_fixations) for subject in self.subjects.values()], ignore_index=True)
+
+        return cumulative_performance
+    
+    def plot_cumulative_performance(self, max_fixations=20):
+        cumulative_performance = self.cumulative_performance(max_fixations)
+        n_rows = len(cumulative_performance["memory_set_size"].unique())
+        n_cols = len(cumulative_performance["target_present"].unique())
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(10 * n_cols, 5 * n_rows),sharey=True,sharex=True)
+        fig.suptitle("Cumulative Performance")
+        if n_cols == 1:
+            axs = np.array([axs])
+
+        if n_rows == 1:
+            axs = np.array([axs])
+
+        # For each fixation number (i.e. first "max_fixations" columns), we need the mean and the standard error
+        # The X axis will be the fixation number, the Y axis will be the accuracy
+        # The area around the mean will be the standard error
+        columns_starting_with_fix = [col for col in cumulative_performance.columns if col.startswith("fix")]
+        for i, row in enumerate(cumulative_performance["memory_set_size"].unique()):
+            for j, col in enumerate(cumulative_performance["target_present"].unique()):
+                data = cumulative_performance[(cumulative_performance["memory_set_size"] == row) & (cumulative_performance["target_present"] == col)]
+                data_mean = data[columns_starting_with_fix].mean()
+                data_standard_error = data[columns_starting_with_fix].sem()
+                axs[i, j].plot(data_mean,color="black")
+                axs[i, j].fill_between(data_mean.index, data_mean - data_standard_error, data_mean + data_standard_error, alpha=0.5, color="gray")
+                axs[i, j].set_title(f"Memory Set Size {int(row)}, Target Present {bool(col)}")
+                axs[i, j].set_xticklabels(range(columns_starting_with_fix)) 
+
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+
+        
 
 class VisualSearchSubject(Subject):
     def __init__(self, subject_id: str, old_subject_id: str, experiment: VisualSearchExperiment, subject_dataset_path: Path, subject_derivatives_path: Path,
@@ -481,36 +539,57 @@ class VisualSearchSubject(Subject):
             }
         return self._sessions
     
+    def correct_trials(self):
+        correct_trials = []
+        for session in self.sessions.values():
+            correct_trials.append(session.correct_trials())
+        correct_trials = pd.concat(correct_trials, ignore_index=True)
+        correct_trials["subject_id"] = self.subject_id
+
+        return correct_trials
+    
     def accuracy(self):
-        accuracy = pd.concat([session.accuracy() for session in self.sessions.values()], ignore_index=True)
+        correct_trials = self.correct_trials()
+        accuracy = correct_trials.groupby(["target_present", "memory_set_size"]).sum().reset_index()
+        accuracy["accuracy"] = accuracy["correct_response"] / accuracy["total_trials"]
+        accuracy.drop(columns=["correct_response", "total_trials"], inplace=True)
         accuracy["subject_id"] = self.subject_id
 
         return accuracy
-    
-    def plot_accuracy(self):
-        accuracy = self.accuracy()
-        # There should be an ax for each pair of target present and memory set size
-        n_cols = len(accuracy["target_present"].unique())
-        n_rows = len(accuracy["memory_set_size"].unique())
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 5 * n_rows))
-        for i, row in enumerate(accuracy["memory_set_size"].unique()):
-            for j, col in enumerate(accuracy["target_present"].unique()):
-                data = accuracy[(accuracy["memory_set_size"] == row) & (accuracy["target_present"] == col)]
-                sns.barplot(x="subject_id", y="correct_response", data=data, ax=axs[i, j])
-                axs[i, j].set_title(f"Memory Set Size {row}, Target Present {col}")
-        plt.tight_layout()
-        plt.show()
-        plt.close()
+
 
     def remove_poor_accuracy_sessions(self, threshold=0.5):
         poor_accuracy_sessions = []
-        for session in self.sessions.values():
+        keys = list(self.sessions.keys())
+        for key in keys:
+            session = self.sessions[key]
             if session.has_poor_accuracy(threshold):
                 poor_accuracy_sessions.append(session.session_id)
                 session.unlink_subject()
-        if len(poor_accuracy_sessions) == len(self.sessions):
+        if len(poor_accuracy_sessions) == len(keys):
             self.unlink_experiment()
 
+    def cumulative_correct_trials(self, max_fixations=20):
+        cumulative_correct = []
+        for session in self.sessions.values():
+            cumulative_correct.append(session.cumulative_correct_trials(max_fixations))
+
+        cumulative_correct = pd.concat(cumulative_correct, ignore_index=True)
+        total_trials = cumulative_correct[['memory_set_size','target_present','total_trials']].groupby(['memory_set_size','target_present']).sum().reset_index()
+        cumulative_correct = cumulative_correct.drop(columns=["total_trials"]).groupby(["memory_set_size","target_present"]).sum().reset_index()
+        cumulative_correct = cumulative_correct.merge(total_trials, on=["memory_set_size","target_present"])
+
+
+        return cumulative_correct
+
+    
+    def cumulative_performance(self, max_fixations=20):
+        cumulative_performance = self.cumulative_correct_trials(max_fixations)
+        columns_starting_with_fix = [col for col in cumulative_performance.columns if col.startswith("fix")]
+        cumulative_performance[columns_starting_with_fix] = cumulative_performance[columns_starting_with_fix] / cumulative_performance["total_trials"].values[:, None]
+        return cumulative_performance
+
+       
 class VisualSearchSession(Session):
     BEH_COLUMNS: list[str] = [
         "trial_number", "stimulus", "stimulus_coords", "memory_set", "memory_set_locations",
@@ -518,7 +597,7 @@ class VisualSearchSession(Session):
     ]
     """
     Columns explanation:
-    - trial_number: The number of the trial, in the order they were presented. They start from 1.
+    - trial_number: The number of the trial, in the order they were presented. They start from 0.
     - stimulus: The filename of the stimulus presented.
     - stimulus_coords: The coordinates of the stimulus presented. It should be a tuple containing the top-left corner of the stimulus and the bottom-right corner.
     - memory_set: The set of items memorized by the participant. It should be a list of strings. Each string should be the filename of the stimulus.
@@ -596,23 +675,57 @@ class VisualSearchSession(Session):
         self.load_behavior_data()
         super().load_data(detection_algorithm)
         del self.behavior_data
-    
-    def accuracy(self):
-        # Accuracy should be grouped by target present and memory set size
-        accuracy = []
+
+    def correct_trials(self):
+        correct_trials = []
         for trial in self.trials.values():
-            accuracy.append({
+            correct_trials.append({
                 "target_present": trial.target_present,
                 "memory_set_size": trial.memory_set_size,
                 "correct_response": trial.correct_response
             })
-        accuracy = pd.DataFrame(accuracy).groupby(["target_present", "memory_set_size"]).mean().reset_index()
-        accuracy["session_id"] = self.session_id
+        total_trials_per_memory_set_size = pd.DataFrame(correct_trials).groupby(["target_present", "memory_set_size"]).size().reset_index().rename(columns={0: "total_trials"})
+        correct_trials = pd.DataFrame(correct_trials).groupby(["target_present", "memory_set_size"]).sum().reset_index()
+        correct_trials["session_id"] = self.session_id
+        correct_trials = correct_trials.merge(total_trials_per_memory_set_size, on=["target_present", "memory_set_size"])
+        return correct_trials
+    
+    def accuracy(self):
+        # Accuracy should be grouped by target present and memory set size
+        correct_trials = self.correct_trials()
+        accuracy = correct_trials.groupby(["target_present", "memory_set_size"]).sum().reset_index()
+        accuracy["accuracy"] = accuracy["correct_response"] / accuracy["total_trials"]
+        accuracy.drop(columns=["correct_response", "total_trials"], inplace=True)
+
         return accuracy
 
     def has_poor_accuracy(self, threshold=0.5):
         accuracy = self.accuracy()
-        return accuracy["correct_response"].mean() < threshold
+        return accuracy["accuracy"].mean() < threshold
+    
+    def cumulative_correct_trials(self, max_fixations=20):
+        correct_trials = np.zeros((len(self.trials), max_fixations+2))
+        for i,trial in enumerate(self.trials.values()):
+            scanpath_length = len(trial.fixations())
+            if trial.correct_response and scanpath_length <= max_fixations:
+                correct_trials[i, scanpath_length:] = 1
+            correct_trials[i, -2] = trial.target_present
+            correct_trials[i, -1] = trial.memory_set_size
+
+        cumulative_correct = pd.DataFrame(correct_trials, columns=[f"fix_{i}" for i in range(1, max_fixations+1)] + ["target_present", "memory_set_size"])
+        
+        total_trials = cumulative_correct.groupby(["target_present", "memory_set_size"]).size().reset_index().rename(columns={0: "total_trials"})
+        cumulative_correct = cumulative_correct.groupby(["target_present", "memory_set_size"]).sum().reset_index()
+        cumulative_correct = cumulative_correct.merge(total_trials, on=["target_present", "memory_set_size"])
+        return cumulative_correct
+    
+    def cumulative_performance(self, max_fixations=20):
+        cumulative_performance = self.cumulative_correct_trials(max_fixations)
+        columns_starting_with_fix = [col for col in cumulative_performance.columns if col.startswith("fix")]
+        cumulative_performance[columns_starting_with_fix] = cumulative_performance[columns_starting_with_fix] / cumulative_performance["total_trials"].values[:, None]
+        return cumulative_performance
+    
+
 
 class VisualSearchTrial(Trial):
 
