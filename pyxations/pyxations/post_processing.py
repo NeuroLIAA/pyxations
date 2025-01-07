@@ -547,7 +547,34 @@ class VisualSearchExperiment(Experiment):
         plt.show()
         plt.close()
 
-        
+    def correct_trials_by_rt_bins(self, bin_end,bin_step):
+        correct_trials = pd.concat([subject.correct_trials_by_rt_bins(bin_end,bin_step) for subject in self.subjects.values()], ignore_index=True)
+
+        return correct_trials
+
+    def plot_correct_trials_by_rt_bins(self, bin_end,bin_step):
+        correct_trials_per_bin = self.correct_trials_by_rt_bins(bin_end,bin_step)
+        correct_trials_per_bin = correct_trials_per_bin.groupby(["rt_bin","target_present","memory_set_size"],observed=False)["correct_response"].sum().reset_index()
+
+        n_cols = len(correct_trials_per_bin["target_present"].unique())
+        n_rows = len(correct_trials_per_bin["memory_set_size"].unique())
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(10 * n_cols, 5 * n_rows),sharey=True,sharex=True)
+        fig.suptitle("Correct Trials by RT Bins")
+        if n_cols == 1:
+            axs = np.array([axs])
+        if n_rows == 1:
+            axs = np.array([axs])
+        for i, row in enumerate(correct_trials_per_bin["memory_set_size"].unique()):
+            for j, col in enumerate(correct_trials_per_bin["target_present"].unique()):
+                data = correct_trials_per_bin[(correct_trials_per_bin["memory_set_size"] == row) & (correct_trials_per_bin["target_present"] == col)]
+                sns.barplot(x="rt_bin", y="correct_response", data=data, ax=axs[i, j])
+                axs[i, j].set_title(f"Memory Set Size {int(row)}, Target Present {bool(col)}")
+        plt.xlabel("RT Bins")
+        plt.ylabel("Correct Trials")
+        plt.tight_layout()
+        plt.show()
+        plt.close()        
+
 
 class VisualSearchSubject(Subject):
     def __init__(self, subject_id: str, old_subject_id: str, experiment: VisualSearchExperiment, subject_dataset_path: Path, subject_derivatives_path: Path,search_phase_name, memorization_phase_name,
@@ -616,6 +643,11 @@ class VisualSearchSubject(Subject):
         columns_starting_with_fix = [col for col in cumulative_performance.columns if col.startswith("fix")]
         cumulative_performance[columns_starting_with_fix] = cumulative_performance[columns_starting_with_fix] / cumulative_performance["total_trials"].values[:, None]
         return cumulative_performance
+    
+    def correct_trials_by_rt_bins(self, bin_end,bin_step):
+        correct_trials = pd.concat([session.correct_trials_by_rt_bins(bin_end,bin_step) for session in self.sessions.values()], ignore_index=True)
+
+        return correct_trials
 
        
 class VisualSearchSession(Session):
@@ -722,6 +754,17 @@ class VisualSearchSession(Session):
         correct_trials = correct_trials.merge(total_trials_per_memory_set_size, on=["target_present", "memory_set_size"])
         return correct_trials
     
+    def correct_trials_by_rt_bins(self,bin_end,bin_step):
+        bins = pd.interval_range(start=0, end=bin_end, freq=bin_step)
+        rts = self.get_rts()
+        rts = rts[rts["phase"] == self._search_phase_name]
+        rts["rt_bin"] = pd.cut(rts["rt"], bins)
+        # Map bin to the first element
+        rts["rt_bin"] = rts["rt_bin"].apply(lambda x: x.left)
+
+        return rts
+
+    
     def accuracy(self):
         # Accuracy should be grouped by target present and memory set size
         correct_trials = self.correct_trials()
@@ -732,8 +775,9 @@ class VisualSearchSession(Session):
         return accuracy
 
     def has_poor_accuracy(self, threshold=0.5):
-        accuracy = self.accuracy()
-        return accuracy["accuracy"].mean() < threshold
+        correct_trials = self.correct_trials()
+        accuracy = correct_trials["correct_response"].sum() / correct_trials["total_trials"].sum()
+        return accuracy < threshold
     
     def cumulative_correct_trials(self, max_fixations=20):
         correct_trials = np.zeros((len(self.trials), max_fixations+2))
@@ -793,7 +837,17 @@ class VisualSearchTrial(Trial):
     @property
     def stimulus(self):
         return self._stimulus
-    
+
+    def save_rts(self):
+        if hasattr(self, "rts"):
+            return
+        rts = self._samples[self._samples["phase"] != ""].groupby(["phase"])["tSample"].agg(lambda x: x.iloc[-1] - x.iloc[0])
+        self.rts = rts.reset_index().rename(columns={"tSample": "rt"})
+        self.rts["trial_number"] = self.trial_number
+        self.rts["memory_set_size"] = len(self._memory_set)
+        self.rts["target_present"] = self._target_present
+        self.rts["correct_response"] = self._correct_response
+
     def search_fixations(self):
         return self._fix[self._fix["phase"] == self._search_phase_name].sort_values(by="tStart")
     
