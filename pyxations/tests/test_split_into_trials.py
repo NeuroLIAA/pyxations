@@ -43,5 +43,42 @@ class TestSplitIntoTrials(unittest.TestCase):
         self.assertTrue('second' in samples.trial_label.unique())
         self.assertTrue('fourth' in samples.trial_label.unique())
 
+
+    def test_split_into_trials_time(self):
+        # TODO: Placeholder for future implementation
+        current_folder = os.getcwd()
+        current_folder = os.path.dirname(current_folder)
+        session_path = os.path.join(current_folder,"antisacadas_dataset_derivatives/sub-0001/ses-antisacadas")
+        
+        samples = pd.read_feather(os.path.join(session_path, 'samples.feather'))
+        fixations = saccades = blinks = samples.copy(True) # whatever
+        user_messages = None
+        
+        
+        pp = PreProcessing(samples, fixations, saccades, blinks, user_messages, session_path)
+        
+        trials_delimiters = [
+            {'start': 100, 'end': 500},
+            {'start': 501, 'end': 1000},
+            
+        ]
+        
+        start_times = {
+            0: [100, 501, 1001],
+            1: [2001, 0]
+        }
+        end_times = {
+            0: [500, 1000, 2000],
+            1: [2500, 0]
+        }
+        #trial_labels = {0:['first', 'second', 'third'], 
+        #                1: ['first', 'second', 'third']}
+
+
+        
+        trial_labels = ['first', 'second', 'third']
+        pp.split_all_into_trials(start_times, end_times, trial_labels)
+
+
 if __name__ == "__main__":
     unittest.main()
