@@ -469,6 +469,8 @@ class VisualSearchExperiment(Experiment):
                 sns.barplot(x="subject_id", y="accuracy", data=data, ax=axs[i, j],estimator="mean")
                 axs[i, j].set_title(f"Memory Set Size {row}, Target Present: {bool(col)}")
                 axs[i, j].tick_params(axis='x', rotation=90)
+                axs[i, j].set_xlabel("Subject ID")
+                axs[i, j].set_ylabel("Accuracy")
 
         plt.tight_layout()
         plt.show()
@@ -541,6 +543,8 @@ class VisualSearchExperiment(Experiment):
                 axs[i, j].set_title(f"Memory Set Size {int(row)}, Target Present {bool(col)}")
                 axs[i, j].set_xticks(range(max_fixations))
                 axs[i, j].set_xticklabels(range(1,max_fixations+1))
+                axs[i, j].set_xlabel("Fixation Number")
+                axs[i, j].set_ylabel("Accuracy")
 
         plt.ylim(0, 1)
         plt.tight_layout()
