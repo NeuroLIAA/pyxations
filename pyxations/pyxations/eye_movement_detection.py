@@ -24,7 +24,8 @@ class RemodnavDetection(EyeMovementDetection):
 
     def detect_eye_movements(self, min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05,
                                  sac_max_vel:float=1000., fix_max_amp:float=1.5, sac_time_thresh:float=0.002,
-                                 drop_fix_from_blink:bool=True, screen_size:float=38., screen_width:int=1920, screen_distance:float=60):
+                                 drop_fix_from_blink:bool=True, screen_size:float=38., screen_width:int=1920, screen_distance:float=60,
+                                 savgol_length=0.19):
         
         """
         Detects fixations and saccades from eye-tracking data for both left and right eyes using REMoDNaV, a velocity based eye movement event detection algorithm 
@@ -87,7 +88,8 @@ class RemodnavDetection(EyeMovementDetection):
         for chunk in np.unique(chunks): 
             chunk_samples = self.samples[chunks == chunk].reset_index(drop=True)
             fixations_chunk, saccades_chunk = self.detect_on_chunk(chunk_samples, min_pursuit_dur, max_pso_dur, min_fix_dur, 
-                            sac_max_vel, fix_max_amp, sac_time_thresh, drop_fix_from_blink, screen_size, screen_width, screen_distance)
+                            sac_max_vel, fix_max_amp, sac_time_thresh, drop_fix_from_blink, screen_size, screen_width, screen_distance,
+                            savgol_length)
             fixations.append(fixations_chunk)
             saccades.append(saccades_chunk)
 
@@ -240,7 +242,8 @@ class RemodnavDetection(EyeMovementDetection):
 
     def detect_on_chunk(self, chunk, min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05,
                                  sac_max_vel:float=1000., fix_max_amp:float=1.5, sac_time_thresh:float=0.002,
-                                 drop_fix_from_blink:bool=True, screen_size:float=38., screen_width:int=1920, screen_distance:float=60):
+                                 drop_fix_from_blink:bool=True, screen_size:float=38., screen_width:int=1920, screen_distance:float=60,
+                                 savgol_length:float=0.19):
 
         sample_rate = chunk["Rate_recorded"].iloc[0]
         calib_index = chunk["Calib_index"].iloc[0]
@@ -256,6 +259,8 @@ class RemodnavDetection(EyeMovementDetection):
 
         fixations = []
         saccades = []
+        
+        min_saccade_duration=0.04
 
         for gazex_data, gazey_data, pupil_data, eye in zip((chunk['LX'], chunk['RX']),
                                                         (chunk['LY'], chunk['RY']),
@@ -264,12 +269,15 @@ class RemodnavDetection(EyeMovementDetection):
 
             fixations_eye, saccades_eye = self.run_eye_movement(
                 gazex_data, gazey_data, sample_rate,
-                min_pursuit_dur, max_pso_dur, min_fix_dur, sac_max_vel, fix_max_amp, sac_time_thresh,
+                min_pursuit_dur, max_pso_dur, min_fix_dur, 
+                min_saccade_duration,
+                sac_max_vel, fix_max_amp, sac_time_thresh,
                 drop_fix_from_blink, screen_size, screen_width, screen_distance, 
-                calib_index, eyes_recorded, starting_time, times, pupil_data, eye)
-            
+                calib_index, savgol_length, eyes_recorded, starting_time, times, pupil_data, eye)
+
+
             fixations.append(fixations_eye)
-            saccades_eye.append(saccades_eye)
+            saccades.append(saccades_eye)
 
         return pd.concat(fixations), pd.concat(saccades)
 

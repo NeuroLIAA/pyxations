@@ -20,6 +20,25 @@ class TestComputeDerivatives(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-0001", "ses-second", "samples.hdf5")))
 
 
+    def test_compute_derivatives_eyelink_remodnav(self):
+        current_folder = os.getcwd()
+        current_folder = os.path.dirname(current_folder)
+        bids_dataset_folder = os.path.join(current_folder,"example_dataset")
+        msg_keywords = ["begin","end","press"]
+        start_msgs = {'search':['beginning_of_stimuli']}
+        end_msgs = {'search':['end_of_stimuli']}
+        detection_algorithm = 'remodnav'
+        compute_derivatives_for_dataset(
+            bids_dataset_folder, 'eyelink', detection_algorithm, msg_keywords=msg_keywords, 
+            start_msgs=start_msgs, end_msgs=end_msgs, overwrite=True,
+            max_pso_dur=0, min_fix_dur=0, sac_max_vel=999, savgol_length= 0.195
+        )
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives")))
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-0001")))
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-0001", "ses-second")))
+        self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-0001", "ses-second", "samples.hdf5")))
+
+
     def test_compute_derivatives_webgazer(self):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
