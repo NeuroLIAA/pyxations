@@ -424,19 +424,21 @@ class Trial:
 
 
 class VisualSearchExperiment(Experiment):
-    def __init__(self, dataset_path: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
+    def __init__(self, dataset_path: str,search_phase_name: str,memorization_phase_name: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
         self.dataset_path = Path(dataset_path)
         self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
         self.metadata = pd.read_csv(self.dataset_path / "participants.tsv", sep="\t", 
                                     dtype={"subject_id": str, "old_subject_id": str})
         self.subjects = { subject_id:
             VisualSearchSubject(subject_id, old_subject_id, self, self.dataset_path / f"sub-{subject_id}",
-                    self.derivatives_path / f"sub-{subject_id}",
+                    self.derivatives_path / f"sub-{subject_id}", search_phase_name, memorization_phase_name,
                      excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}),export_format)
             for subject_id, old_subject_id in zip(self.metadata["subject_id"], self.metadata["old_subject_id"])
             if subject_id not in excluded_subjects and old_subject_id not in excluded_subjects
         }
         self.export_format = export_format
+        self._search_phase_name = search_phase_name
+        self._memorization_phase_name = memorization_phase_name
 
     def correct_trials(self):
         correct_trials = pd.concat([subject.correct_trials() for subject in self.subjects.values()], ignore_index=True)
@@ -477,10 +479,32 @@ class VisualSearchExperiment(Experiment):
         for subject in keys:
             self.subjects[subject].remove_poor_accuracy_sessions(threshold)
 
-    def remove_trials_for_stimuli_with_poor_accuracy(self, threshold=0.5):
-        #TODO: I would need access to the "stimulus" from the trial to be able to do this
-        pass
+    def scanpaths_by_stimuli(self):
+        return pd.concat([subject.scanpaths_by_stimuli() for subject in self.subjects.values()], ignore_index=True)
 
+
+    def remove_trials_for_stimuli_with_poor_accuracy(self, threshold=0.5):
+        scanpaths_by_stimuli = self.scanpaths_by_stimuli()
+        grouped = scanpaths_by_stimuli.groupby(["stimulus", "target_present", "memory_set_size"])
+        poor_accuracy_stimuli = grouped["correct_response"].mean() < threshold
+        poor_accuracy_stimuli = poor_accuracy_stimuli[poor_accuracy_stimuli].index
+        subj_keys = list(self.subjects.keys())
+        for subject_key in subj_keys:
+            subject = self.subjects[subject_key]
+            session_keys = list(subject.sessions.keys())
+            for session_key in session_keys:
+                session = subject.sessions[session_key]
+                trial_keys = list(session.trials.keys())
+                for trial_key in trial_keys:
+                    trial = session.trials[trial_key]
+                    if (trial.stimulus, trial.target_present, trial.memory_set_size) in poor_accuracy_stimuli:
+                        trial.unlink_session()
+                if len(session.trials) == 0:
+                    session.unlink_subject()
+            if len(subject.sessions) == 0:
+                subject.unlink_experiment()
+
+    
     def cumulative_correct_trials(self, max_fixations=20):
         cumulative_correct = pd.concat([subject.cumulative_correct_trials(max_fixations) for subject in self.subjects.values()], ignore_index=True)
 
@@ -515,9 +539,10 @@ class VisualSearchExperiment(Experiment):
                 axs[i, j].plot(data_mean,color="black")
                 axs[i, j].fill_between(data_mean.index, data_mean - data_standard_error, data_mean + data_standard_error, alpha=0.5, color="gray")
                 axs[i, j].set_title(f"Memory Set Size {int(row)}, Target Present {bool(col)}")
-                axs[i, j].set_xticklabels(range(max_fixations))
+                axs[i, j].set_xticks(range(max_fixations))
+                axs[i, j].set_xticklabels(range(1,max_fixations+1))
 
-
+        plt.ylim(0, 1)
         plt.tight_layout()
         plt.show()
         plt.close()
@@ -525,26 +550,28 @@ class VisualSearchExperiment(Experiment):
         
 
 class VisualSearchSubject(Subject):
-    def __init__(self, subject_id: str, old_subject_id: str, experiment: VisualSearchExperiment, subject_dataset_path: Path, subject_derivatives_path: Path,
+    def __init__(self, subject_id: str, old_subject_id: str, experiment: VisualSearchExperiment, subject_dataset_path: Path, subject_derivatives_path: Path,search_phase_name, memorization_phase_name,
                  excluded_sessions: list = [], excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
         super().__init__(subject_id, old_subject_id, experiment, subject_dataset_path, subject_derivatives_path, excluded_sessions, excluded_trials, export_format)
+        self._search_phase_name = search_phase_name
+        self._memorization_phase_name = memorization_phase_name
 
     @property
     def sessions(self):
         if self._sessions is None:
             self._sessions = { session_folder.name.split("-")[-1] :
-                VisualSearchSession(session_folder.name.split("-")[-1], self, session_folder, self.subject_dataset_path / session_folder.name / "behavioral",
+                VisualSearchSession(session_folder.name.split("-")[-1], self, session_folder, self.subject_dataset_path / session_folder.name / "behavioral",self._search_phase_name, self._memorization_phase_name,
                         self.excluded_trials.get(session_folder.name.split("-")[-1], {}),self.export_format) 
                 for session_folder in self.subject_derivatives_path.glob("ses-*") 
                 if session_folder.name.split("-")[-1] not in self.excluded_sessions
             }
         return self._sessions
     
+    def scanpaths_by_stimuli(self):
+        return pd.concat([session.scanpaths_by_stimuli() for session in self.sessions.values()], ignore_index=True)
+    
     def correct_trials(self):
-        correct_trials = []
-        for session in self.sessions.values():
-            correct_trials.append(session.correct_trials())
-        correct_trials = pd.concat(correct_trials, ignore_index=True)
+        correct_trials = pd.concat([session.correct_trials() for session in self.sessions.values()], ignore_index=True)
         correct_trials["subject_id"] = self.subject_id
 
         return correct_trials
@@ -628,12 +655,16 @@ class VisualSearchSession(Session):
         session_id: str, 
         subject: VisualSearchSubject, 
         session_path: Path, 
-        behavior_path: Path, 
+        behavior_path: Path,
+        search_phase_name: str,
+        memorization_phase_name: str,
         excluded_trials: list = None,
         export_format = FEATHER_EXPORT
     ):
         excluded_trials = [] if excluded_trials is None else excluded_trials
         super().__init__(session_id, subject, session_path, behavior_path, excluded_trials, export_format)
+        self._search_phase_name = search_phase_name
+        self._memorization_phase_name = memorization_phase_name
 
 
 
@@ -667,7 +698,7 @@ class VisualSearchSession(Session):
 
     def _init_trials(self,samples,fix,sacc,blink,events_path):
         self._trials = {trial:
-            VisualSearchTrial(trial, self, samples, fix, sacc, blink, events_path, self.behavior_data)
+            VisualSearchTrial(trial, self, samples, fix, sacc, blink, events_path, self.behavior_data,self._search_phase_name,self._memorization_phase_name)
             for trial in samples["trial_number"].unique() 
             if trial != -1 and trial not in self.excluded_trials and trial in self.behavior_data["trial_number"].values
         }
@@ -707,7 +738,7 @@ class VisualSearchSession(Session):
     def cumulative_correct_trials(self, max_fixations=20):
         correct_trials = np.zeros((len(self.trials), max_fixations+2))
         for i,trial in enumerate(self.trials.values()):
-            scanpath_length = len(trial.fixations())
+            scanpath_length = len(trial.search_fixations())
             if trial.correct_response and scanpath_length <= max_fixations:
                 correct_trials[i, scanpath_length:] = 1
             correct_trials[i, -2] = trial.target_present
@@ -726,11 +757,12 @@ class VisualSearchSession(Session):
         cumulative_performance[columns_starting_with_fix] = cumulative_performance[columns_starting_with_fix] / cumulative_performance["total_trials"].values[:, None]
         return cumulative_performance
     
-
+    def scanpaths_by_stimuli(self):
+        return pd.DataFrame([trial.scanpath_by_stimuli() for trial in self.trials.values()], columns=["fixations", "stimulus", "correct_response", "target_present", "memory_set_size"])
 
 class VisualSearchTrial(Trial):
 
-    def __init__(self, trial_number, session, samples, fix, sacc, blink, events_path, behavior_data):
+    def __init__(self, trial_number, session, samples, fix, sacc, blink, events_path, behavior_data,search_phase_name, memorization_phase_name,):
         super().__init__(trial_number, session, samples, fix, sacc, blink, events_path)
         self._target_present = behavior_data.loc[behavior_data["trial_number"] == trial_number, "target_present"].values[0]
         self._target = behavior_data.loc[behavior_data["trial_number"] == trial_number, "target"].values[0]
@@ -743,6 +775,8 @@ class VisualSearchTrial(Trial):
        
         self._memory_set = ast.literal_eval(behavior_data.loc[behavior_data["trial_number"] == trial_number, "memory_set"].values[0])
         self._memory_set_locations = ast.literal_eval(behavior_data.loc[behavior_data["trial_number"] == trial_number, "memory_set_locations"].values[0])
+        self._search_phase_name = search_phase_name
+        self._memorization_phase_name = memorization_phase_name
 
     @property
     def target_present(self):
@@ -756,7 +790,32 @@ class VisualSearchTrial(Trial):
     def memory_set_size(self):
         return len(self._memory_set)
     
-    def plot_scanpath(self, screen_height, screen_width, search_phase, memorization_phase, **kwargs):
+    @property
+    def stimulus(self):
+        return self._stimulus
+    
+    def search_fixations(self):
+        return self._fix[self._fix["phase"] == self._search_phase_name].sort_values(by="tStart")
+    
+    def memorization_fixations(self):
+        return self._fix[self._fix["phase"] == self._memorization_phase_name].sort_values(by="tStart")
+    
+    def search_saccades(self):
+        return self._sacc[self._sacc["phase"] == self._search_phase_name].sort_values(by="tStart")
+    
+    def memorization_saccades(self):
+        return self._sacc[self._sacc["phase"] == self._memorization_phase_name].sort_values(by="tStart")
+    
+    def search_samples(self):
+        return self._samples[self._samples["phase"] == self._search_phase_name].sort_values(by="tSample")
+    
+    def memorization_samples(self):
+        return self._samples[self._samples["phase"] == self._memorization_phase_name].sort_values(by="tSample")
+    
+    def scanpath_by_stimuli(self):
+        return [self.search_fixations(), self._stimulus,self._correct_response,self._target_present,len(self._memory_set)]
+    
+    def plot_scanpath(self, screen_height, screen_width, **kwargs):
         '''
         Plots the scanpath of the trial. The scanpath will be plotted in two phases: the search phase and the memorization phase.
         The search phase will be plotted with the stimulus and the memorization phase will be plotted with the items memorized by the participant.
@@ -769,15 +828,15 @@ class VisualSearchTrial(Trial):
         (self.events_path / "plots").mkdir(parents=True, exist_ok=True)
 
         
-        phase_data = {search_phase:{}, "mem":{}}
-        phase_data[search_phase]["img_paths"] = [self.session.subject.experiment.dataset_path.parent / STIMULI_FOLDER / self._stimulus]
-        phase_data[search_phase]["img_plot_coords"] = [self._stimulus_coords]
-        if memorization_phase is not None:
-            phase_data[memorization_phase]["img_paths"] = [self.session.subject.experiment.dataset_path.parent / ITEMS_FOLDER / img for img in self._memory_set]
-            phase_data[memorization_phase]["img_plot_coords"] = self._memory_set_locations
+        phase_data = {self._search_phase_name:{}, self._memorization_phase_name:{}}
+        phase_data[self._search_phase_name]["img_paths"] = [self.session.subject.experiment.dataset_path.parent / STIMULI_FOLDER / self._stimulus]
+        phase_data[self._search_phase_name]["img_plot_coords"] = [self._stimulus_coords]
+        if self._memorization_phase_name is not None:
+            phase_data[self._memorization_phase_name]["img_paths"] = [self.session.subject.experiment.dataset_path.parent / ITEMS_FOLDER / img for img in self._memory_set]
+            phase_data[self._memorization_phase_name]["img_plot_coords"] = self._memory_set_locations
 
         # If the target is present add the "bbox" to the search_phase phase as a key-value pair
         if self._target_present:
-            phase_data[search_phase]["bbox"] = self._target_location
+            phase_data[self._search_phase_name]["bbox"] = self._target_location
         vis.scanpath(fixations=self._fix,phase_data=phase_data, saccades=self._sacc, samples=self._samples, screen_height=screen_height, screen_width=screen_width, 
                       folder_path=self.events_path / "plots", **kwargs)
