@@ -663,13 +663,14 @@ class VisualSearchSession(Session):
     Columns explanation:
     - trial_number: The number of the trial, in the order they were presented. They start from 0.
     - stimulus: The filename of the stimulus presented.
-    - stimulus_coords: The coordinates of the stimulus presented. It should be a tuple containing the top-left corner of the stimulus and the bottom-right corner.
+    - stimulus_coords: The coordinates of the stimulus presented. It should be a tuple containing the x, y of the top-left corner of the stimulus and the x, y of the bottom-right corner.
     - memory_set: The set of items memorized by the participant. It should be a list of strings. Each string should be the filename of the stimulus.
     - memory_set_locations: The locations of the items memorized by the participant. It should be a list of tuples. Each tuple should contain bounding
       boxes of the items memorized by the participant. The bounding boxes should be in the format (x1, y1, x2, y2), where (x1, y1) is the top-left corner and
       (x2, y2) is the bottom-right corner.
     - target_present: Whether one of the items is present in the stimulus. It should be a boolean.
-    - target: The filename of the target item. It should be a string.
+    - target: The filename of the target item. It should be a string. If target_present is False, the value for this column will
+      not be taken into account.
     - target_location: The location of the target item. It should be a tuple containing the bounding box of the target item. The bounding box should be in
       the format (x1, y1, x2, y2), where (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner. If target_present is False, the value for this column will
       not be taken into account.
