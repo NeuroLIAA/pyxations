@@ -440,10 +440,10 @@ class VisualSearchExperiment(Experiment):
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
 
-    def correct_trials(self):
-        correct_trials = pd.concat([subject.correct_and_total_trials() for subject in self.subjects.values()], ignore_index=True)
+    def grouped_trials(self):
+        grouped_trials = pd.concat([subject.grouped_trials() for subject in self.subjects.values()], ignore_index=True)
 
-        return correct_trials
+        return grouped_trials
 
     def accuracy(self):
         accuracy = pd.concat([subject.accuracy() for subject in self.subjects.values()], ignore_index=True)
@@ -451,7 +451,7 @@ class VisualSearchExperiment(Experiment):
         return accuracy
     
     def plot_accuracy(self):
-        accuracy = self.accuracy().sort_values(by=["memory_set_size", "target_present"])
+        accuracy = self.accuracy().sort_values(by=["memory_set_size", "target_present","accuracy"])
         # There should be an ax for each pair of target present and memory set size
         tp_ta = accuracy["target_present"].unique()
         tp_ta.sort()
@@ -557,13 +557,13 @@ class VisualSearchExperiment(Experiment):
         plt.show()
         plt.close()
 
-    def correct_trials_by_rt_bins(self, bin_end,bin_step):
-        correct_trials = pd.concat([subject.correct_trials_by_rt_bins(bin_end,bin_step) for subject in self.subjects.values()], ignore_index=True)
+    def trials_by_rt_bins(self, bin_end,bin_step):
+        trials_by_rt_bins = pd.concat([subject.trials_by_rt_bins(bin_end,bin_step) for subject in self.subjects.values()], ignore_index=True)
 
-        return correct_trials
+        return trials_by_rt_bins
 
     def plot_correct_trials_by_rt_bins(self, bin_end,bin_step):
-        correct_trials_per_bin = self.correct_trials_by_rt_bins(bin_end,bin_step)[["rt_bin","target_present","memory_set_size","correct_response"]]
+        correct_trials_per_bin = self.trials_by_rt_bins(bin_end,bin_step)[["rt_bin","target_present","memory_set_size","correct_response"]]
         correct_trials_per_bin = correct_trials_per_bin.groupby(["rt_bin","target_present","memory_set_size"],observed=False).sum().reset_index()
         tp_ta = correct_trials_per_bin["target_present"].unique()
         tp_ta.sort()
@@ -586,7 +586,10 @@ class VisualSearchExperiment(Experiment):
                 axs[i, j].set_ylabel("Correct Trials")
         plt.tight_layout()
         plt.show()
-        plt.close()        
+        plt.close()
+        
+    def plot_probability_of_deciding_by_rt_bin(self, bin_end,bin_step):
+        pass
 
 
 class VisualSearchSubject(Subject):
@@ -610,14 +613,14 @@ class VisualSearchSubject(Subject):
     def scanpaths_by_stimuli(self):
         return pd.concat([session.scanpaths_by_stimuli() for session in self.sessions.values()], ignore_index=True)
     
-    def correct_and_total_trials(self):
-        correct_trials = pd.concat([session.correct_and_total_trials() for session in self.sessions.values()], ignore_index=True)
-        correct_trials["subject_id"] = self.subject_id
+    def grouped_trials(self):
+        grouped_trials = pd.concat([session.grouped_trials() for session in self.sessions.values()], ignore_index=True)
+        grouped_trials["subject_id"] = self.subject_id
 
-        return correct_trials
+        return grouped_trials
     
     def accuracy(self):
-        correct_trials = self.correct_and_total_trials()
+        correct_trials = self.grouped_trials()
         accuracy = correct_trials.groupby(["target_present", "memory_set_size"]).sum().reset_index()
         accuracy["accuracy"] = accuracy["correct_response"] / accuracy["total_trials"]
         accuracy.drop(columns=["correct_response", "total_trials"], inplace=True)
@@ -657,10 +660,10 @@ class VisualSearchSubject(Subject):
         cumulative_performance[columns_starting_with_fix] = cumulative_performance[columns_starting_with_fix] / cumulative_performance["total_trials"].values[:, None]
         return cumulative_performance
     
-    def correct_trials_by_rt_bins(self, bin_end,bin_step):
-        correct_trials = pd.concat([session.correct_trials_by_rt_bins(bin_end,bin_step) for session in self.sessions.values()], ignore_index=True)
+    def trials_by_rt_bins(self, bin_end,bin_step):
+        trials_by_rt_bins = pd.concat([session.trials_by_rt_bins(bin_end,bin_step) for session in self.sessions.values()], ignore_index=True)
         
-        return correct_trials
+        return trials_by_rt_bins
 
        
 class VisualSearchSession(Session):
@@ -754,24 +757,24 @@ class VisualSearchSession(Session):
         super().load_data(detection_algorithm)
         del self.behavior_data
 
-    def correct_and_total_trials(self):
-        correct_trials = []
+    def grouped_trials(self):
+        grouped_trials = []
         for trial in self.trials.values():
-            correct_trials.append({
+            grouped_trials.append({
                 "target_present": trial.target_present,
                 "memory_set_size": trial.memory_set_size,
                 "correct_response": trial.correct_response
             })
-        total_trials_per_memory_set_size = pd.DataFrame(correct_trials).groupby(["target_present", "memory_set_size"]).size().reset_index().rename(columns={0: "total_trials"})
-        correct_trials = pd.DataFrame(correct_trials).groupby(["target_present", "memory_set_size"]).sum().reset_index()
-        correct_trials["session_id"] = self.session_id
-        correct_trials = correct_trials.merge(total_trials_per_memory_set_size, on=["target_present", "memory_set_size"])
-        return correct_trials
+        total_trials_per_memory_set_size = pd.DataFrame(grouped_trials).groupby(["target_present", "memory_set_size"]).size().reset_index().rename(columns={0: "total_trials"})
+        grouped_trials = pd.DataFrame(grouped_trials).groupby(["target_present", "memory_set_size"]).sum().reset_index()
+        grouped_trials["session_id"] = self.session_id
+        grouped_trials = grouped_trials.merge(total_trials_per_memory_set_size, on=["target_present", "memory_set_size"])
+        return grouped_trials
     
-    def correct_trials_by_rt_bins(self,bin_end,bin_step):
+    def trials_by_rt_bins(self,bin_end,bin_step):
         bins = pd.interval_range(start=0, end=bin_end, freq=bin_step)
         rts = self.get_rts()
-        rts = rts[(rts["phase"] == self._search_phase_name) & (rts["correct_response"] == True)].reset_index(drop=True)
+        rts = rts[rts["phase"] == self._search_phase_name].reset_index(drop=True)
         rts["rt"] = rts["rt"]/1000
         rts["rt_bin"] = pd.cut(rts["rt"], bins)
         # Map bin to the first element
