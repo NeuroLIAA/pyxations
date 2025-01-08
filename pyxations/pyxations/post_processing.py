@@ -441,7 +441,7 @@ class VisualSearchExperiment(Experiment):
         self._memorization_phase_name = memorization_phase_name
 
     def correct_trials(self):
-        correct_trials = pd.concat([subject.correct_trials() for subject in self.subjects.values()], ignore_index=True)
+        correct_trials = pd.concat([subject.correct_and_total_trials() for subject in self.subjects.values()], ignore_index=True)
 
         return correct_trials
 
@@ -451,20 +451,22 @@ class VisualSearchExperiment(Experiment):
         return accuracy
     
     def plot_accuracy(self):
-        accuracy = self.accuracy()
-        # Change the name of the correct_response column to accuracy
-        accuracy = accuracy.sort_values(by=["target_present", "accuracy"])
+        accuracy = self.accuracy().sort_values(by=["memory_set_size", "target_present"])
         # There should be an ax for each pair of target present and memory set size
-        n_cols = len(accuracy["target_present"].unique())
-        n_rows = len(accuracy["memory_set_size"].unique())
+        tp_ta = accuracy["target_present"].unique()
+        tp_ta.sort()
+        mem_set_sizes = accuracy["memory_set_size"].unique()
+        mem_set_sizes.sort()
+        n_cols = len(tp_ta)
+        n_rows = len(mem_set_sizes)
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(12 * n_cols, 8 * n_rows),sharey=True)
         if n_cols == 1:
             axs = np.array([axs])
         if n_rows == 1:
             axs = np.array([axs])
 
-        for i, row in enumerate(accuracy["memory_set_size"].unique()):
-            for j, col in enumerate(accuracy["target_present"].unique()):
+        for i, row in enumerate(mem_set_sizes):
+            for j, col in enumerate(tp_ta):
                 data = accuracy[(accuracy["memory_set_size"] == row) & (accuracy["target_present"] == col)]
                 sns.barplot(x="subject_id", y="accuracy", data=data, ax=axs[i, j],estimator="mean")
                 axs[i, j].set_title(f"Memory Set Size {row}, Target Present: {bool(col)}")
@@ -507,20 +509,24 @@ class VisualSearchExperiment(Experiment):
                 subject.unlink_experiment()
 
     
-    def cumulative_correct_trials(self, max_fixations=20):
-        cumulative_correct = pd.concat([subject.cumulative_correct_trials(max_fixations) for subject in self.subjects.values()], ignore_index=True)
+    def cumulative_correct_trials_by_fixation_and_total_trials(self, max_fixations=20):
+        cumulative_correct = pd.concat([subject.cumulative_correct_trials_by_fixation_and_total_trials(max_fixations) for subject in self.subjects.values()], ignore_index=True)
 
         return cumulative_correct
 
-    def cumulative_performance(self, max_fixations=20):
-        cumulative_performance = pd.concat([subject.cumulative_performance(max_fixations) for subject in self.subjects.values()], ignore_index=True)
+    def cumulative_performance_by_fixation(self, max_fixations=20):
+        cumulative_performance = pd.concat([subject.cumulative_performance_by_fixation(max_fixations) for subject in self.subjects.values()], ignore_index=True)
 
         return cumulative_performance
     
     def plot_cumulative_performance(self, max_fixations=20):
-        cumulative_performance = self.cumulative_performance(max_fixations)
-        n_rows = len(cumulative_performance["memory_set_size"].unique())
-        n_cols = len(cumulative_performance["target_present"].unique())
+        cumulative_performance = self.cumulative_performance_by_fixation(max_fixations)
+        tp_ta = cumulative_performance["target_present"].unique()
+        tp_ta.sort()
+        mem_set_sizes = cumulative_performance["memory_set_size"].unique()
+        mem_set_sizes.sort()
+        n_cols = len(tp_ta)
+        n_rows = len(mem_set_sizes)
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(10 * n_cols, 5 * n_rows),sharey=True,sharex=True)
         fig.suptitle("Cumulative Performance")
         if n_cols == 1:
@@ -533,8 +539,8 @@ class VisualSearchExperiment(Experiment):
         # The X axis will be the fixation number, the Y axis will be the accuracy
         # The area around the mean will be the standard error
         columns_starting_with_fix = [col for col in cumulative_performance.columns if col.startswith("fix")]
-        for i, row in enumerate(cumulative_performance["memory_set_size"].unique()):
-            for j, col in enumerate(cumulative_performance["target_present"].unique()):
+        for i, row in enumerate(mem_set_sizes):
+            for j, col in enumerate(tp_ta):
                 data = cumulative_performance[(cumulative_performance["memory_set_size"] == row) & (cumulative_performance["target_present"] == col)]
                 data_mean = data[columns_starting_with_fix].mean()
                 data_standard_error = data[columns_starting_with_fix].sem()
@@ -559,17 +565,20 @@ class VisualSearchExperiment(Experiment):
     def plot_correct_trials_by_rt_bins(self, bin_end,bin_step):
         correct_trials_per_bin = self.correct_trials_by_rt_bins(bin_end,bin_step)[["rt_bin","target_present","memory_set_size","correct_response"]]
         correct_trials_per_bin = correct_trials_per_bin.groupby(["rt_bin","target_present","memory_set_size"],observed=False).sum().reset_index()
-
-        n_cols = len(correct_trials_per_bin["target_present"].unique())
-        n_rows = len(correct_trials_per_bin["memory_set_size"].unique())
+        tp_ta = correct_trials_per_bin["target_present"].unique()
+        tp_ta.sort()
+        mem_set_sizes = correct_trials_per_bin["memory_set_size"].unique()
+        mem_set_sizes.sort()
+        n_cols = len(tp_ta)
+        n_rows = len(mem_set_sizes)
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(8 * n_cols, 5 * n_rows),sharey=True,sharex=True)
         fig.suptitle("Correct Trials by RT Bins")
         if n_cols == 1:
             axs = np.array([axs])
         if n_rows == 1:
             axs = np.array([axs])
-        for i, row in enumerate(correct_trials_per_bin["memory_set_size"].unique()):
-            for j, col in enumerate(correct_trials_per_bin["target_present"].unique()):
+        for i, row in enumerate(mem_set_sizes):
+            for j, col in enumerate(tp_ta):
                 data = correct_trials_per_bin[(correct_trials_per_bin["memory_set_size"] == row) & (correct_trials_per_bin["target_present"] == col)]
                 sns.barplot(x="rt_bin", y="correct_response", data=data, ax=axs[i, j])
                 axs[i, j].set_title(f"Memory Set Size {int(row)}, Target Present {bool(col)}")
@@ -601,14 +610,14 @@ class VisualSearchSubject(Subject):
     def scanpaths_by_stimuli(self):
         return pd.concat([session.scanpaths_by_stimuli() for session in self.sessions.values()], ignore_index=True)
     
-    def correct_trials(self):
-        correct_trials = pd.concat([session.correct_trials() for session in self.sessions.values()], ignore_index=True)
+    def correct_and_total_trials(self):
+        correct_trials = pd.concat([session.correct_and_total_trials() for session in self.sessions.values()], ignore_index=True)
         correct_trials["subject_id"] = self.subject_id
 
         return correct_trials
     
     def accuracy(self):
-        correct_trials = self.correct_trials()
+        correct_trials = self.correct_and_total_trials()
         accuracy = correct_trials.groupby(["target_present", "memory_set_size"]).sum().reset_index()
         accuracy["accuracy"] = accuracy["correct_response"] / accuracy["total_trials"]
         accuracy.drop(columns=["correct_response", "total_trials"], inplace=True)
@@ -628,10 +637,10 @@ class VisualSearchSubject(Subject):
         if len(poor_accuracy_sessions) == len(keys):
             self.unlink_experiment()
 
-    def cumulative_correct_trials(self, max_fixations=20):
+    def cumulative_correct_trials_by_fixation_and_total_trials(self, max_fixations=20):
         cumulative_correct = []
         for session in self.sessions.values():
-            cumulative_correct.append(session.cumulative_correct_trials(max_fixations))
+            cumulative_correct.append(session.cumulative_correct_trials_by_fixation_and_total_trials(max_fixations))
 
         cumulative_correct = pd.concat(cumulative_correct, ignore_index=True)
         total_trials = cumulative_correct[['memory_set_size','target_present','total_trials']].groupby(['memory_set_size','target_present']).sum().reset_index()
@@ -642,8 +651,8 @@ class VisualSearchSubject(Subject):
         return cumulative_correct
 
     
-    def cumulative_performance(self, max_fixations=20):
-        cumulative_performance = self.cumulative_correct_trials(max_fixations)
+    def cumulative_performance_by_fixation(self, max_fixations=20):
+        cumulative_performance = self.cumulative_correct_trials_by_fixation_and_total_trials(max_fixations)
         columns_starting_with_fix = [col for col in cumulative_performance.columns if col.startswith("fix")]
         cumulative_performance[columns_starting_with_fix] = cumulative_performance[columns_starting_with_fix] / cumulative_performance["total_trials"].values[:, None]
         return cumulative_performance
@@ -745,7 +754,7 @@ class VisualSearchSession(Session):
         super().load_data(detection_algorithm)
         del self.behavior_data
 
-    def correct_trials(self):
+    def correct_and_total_trials(self):
         correct_trials = []
         for trial in self.trials.values():
             correct_trials.append({
@@ -762,7 +771,7 @@ class VisualSearchSession(Session):
     def correct_trials_by_rt_bins(self,bin_end,bin_step):
         bins = pd.interval_range(start=0, end=bin_end, freq=bin_step)
         rts = self.get_rts()
-        rts = rts[rts["phase"] == self._search_phase_name].reset_index(drop=True)
+        rts = rts[(rts["phase"] == self._search_phase_name) & (rts["correct_response"] == True)].reset_index(drop=True)
         rts["rt"] = rts["rt"]/1000
         rts["rt_bin"] = pd.cut(rts["rt"], bins)
         # Map bin to the first element
@@ -772,7 +781,7 @@ class VisualSearchSession(Session):
     
     def accuracy(self):
         # Accuracy should be grouped by target present and memory set size
-        correct_trials = self.correct_trials()
+        correct_trials = self.correct_and_total_trials()
         accuracy = correct_trials.groupby(["target_present", "memory_set_size"]).sum().reset_index()
         accuracy["accuracy"] = accuracy["correct_response"] / accuracy["total_trials"]
         accuracy.drop(columns=["correct_response", "total_trials"], inplace=True)
@@ -780,11 +789,11 @@ class VisualSearchSession(Session):
         return accuracy
 
     def has_poor_accuracy(self, threshold=0.5):
-        correct_trials = self.correct_trials()
+        correct_trials = self.correct_and_total_trials()
         accuracy = correct_trials["correct_response"].sum() / correct_trials["total_trials"].sum()
         return accuracy < threshold
     
-    def cumulative_correct_trials(self, max_fixations=20):
+    def cumulative_correct_trials_by_fixation_and_total_trials(self, max_fixations=20):
         correct_trials = np.zeros((len(self.trials), max_fixations+2))
         for i,trial in enumerate(self.trials.values()):
             scanpath_length = len(trial.search_fixations())
@@ -800,8 +809,8 @@ class VisualSearchSession(Session):
         cumulative_correct = cumulative_correct.merge(total_trials, on=["target_present", "memory_set_size"])
         return cumulative_correct
     
-    def cumulative_performance(self, max_fixations=20):
-        cumulative_performance = self.cumulative_correct_trials(max_fixations)
+    def cumulative_performance_by_fixation(self, max_fixations=20):
+        cumulative_performance = self.cumulative_correct_trials_by_fixation_and_total_trials(max_fixations)
         columns_starting_with_fix = [col for col in cumulative_performance.columns if col.startswith("fix")]
         cumulative_performance[columns_starting_with_fix] = cumulative_performance[columns_starting_with_fix] / cumulative_performance["total_trials"].values[:, None]
         return cumulative_performance
