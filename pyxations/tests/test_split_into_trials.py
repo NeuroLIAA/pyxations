@@ -80,5 +80,36 @@ class TestSplitIntoTrials(unittest.TestCase):
         pp.split_all_into_trials(start_times, end_times, trial_labels)
 
 
+      def test_split_into_trials_by_duration(self):
+          
+        current_folder = os.getcwd()
+        current_folder = os.path.dirname(current_folder)
+        
+        # Eyelink dataset samples
+        session_path = os.path.join(current_folder, "example_dataset_derivatives/sub-0001/ses-second/")
+        samples = pd.read_feather(os.path.join(session_path, 'samples.feather'))
+        
+        fixations = saccades = blinks = samples.copy(True) # whatever
+        user_messages = pd.read_feather(os.path.join(session_path, 'msg.feather'))
+        
+        
+        pp = PreProcessing(samples, fixations, saccades, blinks, user_messages, session_path)
+        
+        start_msgs = {'search':['beginning_of_stimuli']}
+        
+        durations = {'search': [500 for x in user_messages[user_messages['message']== 'beginning_of_stimuli'].iterrows()]}
+        
+        trial_labels = ['first', 'second', 'third']
+        ##pp.split_all_into_trials(start_times, end_times, trial_labels)
+        pp.split_all_into_trials_by_durations(start_msgs, durations, trial_labels)
+        
+        
+        self.assertTrue('trial_number' in samples.columns)
+        self.assertTrue('phase' in samples.columns)
+        self.assertTrue('trial_label' in samples.columns)        
+        self.assertTrue(1 in samples.phase.unique())
+
+
+
 if __name__ == "__main__":
     unittest.main()
