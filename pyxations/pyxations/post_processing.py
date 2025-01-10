@@ -460,41 +460,131 @@ class VisualSearchExperiment(Experiment):
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
 
-    def grouped_trials(self):
-        grouped_trials = pd.concat([subject.grouped_trials() for subject in self.subjects.values()], ignore_index=True)
-
-        return grouped_trials
-
     def accuracy(self):
         accuracy = pd.concat([subject.accuracy() for subject in self.subjects.values()], ignore_index=True)
 
         return accuracy
     
-    def plot_accuracy(self):
+    def plot_accuracy_by_subject(self):
         accuracy = self.accuracy().sort_values(by=["memory_set_size", "target_present","accuracy"])
-        # There should be an ax for each pair of target present and memory set size
-        tp_ta = accuracy["target_present"].unique()
-        tp_ta.sort()
+        # target present to bool
+        accuracy["target_present"] = accuracy["target_present"].astype(bool)
+        # There should be an ax for each memory set size
+
         mem_set_sizes = accuracy["memory_set_size"].unique()
         mem_set_sizes.sort()
-        n_cols = len(tp_ta)
+
         n_rows = len(mem_set_sizes)
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(10 * n_cols, 5 * n_rows),sharey=True)
-        if n_cols == 1:
-            axs = np.array([axs])
+        fig, axs = plt.subplots(n_rows, 1, figsize=(10, 5 * n_rows),sharey=True)
+
         if n_rows == 1:
             axs = np.array([axs])
 
         for i, row in enumerate(mem_set_sizes):
-            for j, col in enumerate(tp_ta):
-                data = accuracy[(accuracy["memory_set_size"] == row) & (accuracy["target_present"] == col)]
-                sns.barplot(x="subject_id", y="accuracy", data=data, ax=axs[i, j],estimator="mean")
-                axs[i, j].set_title(f"Memory Set Size {row}, Target Present: {bool(col)}")
-                axs[i, j].tick_params(axis='x', rotation=90)
-                axs[i, j].set_xlabel("Subject ID")
-                axs[i, j].set_ylabel("Accuracy")
+            data = accuracy[(accuracy["memory_set_size"] == row)]
+            sns.barplot(x="subject_id", y="accuracy", data=data, ax=axs[i],estimator="mean", hue="target_present")
+            axs[i].set_title(f"Memory Set Size {row}")
+            axs[i].tick_params(axis='x', rotation=90)
+            axs[i].set_xlabel("Subject ID")
+            axs[i].set_ylabel("Accuracy")
 
         plt.tight_layout()
+        plt.show()
+        plt.close()
+    
+    def plot_accuracy_by_stimulus(self):
+        accuracy = self.get_search_rts().groupby(["target_present", "memory_set_size","stimulus"])[["rt","correct_response"]].mean().reset_index().sort_values(by=["memory_set_size", "target_present","correct_response"])
+        # target present to bool
+        accuracy["target_present"] = accuracy["target_present"].astype(bool)
+        # correct_response name to accuracy
+        accuracy = accuracy.rename(columns={"correct_response": "accuracy"})
+        # There should be an ax for each memory set size
+
+        mem_set_sizes = accuracy["memory_set_size"].unique()
+        mem_set_sizes.sort()
+
+        n_rows = len(mem_set_sizes)
+        fig, axs = plt.subplots(n_rows, 1, figsize=(10, 5 * n_rows),sharey=True)
+
+        if n_rows == 1:
+            axs = np.array([axs])
+
+        for i, row in enumerate(mem_set_sizes):
+            data = accuracy[(accuracy["memory_set_size"] == row)]
+            sns.barplot(x="stimulus", y="accuracy", data=data, ax=axs[i],estimator="mean", hue="target_present")
+            axs[i].set_title(f"Memory Set Size {row}")
+            axs[i].tick_params(axis='x', rotation=90)
+            axs[i].set_xlabel("Subject ID")
+            axs[i].set_ylabel("Accuracy")
+
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+
+    def get_search_rts(self):
+        rts = [subject.get_search_rts() for subject in self.subjects.values()]
+        return pd.concat(rts, ignore_index=True)
+    
+    def plot_speed_accuracy_tradeoff_by_subject(self):
+        speed_accuracy = self.get_search_rts().groupby(["subject_id", "target_present", "memory_set_size"])[["rt","correct_response"]].mean().reset_index()
+        # Change type of target_present to bool
+        speed_accuracy["target_present"] = speed_accuracy["target_present"].astype(bool)
+        mem_set_sizes = speed_accuracy["memory_set_size"].unique()
+        mem_set_sizes.sort()
+
+        n_rows = len(mem_set_sizes)
+        fig, axs = plt.subplots(n_rows, 1, figsize=(6, 6 * n_rows))
+
+        if n_rows == 1:
+            axs = np.array([axs])
+
+
+        speed_accuracy = speed_accuracy.rename(columns={"correct_response": "accuracy"})
+        for i, row in enumerate(mem_set_sizes):
+            data = speed_accuracy[speed_accuracy["memory_set_size"] == row]
+            sns.scatterplot(x="accuracy", y="rt", data=data, hue="target_present", ax=axs[i])
+            # Plot a line between the two points of the same subject
+            for subject in data["subject_id"].unique():
+                subject_data = data[data["subject_id"] == subject]
+                init_point = subject_data[subject_data["target_present"] == False][["accuracy", "rt"]]
+                final_point = subject_data[subject_data["target_present"] == True][["accuracy", "rt"]]
+                axs[i].plot([init_point["accuracy"].values[0], final_point["accuracy"].values[0]], [init_point["rt"].values[0], final_point["rt"].values[0]], color="black", alpha=0.3, linewidth=0.3, zorder=0)
+            axs[i].set_title(f"Memory Set Size {row}")
+            axs[i].set_xlabel("Accuracy")
+            axs[i].set_ylabel("RT")
+            axs[i].set_xlim(0, 1)
+            axs[i].set_ylim(0, speed_accuracy["rt"].max())
+
+        plt.suptitle("Speed-Accuracy Tradeoff for subjects")
+        plt.show()
+        plt.close()
+
+    def plot_speed_accuracy_tradeoff_by_stimulus(self):
+        speed_accuracy = self.get_search_rts().groupby(["target_present", "memory_set_size","stimulus"])[["rt","correct_response"]].mean().reset_index()
+        speed_accuracy["target_present"] = speed_accuracy["target_present"].astype(bool)
+        mem_set_sizes = speed_accuracy["memory_set_size"].unique()
+        mem_set_sizes.sort()
+        n_rows = len(mem_set_sizes)
+        fig, axs = plt.subplots(n_rows, 1, figsize=(6, 6 * n_rows))
+        if n_rows == 1:
+            axs = np.array([axs])
+        speed_accuracy = speed_accuracy.rename(columns={"correct_response": "accuracy"})
+        for i, row in enumerate(mem_set_sizes):
+            data = speed_accuracy[speed_accuracy["memory_set_size"] == row]
+            sns.scatterplot(x="accuracy", y="rt", data=data, hue="target_present", ax=axs[i])
+            for stimulus in data["stimulus"].unique():
+                stimulus_data = data[data["stimulus"] == stimulus]
+                init_point = stimulus_data[stimulus_data["target_present"] == False][["accuracy", "rt"]]
+                final_point = stimulus_data[stimulus_data["target_present"] == True][["accuracy", "rt"]]
+                if len(init_point) == 0 or len(final_point) == 0:
+                    continue
+                axs[i].plot([init_point["accuracy"].values[0], final_point["accuracy"].values[0]], [init_point["rt"].values[0], final_point["rt"].values[0]], color="black", alpha=0.3, linewidth=0.3, zorder=0)
+            axs[i].set_title(f"Memory Set Size {row}")
+            axs[i].set_xlabel("Accuracy")
+            axs[i].set_ylabel("RT")
+            axs[i].set_xlim(0, 1)
+            axs[i].set_ylim(0, speed_accuracy["rt"].max())
+        plt.suptitle("Speed-Accuracy Tradeoff for stimuli")
         plt.show()
         plt.close()
 
@@ -535,8 +625,9 @@ class VisualSearchExperiment(Experiment):
 
 
     def remove_trials_for_stimuli_with_poor_accuracy(self, threshold=0.5):
+        '''For now this will be done without grouping by target_present'''
         scanpaths_by_stimuli = self.scanpaths_by_stimuli()
-        grouped = scanpaths_by_stimuli.groupby(["stimulus", "target_present", "memory_set_size"])
+        grouped = scanpaths_by_stimuli.groupby(["stimulus", "memory_set_size"])
         poor_accuracy_stimuli = grouped["correct_response"].mean() < threshold
         poor_accuracy_stimuli = poor_accuracy_stimuli[poor_accuracy_stimuli].index
         subj_keys = list(self.subjects.keys())
@@ -548,7 +639,7 @@ class VisualSearchExperiment(Experiment):
                 trial_keys = list(session.trials.keys())
                 for trial_key in trial_keys:
                     trial = session.trials[trial_key]
-                    if (trial.stimulus, trial.target_present, trial.memory_set_size) in poor_accuracy_stimuli:
+                    if (trial.stimulus, trial.memory_set_size) in poor_accuracy_stimuli:
                         trial.unlink_session()
                 if len(session.trials) == 0:
                     session.unlink_subject()
@@ -614,9 +705,14 @@ class VisualSearchExperiment(Experiment):
         plt.close()
 
     def trials_by_rt_bins(self, bin_end,bin_step):
-        trials_by_rt_bins = pd.concat([subject.trials_by_rt_bins(bin_end,bin_step) for subject in self.subjects.values()], ignore_index=True)
-
-        return trials_by_rt_bins
+        bins = pd.interval_range(start=0, end=bin_end, freq=bin_step)
+        rts = self.get_rts()
+        rts = rts[rts["phase"] == self._search_phase_name].reset_index(drop=True)
+        rts["rt"] = rts["rt"]/1000
+        rts["rt_bin"] = pd.cut(rts["rt"], bins)
+        # Map bin to the first element
+        rts["rt_bin"] = rts["rt_bin"].apply(lambda x: x.left)
+        return rts
 
     def plot_correct_trials_by_rt_bins(self, bin_end,bin_step):
         correct_trials_per_bin = self.trials_by_rt_bins(bin_end,bin_step)[["rt_bin","target_present","memory_set_size","correct_response"]]
@@ -671,6 +767,8 @@ class VisualSearchExperiment(Experiment):
 
         grouped_agg = grouped.groupby(["correct_response","target_present","rt_bin","memory_set_size"]).agg({"count": "sum", "total_per_bin": "sum"}).reset_index()
         grouped_agg["count_normalized"] = grouped_agg["count"] / grouped_agg["total_per_bin"]
+        # correct_response as bool
+        grouped_agg["correct_response"] = grouped_agg["correct_response"].astype(bool)
 
         # Plot the waiting per RT bin (1st plot for correct trials, 2nd plot for incorrect trials)
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 5 * n_rows),sharey=True,sharex=True)
@@ -714,17 +812,16 @@ class VisualSearchSubject(Subject):
     def scanpaths_by_stimuli(self):
         return pd.concat([session.scanpaths_by_stimuli() for session in self.sessions.values()], ignore_index=True)
     
-    def grouped_trials(self):
-        grouped_trials = pd.concat([session.grouped_trials() for session in self.sessions.values()], ignore_index=True)
-        grouped_trials["subject_id"] = self.subject_id
-
-        return grouped_trials
+    def get_search_rts(self):
+        rts = self.get_rts()
+        return rts[rts["phase"] == self._search_phase_name]
     
     def accuracy(self):
-        correct_trials = self.grouped_trials()
-        accuracy = correct_trials.groupby(["target_present", "memory_set_size"]).sum().reset_index()
-        accuracy["accuracy"] = accuracy["correct_response"] / accuracy["total_trials"]
-        accuracy.drop(columns=["correct_response", "total_trials"], inplace=True)
+        # Accuracy should be grouped by target present and memory set size
+        correct_trials = self.get_search_rts()[["target_present", "correct_response", "memory_set_size"]]
+        accuracy = correct_trials.groupby(["target_present", "memory_set_size"]).mean().reset_index()
+        # Change the column name to accuracy
+        accuracy.rename(columns={"correct_response": "accuracy"}, inplace=True)
         accuracy["subject_id"] = self.subject_id
 
         return accuracy
@@ -781,9 +878,15 @@ class VisualSearchSubject(Subject):
         return cumulative_performance, cumulative_performance_sem
     
     def trials_by_rt_bins(self, bin_end,bin_step):
-        trials_by_rt_bins = pd.concat([session.trials_by_rt_bins(bin_end,bin_step) for session in self.sessions.values()], ignore_index=True)
-        
-        return trials_by_rt_bins
+        bins = pd.interval_range(start=0, end=bin_end, freq=bin_step)
+        rts = self.get_rts()
+        rts = rts[rts["phase"] == self._search_phase_name].reset_index(drop=True)
+        rts["rt"] = rts["rt"]/1000
+        rts["rt_bin"] = pd.cut(rts["rt"], bins)
+        # Map bin to the first element
+        rts["rt_bin"] = rts["rt_bin"].apply(lambda x: x.left)
+        return rts
+
 
        
 class VisualSearchSession(Session):
@@ -877,19 +980,7 @@ class VisualSearchSession(Session):
         super().load_data(detection_algorithm)
         del self.behavior_data
 
-    def grouped_trials(self):
-        grouped_trials = []
-        for trial in self.trials.values():
-            grouped_trials.append({
-                "target_present": trial.target_present,
-                "memory_set_size": trial.memory_set_size,
-                "correct_response": trial.correct_response
-            })
-        total_trials_per_memory_set_size = pd.DataFrame(grouped_trials).groupby(["target_present", "memory_set_size"]).size().reset_index().rename(columns={0: "total_trials"})
-        grouped_trials = pd.DataFrame(grouped_trials).groupby(["target_present", "memory_set_size"]).sum().reset_index()
-        grouped_trials["session_id"] = self.session_id
-        grouped_trials = grouped_trials.merge(total_trials_per_memory_set_size, on=["target_present", "memory_set_size"])
-        return grouped_trials
+
     
     def trials_by_rt_bins(self,bin_end,bin_step):
         bins = pd.interval_range(start=0, end=bin_end, freq=bin_step)
@@ -901,19 +992,23 @@ class VisualSearchSession(Session):
         rts["rt_bin"] = rts["rt_bin"].apply(lambda x: x.left)
         return rts
 
-    
+    def get_search_rts(self):
+        rts = self.get_rts()
+        return rts[rts["phase"] == self._search_phase_name]
+
     def accuracy(self):
         # Accuracy should be grouped by target present and memory set size
-        correct_trials = self.grouped_trials()
-        accuracy = correct_trials.groupby(["target_present", "memory_set_size"]).sum().reset_index()
-        accuracy["accuracy"] = accuracy["correct_response"] / accuracy["total_trials"]
-        accuracy.drop(columns=["correct_response", "total_trials"], inplace=True)
+        correct_trials = self.get_search_rts()[["target_present", "correct_response", "memory_set_size"]]
+        accuracy = correct_trials.groupby(["target_present", "memory_set_size"]).mean().reset_index()
+        # Change the column name to accuracy
+        accuracy.rename(columns={"correct_response": "accuracy"}, inplace=True)
+        accuracy["session_id"] = self.session_id
 
         return accuracy
 
     def has_poor_accuracy(self, threshold=0.5):
-        correct_trials = self.grouped_trials()
-        accuracy = correct_trials["correct_response"].sum() / correct_trials["total_trials"].sum()
+        correct_trials = self.get_search_rts()[["target_present", "correct_response", "memory_set_size"]]
+        accuracy = correct_trials["correct_response"].sum() / correct_trials["correct_response"].count()
         return accuracy < threshold
     
     def find_fixation_cutoff(self, percentile=0.95):
@@ -1022,6 +1117,7 @@ class VisualSearchTrial(Trial):
         self.rts["memory_set_size"] = len(self._memory_set)
         self.rts["target_present"] = self._target_present
         self.rts["correct_response"] = self._correct_response
+        self.rts["stimulus"] = self._stimulus
         # Make sure the values are of the correct type
 
 
