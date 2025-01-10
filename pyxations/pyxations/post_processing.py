@@ -531,6 +531,8 @@ class VisualSearchExperiment(Experiment):
         speed_accuracy["target_present"] = speed_accuracy["target_present"].astype(bool)
         mem_set_sizes = speed_accuracy["memory_set_size"].unique()
         mem_set_sizes.sort()
+        # Divide rt by 1000 to get seconds
+        speed_accuracy["rt"] = speed_accuracy["rt"] / 1000                  
 
         n_rows = len(mem_set_sizes)
         fig, axs = plt.subplots(n_rows, 1, figsize=(6, 6 * n_rows))
@@ -551,7 +553,7 @@ class VisualSearchExperiment(Experiment):
                 axs[i].plot([init_point["accuracy"].values[0], final_point["accuracy"].values[0]], [init_point["rt"].values[0], final_point["rt"].values[0]], color="black", alpha=0.3, linewidth=0.3, zorder=0)
             axs[i].set_title(f"Memory Set Size {row}")
             axs[i].set_xlabel("Accuracy")
-            axs[i].set_ylabel("RT")
+            axs[i].set_ylabel("Mean RT (s)")
             axs[i].set_xlim(0, 1)
             axs[i].set_ylim(0, speed_accuracy["rt"].max())
 
@@ -564,6 +566,8 @@ class VisualSearchExperiment(Experiment):
         speed_accuracy["target_present"] = speed_accuracy["target_present"].astype(bool)
         mem_set_sizes = speed_accuracy["memory_set_size"].unique()
         mem_set_sizes.sort()
+        # Divide rt by 1000 to get seconds
+        speed_accuracy["rt"] = speed_accuracy["rt"] / 1000      
         n_rows = len(mem_set_sizes)
         fig, axs = plt.subplots(n_rows, 1, figsize=(6, 6 * n_rows))
         if n_rows == 1:
@@ -581,7 +585,7 @@ class VisualSearchExperiment(Experiment):
                 axs[i].plot([init_point["accuracy"].values[0], final_point["accuracy"].values[0]], [init_point["rt"].values[0], final_point["rt"].values[0]], color="black", alpha=0.3, linewidth=0.3, zorder=0)
             axs[i].set_title(f"Memory Set Size {row}")
             axs[i].set_xlabel("Accuracy")
-            axs[i].set_ylabel("RT")
+            axs[i].set_ylabel("Mean RT (s)")
             axs[i].set_xlim(0, 1)
             axs[i].set_ylim(0, speed_accuracy["rt"].max())
         plt.suptitle("Speed-Accuracy Tradeoff for stimuli")
