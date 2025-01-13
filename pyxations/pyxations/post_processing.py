@@ -594,8 +594,14 @@ class VisualSearchExperiment(Experiment):
 
     def remove_poor_accuracy_sessions(self, threshold=0.5):
         keys = list(self.subjects.keys())
+        dict_removed = {"subject":[],"session":[]}
         for subject in keys:
-            self.subjects[subject].remove_poor_accuracy_sessions(threshold)
+            dict_subject = self.subjects[subject].remove_poor_accuracy_sessions(threshold)
+            for session in dict_subject["session"]:
+                dict_removed["session"].append((subject,session))
+            for sub in dict_subject["subject"]:
+                dict_removed["subject"].append(sub)
+        return dict_removed
 
     def scanpaths_by_stimuli(self):
         return pd.concat([subject.scanpaths_by_stimuli() for subject in self.subjects.values()], ignore_index=True)
@@ -635,6 +641,7 @@ class VisualSearchExperiment(Experiment):
         poor_accuracy_stimuli = grouped["correct_response"].mean() < threshold
         poor_accuracy_stimuli = poor_accuracy_stimuli[poor_accuracy_stimuli].index
         subj_keys = list(self.subjects.keys())
+        dict_removed= {"subject":[],"session":[],"trial":[]}
         for subject_key in subj_keys:
             subject = self.subjects[subject_key]
             session_keys = list(subject.sessions.keys())
@@ -644,12 +651,15 @@ class VisualSearchExperiment(Experiment):
                 for trial_key in trial_keys:
                     trial = session.trials[trial_key]
                     if (trial.stimulus, trial.memory_set_size) in poor_accuracy_stimuli:
+                        dict_removed["trial"].append((subject_key,session_key,trial_key))
                         trial.unlink_session()
                 if len(session.trials) == 0:
+                    dict_removed["session"].append((subject_key,session_key))
                     session.unlink_subject()
             if len(subject.sessions) == 0:
+                dict_removed["subject"].append(subject_key)
                 subject.unlink_experiment()
-
+        return dict_removed
     
     def cumulative_correct_trials_by_fixation(self, group_cutoffs=None):
         if group_cutoffs is None:
@@ -857,13 +867,17 @@ class VisualSearchSubject(Subject):
     def remove_poor_accuracy_sessions(self, threshold=0.5):
         poor_accuracy_sessions = []
         keys = list(self.sessions.keys())
+        dict_removed = {"subject":[],"session":[]}
         for key in keys:
             session = self.sessions[key]
             if session.has_poor_accuracy(threshold):
                 poor_accuracy_sessions.append(session.session_id)
+                dict_removed["session"].append(session.session_id)
                 session.unlink_subject()
         if len(poor_accuracy_sessions) == len(keys):
+            dict_removed["subject"].append(self.subject_id)
             self.unlink_experiment()
+        return dict_removed
 
     def cumulative_correct_trials_by_fixation(self, group_cutoffs=None):
         if group_cutoffs is None:
