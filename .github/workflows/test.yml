@@ -26,9 +26,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r pyxations/requirements.txt
 
       # Ejecutar tests
       - name: Run tests
         run: |
-          pytest
+          pytest pyxations/tests
