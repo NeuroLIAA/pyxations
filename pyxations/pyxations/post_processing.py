@@ -124,6 +124,8 @@ class Experiment:
     
     def remove_subject(self, subject_id):
         del self.subjects[subject_id]
+
+
 class Subject:
 
     def __init__(self, subject_id: str, old_subject_id: str, experiment: Experiment, subject_dataset_path: Path, subject_derivatives_path: Path,

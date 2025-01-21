@@ -34,10 +34,10 @@ class BidsParse(object):
 
         
         (self.session_folder_path / f'{detection_algorithm}_events').mkdir(parents=True, exist_ok=True)
-        if not dfFix.empty:
-            self.save_dataframe(dfFix, (self.session_folder_path / f'{detection_algorithm}_events'), 'fix', key='fix')
-        if not dfSacc.empty:
-            self.save_dataframe(dfSacc, (self.session_folder_path / f'{detection_algorithm}_events'), 'sacc', key='sacc')
-        if not dfBlink.empty:
-            self.save_dataframe(dfBlink, (self.session_folder_path / f'{detection_algorithm}_events'), 'blink', key='blink')        
+        #if not dfFix.empty:
+        self.save_dataframe(dfFix, (self.session_folder_path / f'{detection_algorithm}_events'), 'fix', key='fix')
+        #if not dfSacc.empty:
+        self.save_dataframe(dfSacc, (self.session_folder_path / f'{detection_algorithm}_events'), 'sacc', key='sacc')
+        #if not dfBlink.empty:
+        self.save_dataframe(dfBlink, (self.session_folder_path / f'{detection_algorithm}_events'), 'blink', key='blink')        
 

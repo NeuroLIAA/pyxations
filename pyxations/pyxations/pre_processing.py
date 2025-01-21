@@ -141,6 +141,7 @@ class PreProcessing:
     
     def split_into_trials(self, data:pd.DataFrame, start_times: dict[list[int]], end_times: dict[list[int]],trial_labels:dict[list[str]] = None):
         data['phase'] = [''] * len(data)
+        #data['phase'] = [-1] * len(data)
         data['trial_number'] = [-1] * len(data)
         data['trial_label'] = [''] * len(data)
         for key in start_times.keys():
@@ -163,16 +164,17 @@ class PreProcessing:
                 raise ValueError("The amount of computed trials is {} while the amount of ordered trial ids is {} for key {} in the session path {}.".format(len(start_times_list), len(trial_labels_list)), key, self.session_path)
 
 
+            print(data['phase'].dtypes)
 
             # Divide in trials according to start_times_list and end_times_list
             if 'tSample' in data.columns:
                 for i in range(len(start_times_list)):
                     data.loc[(data['tSample'] >= start_times_list[i]) & (data['tSample'] <= end_times_list[i]), 'trial_number'] = i
-                    data.loc[(data['tSample'] >= start_times_list[i]) & (data['tSample'] <= end_times_list[i]), 'phase'] = key
+                    data.loc[(data['tSample'] >= start_times_list[i]) & (data['tSample'] <= end_times_list[i]), 'phase'] = str(key)
             elif 'tStart' in data.columns and 'tEnd' in data.columns:
                 for i in range(len(start_times_list)):
                     data.loc[(data['tStart'] >= start_times_list[i]) & (data['tEnd'] <= end_times_list[i]), 'trial_number'] = i
-                    data.loc[(data['tStart'] >= start_times_list[i]) & (data['tEnd'] <= end_times_list[i]), 'phase'] = key
+                    data.loc[(data['tStart'] >= start_times_list[i]) & (data['tEnd'] <= end_times_list[i]), 'phase'] = str(key)
             else:
                 data.drop('trial_number', axis=1, inplace=True)
                 data.drop('phase', axis=1, inplace=True)
@@ -182,3 +184,6 @@ class PreProcessing:
                 #data['trial_label'] = [''] * len(data)
                 for i in range(len(start_times_list)):
                     data.loc[data['trial_number'] == i, 'trial_label'] = trial_labels_list[i]
+                    
+            print(len(data['phase']), data['phase'].dtypes)
+            print(len(data['phase']))
