@@ -1,14 +1,16 @@
 import unittest
-from pyxations import dataset_to_bids
+#from pyxations import pyx.dataset_to_bids
 import os
+
+import pyxations as pyx
 
 class TestDatasetToBids(unittest.TestCase):
     def test_dataset_to_bids(self):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
         files_folder_path = os.path.join(current_folder,"example_files")
-        bids_dataset_folder = dataset_to_bids(current_folder,files_folder_path,"example_dataset")
-        #bids_dataset_folder = dataset_to_bids(current_folder,files_folder_path,"antisacadas_dataset", format_name='eyelink')
+        bids_dataset_folder = pyx.dataset_to_bids(current_folder,files_folder_path,"example_dataset")
+        #bids_dataset_folder = pyx.dataset_to_bids(current_folder,files_folder_path,"antisacadas_dataset", format_name='eyelink')
         self.assertTrue(os.path.exists(bids_dataset_folder))
         self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001")))
         self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001", "ses-second")))
@@ -18,7 +20,7 @@ class TestDatasetToBids(unittest.TestCase):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
         files_folder_path = os.path.join(current_folder,"antisacadas_files")
-        bids_dataset_folder = dataset_to_bids(current_folder, files_folder_path,"antisacadas_dataset", format_name='webgazer')
+        bids_dataset_folder = pyx.dataset_to_bids(current_folder, files_folder_path,"antisacadas_dataset", format_name='webgazer')
         self.assertTrue(os.path.exists(bids_dataset_folder))
         self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001")))
         #self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001", "ses-second")))
@@ -28,7 +30,7 @@ class TestDatasetToBids(unittest.TestCase):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
         files_folder_path = os.path.join(current_folder,"tobii_files")
-        bids_dataset_folder = dataset_to_bids(current_folder,files_folder_path,"tobii_dataset", format_name='tobii')
+        bids_dataset_folder = pyx.dataset_to_bids(current_folder,files_folder_path,"tobii_dataset", format_name='tobii')
         self.assertTrue(os.path.exists(bids_dataset_folder))
         self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001")))
         #self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001", "ses-second")))
@@ -37,7 +39,7 @@ class TestDatasetToBids(unittest.TestCase):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
         files_folder_path = os.path.join(current_folder,"gazepoint_files")
-        bids_dataset_folder = dataset_to_bids(current_folder,files_folder_path,"gazepoint_dataset", format_name='gaze')
+        bids_dataset_folder = pyx.dataset_to_bids(current_folder,files_folder_path,"gazepoint_dataset", format_name='gaze')
         self.assertTrue(os.path.exists(bids_dataset_folder))
         self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001")))
         #self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001", "ses-second")))

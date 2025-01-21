@@ -4,7 +4,7 @@ name: Run Tests
 on:
   push:
     branches:
-      - cpa  # Cambia "main" si usas otro nombre de rama principal
+      - restructure  # Cambia "main" si usas otro nombre de rama principal
   pull_request:
 
 jobs:
@@ -31,5 +31,7 @@ jobs:
 
       # Ejecutar tests
       - name: Run tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
-          pytest pyxations/tests
+          pytest tests
