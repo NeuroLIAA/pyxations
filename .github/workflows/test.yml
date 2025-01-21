@@ -20,13 +20,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.x"  # Cambia por tu versión de Python
+          python-version: "3.11"  # Cambia por tu versión de Python
 
       # Instalar dependencias
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools
+          pip install setuptools --upgrade
           pip install -r pyxations/requirements.txt
 
       # Ejecutar tests
