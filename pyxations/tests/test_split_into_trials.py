@@ -80,8 +80,7 @@ class TestSplitIntoTrials(unittest.TestCase):
         pp.split_all_into_trials(start_times, end_times, trial_labels)
 
 
-      def test_split_into_trials_by_duration(self):
-          
+    def test_split_into_trials_by_duration(self):
         current_folder = os.getcwd()
         current_folder = os.path.dirname(current_folder)
         
