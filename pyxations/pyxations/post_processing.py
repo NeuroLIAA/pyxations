@@ -31,6 +31,24 @@ def _find_fixation_cutoff(fix_count_list, threshold, max_possible):
             return i
 
     return max_possible-1
+
+def scatter_hist(x, y, ax, ax_histx, ax_histy):
+    # no labels
+    ax_histx.tick_params(axis="x", labelbottom=False)
+    ax_histy.tick_params(axis="y", labelleft=False)
+
+    # the scatter plot:
+    ax.scatter(x, y)
+
+    # now determine nice limits by hand:
+    binwidth = 0.25
+    xymax = max(np.max(np.abs(x)), np.max(np.abs(y)))
+    lim = (int(xymax/binwidth) + 1) * binwidth
+
+    bins = np.arange(-lim, lim + binwidth, binwidth)
+    ax_histx.hist(x, bins=bins)
+    ax_histy.hist(y, bins=bins, orientation='horizontal')
+
 class Experiment:
 
     def __init__(self, dataset_path: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
@@ -394,13 +412,15 @@ class Trial:
 
         self.events_path = events_path
         self.detection_algorithm = events_path.name[:-7]
-    
+
     def fixations(self):
         return self._fix
     
+
     def saccades(self):
         return self._sacc
     
+
     def samples(self):
         return self._samples
 
@@ -524,73 +544,200 @@ class VisualSearchExperiment(Experiment):
         plt.close()
 
     def get_search_rts(self):
-        rts = [subject.get_search_rts() for subject in self.subjects.values()]
-        return pd.concat(rts, ignore_index=True)
+        rts = self.get_rts()
+        return rts[rts["phase"] == self._search_phase_name]
     
+    def get_search_saccades(self):
+        saccades = self.saccades()
+        return saccades[saccades["phase"] == self._search_phase_name]
+
+    def get_search_fixations(self):
+        fixations = self.fixations()
+        return fixations[fixations["phase"] == self._search_phase_name]
+
     def plot_speed_accuracy_tradeoff_by_subject(self):
-        speed_accuracy = self.get_search_rts().groupby(["subject_id", "target_present", "memory_set_size"])[["rt","correct_response"]].mean().reset_index()
-        # Change type of target_present to bool
+        # 1) Aggregate the data (as you already do).
+        speed_accuracy = (
+            self.get_search_rts()
+                .groupby(["target_present", "memory_set_size", "subject_id"])[["rt","correct_response"]]
+                .mean()
+                .reset_index()
+        )
+        # Convert booleans and rename
         speed_accuracy["target_present"] = speed_accuracy["target_present"].astype(bool)
-        mem_set_sizes = speed_accuracy["memory_set_size"].unique()
-        mem_set_sizes.sort()
-        # Divide rt by 1000 to get seconds
-        speed_accuracy["rt"] = speed_accuracy["rt"] / 1000                  
-
-        n_rows = len(mem_set_sizes)
-        fig, axs = plt.subplots(n_rows, 1, figsize=(6, 6 * n_rows))
-
-        if n_rows == 1:
-            axs = np.array([axs])
-
-
         speed_accuracy = speed_accuracy.rename(columns={"correct_response": "accuracy"})
-        for i, row in enumerate(mem_set_sizes):
-            data = speed_accuracy[speed_accuracy["memory_set_size"] == row]
-            sns.scatterplot(x="accuracy", y="rt", data=data, hue="target_present", ax=axs[i])
-            # Plot a line between the two points of the same subject
-            for subject in data["subject_id"].unique():
-                subject_data = data[data["subject_id"] == subject]
-                init_point = subject_data[subject_data["target_present"] == False][["accuracy", "rt"]]
-                final_point = subject_data[subject_data["target_present"] == True][["accuracy", "rt"]]
-                axs[i].plot([init_point["accuracy"].values[0], final_point["accuracy"].values[0]], [init_point["rt"].values[0], final_point["rt"].values[0]], color="black", alpha=0.3, linewidth=0.3, zorder=0)
-            axs[i].set_title(f"Memory Set Size {row}")
-            axs[i].set_xlabel("Accuracy")
-            axs[i].set_ylabel("Mean RT (s)")
-            axs[i].set_xlim(0, 1)
-            axs[i].set_ylim(0, speed_accuracy["rt"].max())
+        
+        # Convert RT from ms to seconds (if needed)
+        speed_accuracy["rt"] = speed_accuracy["rt"] / 1000.0
 
-        plt.suptitle("Speed-Accuracy Tradeoff for subjects")
+        # Unique memory set sizes
+        mem_set_sizes = np.sort(speed_accuracy["memory_set_size"].unique())
+        n_rows = len(mem_set_sizes)
+
+        # 2) Prepare a figure that has 2 rows per memory-set size:
+        #    - top row:  x-hist
+        #    - bottom:   scatter + y-hist
+        fig = plt.figure(figsize=(6,1 + 6 * n_rows))
+        gs = fig.add_gridspec(
+            2 * n_rows, 2, 
+            width_ratios=(4, 1), 
+            height_ratios=[1, 4]*n_rows,  # repeat [1,4] for each row
+            left=0.1, right=0.9, bottom=0.07, top=0.85,
+            wspace=0.05, hspace=0.05
+        )
+
+        # 3) Loop over each memory-set size, building a “scatter+hist” layout
+        for i, mem_size in enumerate(mem_set_sizes):
+            data = speed_accuracy[speed_accuracy["memory_set_size"] == mem_size]
+
+            # Indices in the GridSpec
+            row_top    = 2*i     # hist of x
+            row_bottom = 2*i + 1 # scatter + hist of y
+
+            # Create the three Axes
+            ax       = fig.add_subplot(gs[row_bottom, 0])  # main scatter
+            ax_histx = fig.add_subplot(gs[row_top,    0], sharex=ax)
+            ax_histy = fig.add_subplot(gs[row_bottom, 1], sharey=ax)
+
+            # ------------------------------------
+            # (A) The main scatter plot (color by `target_present`)
+            #     Using Seaborn the same way you did:
+            sns.scatterplot(
+                x="accuracy", 
+                y="rt", 
+                data=data, 
+                hue="target_present",
+                ax=ax
+            )
+
+            # (B) Connect the same `subject_id` pairs with lines
+            #     between target_present=False and target_present=True
+            for stim in data["subject_id"].unique():
+                stim_data = data[data["subject_id"] == stim]
+                init_point  = stim_data[stim_data["target_present"] == False]
+                final_point = stim_data[stim_data["target_present"] == True]
+                if len(init_point) == 0 or len(final_point) == 0:
+                    continue
+                ax.plot(
+                    [init_point["accuracy"].values[0], final_point["accuracy"].values[0]],
+                    [init_point["rt"].values[0],       final_point["rt"].values[0]],
+                    color="black", alpha=0.3, linewidth=0.5, zorder=0
+                )
+
+            # (C) Histograms on top (ax_histx) and on the right (ax_histy).
+            #     We'll just do a simple histogram here; 
+            #     you can adapt binning to your data range.
+            ax_histx.hist(data["accuracy"], bins=np.linspace(0, 1, 21), color="gray")
+            ax_histy.hist(data["rt"], bins=20, orientation='horizontal', color="gray")
+
+            # Turn off tick labels for the marginal plots
+            ax_histx.tick_params(axis="x", labelbottom=False)
+            ax_histy.tick_params(axis="y", labelleft=False)
+
+            # (D) Titles, axes limits, etc.
+            ax_histx.set_title(f"Memory Set Size {mem_size}")
+            ax.set_xlim(0, 1)
+            # Force RT >= 0
+            y_max = speed_accuracy["rt"].max() * 1.1
+            ax.set_ylim(0, y_max)
+            ax.set_xlabel("Accuracy")
+            ax.set_ylabel("Mean RT (s)")
+
+        # 4) Final figure touches
+        plt.suptitle("Speed-Accuracy Tradeoff by Subject", fontsize=14)
         plt.show()
         plt.close()
 
     def plot_speed_accuracy_tradeoff_by_stimulus(self):
-        speed_accuracy = self.get_search_rts().groupby(["target_present", "memory_set_size","stimulus"])[["rt","correct_response"]].mean().reset_index()
+        # 1) Aggregate the data (as you already do).
+        speed_accuracy = (
+            self.get_search_rts()
+                .groupby(["target_present", "memory_set_size", "stimulus"])[["rt","correct_response"]]
+                .mean()
+                .reset_index()
+        )
+        # Convert booleans and rename
         speed_accuracy["target_present"] = speed_accuracy["target_present"].astype(bool)
-        mem_set_sizes = speed_accuracy["memory_set_size"].unique()
-        mem_set_sizes.sort()
-        # Divide rt by 1000 to get seconds
-        speed_accuracy["rt"] = speed_accuracy["rt"] / 1000      
-        n_rows = len(mem_set_sizes)
-        fig, axs = plt.subplots(n_rows, 1, figsize=(6, 6 * n_rows))
-        if n_rows == 1:
-            axs = np.array([axs])
         speed_accuracy = speed_accuracy.rename(columns={"correct_response": "accuracy"})
-        for i, row in enumerate(mem_set_sizes):
-            data = speed_accuracy[speed_accuracy["memory_set_size"] == row]
-            sns.scatterplot(x="accuracy", y="rt", data=data, hue="target_present", ax=axs[i])
-            for stimulus in data["stimulus"].unique():
-                stimulus_data = data[data["stimulus"] == stimulus]
-                init_point = stimulus_data[stimulus_data["target_present"] == False][["accuracy", "rt"]]
-                final_point = stimulus_data[stimulus_data["target_present"] == True][["accuracy", "rt"]]
+        
+        # Convert RT from ms to seconds (if needed)
+        speed_accuracy["rt"] = speed_accuracy["rt"] / 1000.0
+
+        # Unique memory set sizes
+        mem_set_sizes = np.sort(speed_accuracy["memory_set_size"].unique())
+        n_rows = len(mem_set_sizes)
+
+        # 2) Prepare a figure that has 2 rows per memory-set size:
+        #    - top row:  x-hist
+        #    - bottom:   scatter + y-hist
+        fig = plt.figure(figsize=(6,1 + 6 * n_rows))
+        gs = fig.add_gridspec(
+            2 * n_rows, 2, 
+            width_ratios=(4, 1), 
+            height_ratios=[1, 4]*n_rows,  # repeat [1,4] for each row
+            left=0.1, right=0.9, bottom=0.07, top=0.85,
+            wspace=0.05, hspace=0.05
+        )
+
+        # 3) Loop over each memory-set size, building a “scatter+hist” layout
+        for i, mem_size in enumerate(mem_set_sizes):
+            data = speed_accuracy[speed_accuracy["memory_set_size"] == mem_size]
+
+            # Indices in the GridSpec
+            row_top    = 2*i     # hist of x
+            row_bottom = 2*i + 1 # scatter + hist of y
+
+            # Create the three Axes
+            ax       = fig.add_subplot(gs[row_bottom, 0])  # main scatter
+            ax_histx = fig.add_subplot(gs[row_top,    0], sharex=ax)
+            ax_histy = fig.add_subplot(gs[row_bottom, 1], sharey=ax)
+
+            # ------------------------------------
+            # (A) The main scatter plot (color by `target_present`)
+            #     Using Seaborn the same way you did:
+            sns.scatterplot(
+                x="accuracy", 
+                y="rt", 
+                data=data, 
+                hue="target_present",
+                ax=ax
+            )
+
+            # (B) Connect the same `stimulus` pairs with lines
+            #     between target_present=False and target_present=True
+            for stim in data["stimulus"].unique():
+                stim_data = data[data["stimulus"] == stim]
+                init_point  = stim_data[stim_data["target_present"] == False]
+                final_point = stim_data[stim_data["target_present"] == True]
                 if len(init_point) == 0 or len(final_point) == 0:
                     continue
-                axs[i].plot([init_point["accuracy"].values[0], final_point["accuracy"].values[0]], [init_point["rt"].values[0], final_point["rt"].values[0]], color="black", alpha=0.3, linewidth=0.3, zorder=0)
-            axs[i].set_title(f"Memory Set Size {row}")
-            axs[i].set_xlabel("Accuracy")
-            axs[i].set_ylabel("Mean RT (s)")
-            axs[i].set_xlim(0, 1)
-            axs[i].set_ylim(0, speed_accuracy["rt"].max())
-        plt.suptitle("Speed-Accuracy Tradeoff for stimuli")
+                ax.plot(
+                    [init_point["accuracy"].values[0], final_point["accuracy"].values[0]],
+                    [init_point["rt"].values[0],       final_point["rt"].values[0]],
+                    color="black", alpha=0.3, linewidth=0.5, zorder=0
+                )
+
+            # (C) Histograms on top (ax_histx) and on the right (ax_histy).
+            #     We'll just do a simple histogram here; 
+            #     you can adapt binning to your data range.
+            ax_histx.hist(data["accuracy"], bins=np.linspace(0, 1, 21), color="gray")
+            ax_histy.hist(data["rt"], bins=20, orientation='horizontal', color="gray")
+
+            # Turn off tick labels for the marginal plots
+            ax_histx.tick_params(axis="x", labelbottom=False)
+            ax_histy.tick_params(axis="y", labelleft=False)
+
+            # (D) Titles, axes limits, etc.
+            ax_histx.set_title(f"Memory Set Size {mem_size}")
+            ax.set_xlim(0, 1)
+            # Force RT >= 0
+            y_max = speed_accuracy["rt"].max() * 1.1
+            ax.set_ylim(0, y_max)
+            ax.set_xlabel("Accuracy")
+            ax.set_ylabel("Mean RT (s)")
+
+        # 4) Final figure touches
+        plt.suptitle("Speed-Accuracy Tradeoff by Stimulus", fontsize=14)
         plt.show()
         plt.close()
 
@@ -610,7 +757,7 @@ class VisualSearchExperiment(Experiment):
 
 
 
-    def find_fixation_cutoff(self, percentile=0.95):
+    def find_fixation_cutoff(self, percentile=1.0):
          # 1. Gather fixation counts
         fix_counts = [(trial.search_fixations().shape[0],trial.target_present, trial.memory_set_size) for subject in self.subjects.values() for session in subject.sessions.values() for trial in session.trials.values()]
         fix_counts = pd.DataFrame(fix_counts, columns=["fix_count", "target_present", "memory_set_size"])
@@ -832,6 +979,14 @@ class VisualSearchSubject(Subject):
         rts = self.get_rts()
         return rts[rts["phase"] == self._search_phase_name]
     
+    def get_search_saccades(self):
+        saccades = self.saccades()
+        return saccades[saccades["phase"] == self._search_phase_name]
+    
+    def get_search_fixations(self):
+        fixations = self.fixations()
+        return fixations[fixations["phase"] == self._search_phase_name]
+    
     def accuracy(self):
         # Accuracy should be grouped by target present and memory set size
         correct_trials = self.get_search_rts()[["target_present", "correct_response", "memory_set_size"]]
@@ -842,7 +997,7 @@ class VisualSearchSubject(Subject):
 
         return accuracy
 
-    def find_fixation_cutoff(self, percentile=0.95):
+    def find_fixation_cutoff(self, percentile=1.0):
          # 1. Gather fixation counts
         fix_counts = [(trial.search_fixations().shape[0],trial.target_present, trial.memory_set_size) for session in self.sessions.values() for trial in session.trials.values()]
         fix_counts = pd.DataFrame(fix_counts, columns=["fix_count", "target_present", "memory_set_size"])
@@ -912,7 +1067,7 @@ class VisualSearchSubject(Subject):
 class VisualSearchSession(Session):
     BEH_COLUMNS: list[str] = [
         "trial_number", "stimulus", "stimulus_coords", "memory_set", "memory_set_locations",
-        "target_present", "target", "target_location", "correct_response"
+        "target_present", "target", "target_location", "correct_response", "was_answered"
     ]
     """
     Columns explanation:
@@ -930,6 +1085,7 @@ class VisualSearchSession(Session):
       the format (x1, y1, x2, y2), where (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner. If target_present is False, the value for this column will
       not be taken into account.
     - correct_response: The correct response for the trial. It should be a boolean.
+    - was_answered: Whether the trial was answered by the participant. It should be a boolean.
 
     Notice that you can get the actual response of the user by using the "correct_response" and "target_present" columns.
     For all of the heights, widths and locations of the items, the values should be in pixels and according to the screen itself.
@@ -979,7 +1135,8 @@ class VisualSearchSession(Session):
                 "stimulus": str,
                 "target_present": bool,
                 "target": str,
-                "correct_response": bool
+                "correct_response": bool,
+                "was_answered": bool
             }
         )
 
@@ -1015,6 +1172,14 @@ class VisualSearchSession(Session):
     def get_search_rts(self):
         rts = self.get_rts()
         return rts[rts["phase"] == self._search_phase_name]
+    
+    def get_search_saccades(self):
+        saccades = self.saccades()
+        return saccades[saccades["phase"] == self._search_phase_name]
+
+    def get_search_fixations(self):
+        fixations = self.fixations()
+        return fixations[fixations["phase"] == self._search_phase_name]
 
     def accuracy(self):
         # Accuracy should be grouped by target present and memory set size
@@ -1031,7 +1196,7 @@ class VisualSearchSession(Session):
         accuracy = correct_trials["correct_response"].sum() / correct_trials["correct_response"].count()
         return accuracy < threshold
     
-    def find_fixation_cutoff(self, percentile=0.95):
+    def find_fixation_cutoff(self, percentile=1.0):
          # 1. Gather fixation counts
         fix_counts = [(trial.search_fixations().shape[0],trial.target_present, trial.memory_set_size) for trial in self.trials.values()]
         fix_counts = pd.DataFrame(fix_counts, columns=["fix_count", "target_present", "memory_set_size"])
@@ -1111,6 +1276,7 @@ class VisualSearchTrial(Trial):
         self._memory_set_locations = ast.literal_eval(behavior_data.loc[behavior_data["trial_number"] == trial_number, "memory_set_locations"].values[0])
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
+        self._was_answered = behavior_data.loc[behavior_data["trial_number"] == trial_number, "was_answered"].values[0]
 
     @property
     def target_present(self):
@@ -1138,26 +1304,47 @@ class VisualSearchTrial(Trial):
         self.rts["target_present"] = self._target_present
         self.rts["correct_response"] = self._correct_response
         self.rts["stimulus"] = self._stimulus
+        self.rts["target"] = self._target
+        self.rts["was_answered"] = self._was_answered
         # Make sure the values are of the correct type
 
 
+    def fixations(self):
+        fixations = super().fixations()
+        fixations["target_present"] = self._target_present
+        fixations["correct_response"] = self._correct_response
+        fixations["stimulus"] = self._stimulus
+        fixations["memory_set_size"] = len(self._memory_set)
+        fixations["target"] = self._target
+        return fixations
+    
+
+    def saccades(self):
+        saccades = super().saccades()
+        saccades["target_present"] = self._target_present
+        saccades["correct_response"] = self._correct_response
+        saccades["stimulus"] = self._stimulus
+        saccades["memory_set_size"] = len(self._memory_set)
+        saccades["target"] = self._target
+        return saccades
+
     def search_fixations(self):
-        return self._fix[self._fix["phase"] == self._search_phase_name].sort_values(by="tStart")
+        return self.fixations()[self._fix["phase"] == self._search_phase_name].sort_values(by="tStart")
     
     def memorization_fixations(self):
-        return self._fix[self._fix["phase"] == self._memorization_phase_name].sort_values(by="tStart")
+        return self.fixations()[self._fix["phase"] == self._memorization_phase_name].sort_values(by="tStart")
     
     def search_saccades(self):
-        return self._sacc[self._sacc["phase"] == self._search_phase_name].sort_values(by="tStart")
+        return self.saccades()[self._sacc["phase"] == self._search_phase_name].sort_values(by="tStart")
     
     def memorization_saccades(self):
-        return self._sacc[self._sacc["phase"] == self._memorization_phase_name].sort_values(by="tStart")
+        return self.saccades()[self._sacc["phase"] == self._memorization_phase_name].sort_values(by="tStart")
     
     def search_samples(self):
-        return self._samples[self._samples["phase"] == self._search_phase_name].sort_values(by="tSample")
+        return self.samples()[self._samples["phase"] == self._search_phase_name].sort_values(by="tSample")
     
     def memorization_samples(self):
-        return self._samples[self._samples["phase"] == self._memorization_phase_name].sort_values(by="tSample")
+        return self.samples()[self._samples["phase"] == self._memorization_phase_name].sort_values(by="tSample")
     
     def scanpath_by_stimuli(self):
         return [self.search_fixations(), self._stimulus,self._correct_response,self._target_present,len(self._memory_set)]
