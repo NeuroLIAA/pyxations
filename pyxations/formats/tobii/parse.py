@@ -58,7 +58,7 @@ class TobiiParse(BidsParse):
         
         dfFix, dfSacc = eye_movement_detector.run_eye_movement_from_samples(
             dfSample, 60,
-            x_label='Gaze3d_Left.x', y_label='Gaze3d_Left.y', config=config, eye='Left')
+            x_label='Gaze3d_Left.x', y_label='Gaze3d_Left.y', config=config, )
         
 
         # Split into trials

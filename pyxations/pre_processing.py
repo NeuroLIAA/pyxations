@@ -164,8 +164,6 @@ class PreProcessing:
                 raise ValueError("The amount of computed trials is {} while the amount of ordered trial ids is {} for key {} in the session path {}.".format(len(start_times_list), len(trial_labels_list)), key, self.session_path)
 
 
-            print(data['phase'].dtypes)
-
             # Divide in trials according to start_times_list and end_times_list
             if 'tSample' in data.columns:
                 for i in range(len(start_times_list)):
@@ -185,5 +183,3 @@ class PreProcessing:
                 for i in range(len(start_times_list)):
                     data.loc[data['trial_number'] == i, 'trial_label'] = trial_labels_list[i]
                     
-            print(len(data['phase']), data['phase'].dtypes)
-            print(len(data['phase']))
