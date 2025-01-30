@@ -536,7 +536,7 @@ class VisualSearchExperiment(Experiment):
             sns.barplot(x="stimulus", y="accuracy", data=data, ax=axs[i],estimator="mean", hue="target_present")
             axs[i].set_title(f"Memory Set Size {row}")
             axs[i].tick_params(axis='x', rotation=90)
-            axs[i].set_xlabel("Subject ID")
+            axs[i].set_xlabel("Stimulus")
             axs[i].set_ylabel("Accuracy")
 
         plt.tight_layout()
@@ -906,6 +906,36 @@ class VisualSearchExperiment(Experiment):
         plt.show()
         plt.close()
         
+    def plot_incorrect_trials_by_rt_bins(self, bin_end,bin_step):
+        incorrect_trials_per_bin = self.trials_by_rt_bins(bin_end,bin_step)[["rt_bin","target_present","memory_set_size","correct_response"]]
+        incorrect_trials_per_bin["correct_response"] = 1 - incorrect_trials_per_bin["correct_response"]
+        incorrect_trials_per_bin = incorrect_trials_per_bin.groupby(["rt_bin","target_present","memory_set_size"],observed=False).sum().reset_index()
+        tp_ta = incorrect_trials_per_bin["target_present"].unique()
+        tp_ta.sort()
+        mem_set_sizes = incorrect_trials_per_bin["memory_set_size"].unique()
+        mem_set_sizes.sort()
+        n_cols = len(tp_ta)
+        n_rows = len(mem_set_sizes)
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 5 * n_rows),sharey=True,sharex=True)
+        fig.suptitle("Incorrect Trials by RT Bins")
+        if n_cols == 1:
+            axs = np.array([axs])
+        if n_rows == 1:
+            axs = np.array([axs])
+        for i, row in enumerate(mem_set_sizes):
+            for j, col in enumerate(tp_ta):
+                data = incorrect_trials_per_bin[(incorrect_trials_per_bin["memory_set_size"] == row) & (incorrect_trials_per_bin["target_present"] == col)]
+                sns.barplot(x="rt_bin", y="correct_response", data=data, ax=axs[i, j])
+                axs[i, j].set_title(f"Memory Set Size {int(row)}, Target Present {bool(col)}")
+                axs[i, j].set_xlabel("RT Bins")
+                axs[i, j].set_ylabel("Incorrect Trials")
+                # Ticks every 5 bins
+                axs[i, j].set_xticks(range(0, int(bin_end/bin_step)+3, 3))
+
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+    
     def plot_probability_of_deciding_by_rt_bin(self, bin_end,bin_step):
         # Grouped by rt bins and target_present
         correct_trials_per_bin = self.trials_by_rt_bins(bin_end,bin_step)[["rt_bin","target_present","memory_set_size","correct_response"]]
