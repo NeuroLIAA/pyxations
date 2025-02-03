@@ -2,11 +2,12 @@ from pathlib import Path
 import pandas as pd
 from pyxations.visualization.visualization import Visualization
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from pyxations.export import FEATHER_EXPORT, HDF5_EXPORT
+from pyxations.export import FEATHER_EXPORT, HDF5_EXPORT, get_exporter
 import ast
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
+import pyxations
 
 STIMULI_FOLDER = "stimuli"
 ITEMS_FOLDER = "items"
@@ -287,25 +288,20 @@ class Session():
         self.detection_algorithm = detection_algorithm
         events_path = self.session_path / f"{self.detection_algorithm}_events"
         
-        if self.export_format == FEATHER_EXPORT:
-            file_extension = "feather"
-            reader = pd.read_feather
-        elif self.export_format == HDF5_EXPORT:
-            file_extension = "hdf5"
-            reader = pd.read_hdf
-        else:
-            raise ValueError(f"Export format {self.export_format} not found.")
-
+        
+        exporter = get_exporter(self.export_format)
+        file_extension = exporter.extension()
+        
         
         # Check paths and load files efficiently
         samples_path = self.session_path / ("samples." + file_extension)
         fix_path = events_path / ("fix." + file_extension)
         sacc_path = events_path / ("sacc." + file_extension)
         
-        samples = reader(samples_path)
-        fix = reader(fix_path)
-        sacc = reader(sacc_path)
-        blink = reader(events_path / ("blink." + file_extension)) if (events_path / ("blink." + file_extension)).exists() else None
+        samples = exporter.read(self.session_path, 'samples')
+        fix = exporter.read(events_path, 'fix')
+        sacc = exporter.read(events_path, 'sacc')
+        blink = exporter.read(events_path, "blink.") if (events_path / ("blink." + file_extension)).exists() else None
 
         self.behavior_data = None
         if self.behavior_path.exists():
@@ -317,10 +313,10 @@ class Session():
         self._init_trials(samples,fix,sacc,blink,events_path)
 
     def _init_trials(self,samples,fix,sacc,blink,events_path):
+        cosas = [trial for trial in samples["trial_number"].unique() if trial != -1 and trial not in self.excluded_trials]
         self._trials = {trial:
             Trial(trial, self, samples, fix, sacc, blink, events_path)
-            for trial in samples["trial_number"].unique() 
-            if trial != -1 and trial not in self.excluded_trials
+            for trial in cosas
         } 
 
     def plot_scanpaths(self,screen_height,screen_width, display: bool = False):

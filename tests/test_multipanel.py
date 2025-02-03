@@ -1,10 +1,13 @@
 import os
 import unittest
 from pyxations import Experiment
+from pathlib import Path
+
+current_path = Path(__file__).resolve()
+current_folder = current_path.parent.parent
+
 class TestMultipanel(unittest.TestCase):
     def test_multipanel(self):
-        current_folder = os.getcwd()
-        current_folder = os.path.dirname(current_folder)
         path_to_derivatives = os.path.join(current_folder, "example_dataset_derivatives")
         # Create an experiment
         exp = Experiment(os.path.join(current_folder,"example_dataset"))

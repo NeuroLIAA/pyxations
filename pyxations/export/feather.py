@@ -16,3 +16,6 @@ class FeatherExport(object):
 
     def read(self, path, data_name):
         return pd.read_feather((path / f'{data_name}.feather'))
+
+    def extension(self):
+        return '.feather'

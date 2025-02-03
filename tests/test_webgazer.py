@@ -6,14 +6,15 @@ Created on Nov 25, 2024
 import unittest
 import os
 from pyxations.bids_formatting import compute_derivatives_for_dataset
+from pathlib import Path
 
+current_path = Path(__file__).resolve()
+current_folder = current_path.parent.parent
 
 class Test(unittest.TestCase):
 
 
     def test_compute_derivatives_webgazer(self):
-        current_folder = os.getcwd()
-        current_folder = os.path.dirname(current_folder)
         bids_dataset_folder = os.path.join(current_folder,"antisacadas_dataset")
         dataset_format = 'webgazer'
         detection_algorithm = 'remodnav'

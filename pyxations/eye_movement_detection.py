@@ -113,9 +113,7 @@ class RemodnavDetection(EyeMovementDetection):
         }
         eye_data = np.rec.fromarrays(list(eye_data.values()), names=list(eye_data.keys()))
         
-        return self.simple_run_eye_movement(eye_data, sample_rate, starting_time, config, **kwargs)
-        
-    def simple_run_eye_movement(self, eye_data, sample_rate, starting_time, config={}, **kwargs):
+        #return self.simple_run_eye_movement(eye_data, sample_rate, starting_time, config, **kwargs)
         if 'pupil_data' not in config.keys():
             config['pupil_data'] = pd.Series([0]* len(eye_data['x']))
         #starting_time = dfSamples['tSample'].min()
@@ -123,6 +121,7 @@ class RemodnavDetection(EyeMovementDetection):
         
         return self.run_eye_movement(eye_data['x'], eye_data['y'], sample_rate, 
             times=times, starting_time=starting_time, **config, **kwargs)
+        
 
     def run_eye_movement(self, gazex_data, gazey_data, sample_rate,
              min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05,
@@ -292,7 +291,7 @@ class RemodnavDetection(EyeMovementDetection):
     
         # one inch per second, or as big as PNG software/browsers can handle
         duration = float(len(data)) / sample_rate
-        pl.figure(figsize=(min(duration, 400), 3), dpi=100)
+        pl.figure(figsize=(min(duration, 100), 3), dpi=100) # original min(duration, 400) crashed
         clf.show_gaze(pp=pp, events=events, show_vels=False)
         pl.xlim((0, duration))
         pl.xticks(np.arange(0, duration, step=1))

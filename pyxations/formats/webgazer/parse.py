@@ -82,7 +82,10 @@ class WebGazerParse(BidsParse):
     
 
         self.detection_algorithm = detection_algorithm
-        self.store_dataframes(dfSamples, dfCalib, dfFix, dfSacc, dfBlink, dfMsg)
+        #self.store_dataframes(dfSamples, dfCalib, dfFix, dfSacc, dfBlink, dfMsg)
+        pp = pre_processing
+        self.store_dataframes(pp.samples, dfCalib, pp.fixations, pp.saccades, pp.blinks, pp.user_messages)
+            
 
         # Save DataFrames to disk in one go to minimize memory usage during processing
         #self.save_dataframe(dfCalib, session_folder_path, 'calib', key='calib')

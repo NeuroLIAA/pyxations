@@ -14,4 +14,7 @@ class HDFExport(object):
     def read(self, path):
         return pd.read_hdf(path, memory_map=True)
     
+    def extension(self):
+        return 'hdf5'
+    
     #dfHeader.to_hdf((session_folder_path / 'header.hdf5'), key='header', mode='w')

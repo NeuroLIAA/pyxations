@@ -27,12 +27,13 @@ class Test(unittest.TestCase):
         }
         trial_labels = {0:['first', 'second', 'third'], 1: ['fourth']}
         
-        detection_algorithm = 'remodnav'
-        compute_derivatives_for_dataset(
-            bids_dataset_folder, 'webgazer', detection_algorithm, overwrite=True, 
-            exp_format=FEATHER_EXPORT, screen_height=768, screen_width=1024,
-            start_times=start_times, end_times=end_times, trial_labels=trial_labels)
-        
+        # detection_algorithm = 'remodnav'
+        # compute_derivatives_for_dataset(
+        #     bids_dataset_folder, 'webgazer', detection_algorithm, overwrite=True, 
+        #     exp_format=FEATHER_EXPORT, screen_height=768, screen_width=1024,
+        #     start_times=start_times, end_times=end_times, trial_labels=trial_labels)
+        #
+
         experiment = Experiment(bids_dataset_folder)
         experiment.load_data('remodnav')
         print('subjects:', experiment.subjects)

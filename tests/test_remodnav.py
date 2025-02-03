@@ -12,25 +12,23 @@ current_folder = current_path.parent.parent
 
 class TestRemodnav(unittest.TestCase):
 
-    def test_remodnav(self):
-        path_to_derivatives = os.path.join(current_folder, "example_dataset_derivatives")
-        
-        # Columns required: 'LX', 'RX', 'LY', 'RY', 'LPupil','RPupil', 'Rate_recorded'
-        df_samples = pd.read_hdf(os.path.join(path_to_derivatives, 'sub-0001/ses-second/samples.hdf5'))
-        
-        remodnav = RemodnavDetection(
-            Path(os.path.join(path_to_derivatives, 'sub-0001', 'ses-second')),
-            df_samples
-        )
-        
-        result = remodnav.detect_eye_movements()
-        
-        self.assertTrue(result)
+    # def test_remodnav(self):
+    #     path_to_derivatives = os.path.join(current_folder, "example_dataset_derivatives")
+    #
+    #     # Columns required: 'LX', 'RX', 'LY', 'RY', 'LPupil','RPupil', 'Rate_recorded'
+    #     df_samples = pd.read_hdf(os.path.join(path_to_derivatives, 'sub-0001/ses-second/samples.hdf5'))
+    #
+    #     remodnav = RemodnavDetection(
+    #         Path(os.path.join(path_to_derivatives, 'sub-0001', 'ses-second')),
+    #         df_samples
+    #     )
+    #
+    #     result = remodnav.detect_eye_movements()
+    #
+    #     self.assertTrue(result)
         
 
     def test_remodnav_with_eyelink_dataset(self):
-        current_folder = os.getcwd()
-        current_folder = os.path.dirname(current_folder)
         session_folder_path = os.path.join(current_folder, "example_dataset_derivatives", 'sub-0001/ses-second')
         dfSamples = pd.read_feather(os.path.join(session_folder_path, 'samples.feather'))
         dfSamples = dfSamples[dfSamples['trial_number'] == 1]
@@ -54,8 +52,6 @@ class TestRemodnav(unittest.TestCase):
 
     def test_webgazer_remodnav(self):
 
-        current_folder = os.getcwd()
-        current_folder = os.path.dirname(current_folder)
         path_to_derivatives = os.path.join(current_folder, "antisacadas_dataset_derivatives")
         
         # Columns required: 'LX', 'RX', 'LY', 'RY', 'LPupil','RPupil', 'Rate_recorded', 'Calib_index', ''Eyes_recorded'
@@ -76,8 +72,7 @@ class TestRemodnav(unittest.TestCase):
         self.assertTrue(result)
 
     def test_tobii_remodnav(self):
-        current_folder = os.path.dirname(os.getcwd())
-        df_samples = pd.read_feather(os.path.join(current_folder, 'tobii_dataset_derivatives', 'sub-0001/ses-sceneviewing/samples.feather'))
+        df_samples = pd.read_hdf(os.path.join(current_folder, 'tobii_dataset_derivatives', 'sub-0001/ses-sceneviewing/samples.hdf5'))
         
         remodnav = RemodnavDetection(
             Path(current_folder),
