@@ -98,16 +98,17 @@ class TestComputeDerivatives(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(current_folder, "example_dataset_derivatives", "sub-0001", "ses-second", "samples.feather")))
 
     def test_compute_derivatives_webgazer_feather(self):
-        bids_dataset_folder = os.path.join(current_folder,"antisacadas_dataset")
+        data_folder = os.path.join(current_path.parent, 'data')
+        bids_dataset_folder = os.path.join(data_folder,"antisacadas_dataset")
 
         dataset_type = 'webgazer'
         detection_algorithm = 'remodnav'
         compute_derivatives_for_dataset(bids_dataset_folder, dataset_type, detection_algorithm, 
                                         export_format=FEATHER_EXPORT, screen_height=768, screen_width=1024)
-        self.assertTrue(os.path.exists(os.path.join(current_folder, "antisacadas_dataset_derivatives")))
-        self.assertTrue(os.path.exists(os.path.join(current_folder, "antisacadas_dataset_derivatives", "sub-0001")))
-        self.assertTrue(os.path.exists(os.path.join(current_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas")))
-        self.assertTrue(os.path.exists(os.path.join(current_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas", "samples.feather")))
+        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives")))
+        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001")))
+        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas")))
+        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas", "samples.feather")))
 
 
 if __name__ == "__main__":

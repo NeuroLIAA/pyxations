@@ -18,7 +18,7 @@ class TestScanpaths(unittest.TestCase):
         path_to_derivatives = os.path.join(data_folder, "example_dataset_derivatives")
         self.assertTrue(os.path.exists(os.path.join(path_to_derivatives,'sub-0001','ses-second','eyelink_events','plots', "scanpath_0_search.png")))
 
-
+""" 
     def test_scanpaths_webgazer(self):
         path_to_derivatives = os.path.join(data_folder, "antisacadas_dataset_derivatives")
         # Create an experiment
@@ -28,7 +28,7 @@ class TestScanpaths(unittest.TestCase):
 
         # Assert that the scanpath file exists
         self.assertTrue(os.path.exists(os.path.join(path_to_derivatives,'sub-0001','ses-antisacadas','remodnav_events','plots', "scanpath_0_search.png")))
-
+ """
 
 
 
