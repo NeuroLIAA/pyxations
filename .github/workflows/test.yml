@@ -29,6 +29,12 @@ jobs:
           pip install setuptools --upgrade
           pip install -r requirements.txt
 
+      - name: Download edf2asc binary
+        run: |
+          curl -L -o /usr/local/bin/edf2asc https://github.com/ihrke/pypillometry/raw/refs/heads/master/external/edf2asc-linux
+          chmod +x /usr/local/bin/edf2asc
+
+
       # Ejecutar tests
       - name: Run tests
         env:
