@@ -11,13 +11,13 @@ from pathlib import Path
 
 
 current_path = Path(__file__).resolve()
-current_folder = current_path.parent.parent
+data_folder = os.path.join(current_path.parent, 'data')
 
 class Test(unittest.TestCase):
 
     def testPlot(self):
         df = pd.read_hdf(
-            os.path.join(current_folder, 'gazepoint_dataset_derivatives/sub-0001/ses-ses-A/samples.hdf5'))
+            os.path.join(data_folder, 'gazepoint_dataset_derivatives/sub-0001/ses-ses-A/samples.hdf5'))
         
         vis  = SampleVisualization(df, 1024, 768)
         vis.plot(in_percent=True)
@@ -25,7 +25,7 @@ class Test(unittest.TestCase):
 
     def testName(self):
         df = pd.read_hdf(
-            os.path.join(current_folder, 'gazepoint_dataset_derivatives/sub-0001/ses-ses-A/samples.hdf5'))
+            os.path.join(data_folder, 'gazepoint_dataset_derivatives/sub-0001/ses-ses-A/samples.hdf5'))
         
         vis  = SampleVisualization(df, 1024, 768)
         vis.animate(display=False, out_file='anim.gif', in_percent=True)
@@ -33,7 +33,7 @@ class Test(unittest.TestCase):
 
     def testAnimWebgazer(self):
 
-        df_path = os.path.join(current_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas", "samples.hdf5")
+        df_path = os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas", "samples.hdf5")
         df = pd.read_hdf(df_path)
         
         vis  = SampleVisualization(df, screen_width=1366, screen_height=768)

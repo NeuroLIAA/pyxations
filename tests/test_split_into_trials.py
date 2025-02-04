@@ -5,12 +5,12 @@ import pandas as pd
 from pathlib import Path
 
 current_path = Path(__file__).resolve()
-current_folder = current_path.parent.parent
+data_folder = os.path.join(current_path.parent, 'data')
 
 class TestSplitIntoTrials(unittest.TestCase):
     def test_split_into_trials(self):
         # TODO: Placeholder for future implementation
-        session_path = os.path.join(current_folder,"antisacadas_dataset_derivatives/sub-0001/ses-antisacadas")
+        session_path = os.path.join(data_folder,"antisacadas_dataset_derivatives/sub-0001/ses-antisacadas")
         
         samples = pd.read_feather(os.path.join(session_path, 'samples.feather'))
         fixations = saccades = blinks = samples.copy(True) # whatever
@@ -48,7 +48,7 @@ class TestSplitIntoTrials(unittest.TestCase):
 
     def test_split_into_trials_time(self):
 
-        session_path = os.path.join(current_folder,"antisacadas_dataset_derivatives/sub-0001/ses-antisacadas")
+        session_path = os.path.join(data_folder, "antisacadas_dataset_derivatives/sub-0001/ses-antisacadas")
         
         samples = pd.read_feather(os.path.join(session_path, 'samples.feather'))
         fixations = saccades = blinks = samples.copy(True) # whatever
@@ -83,7 +83,7 @@ class TestSplitIntoTrials(unittest.TestCase):
     def test_split_into_trials_by_duration(self):
        
         # Eyelink dataset samples
-        session_path = os.path.join(current_folder, "example_dataset_derivatives/sub-0001/ses-second/")
+        session_path = os.path.join(data_folder, "example_dataset_derivatives/sub-0001/ses-second/")
         samples = pd.read_feather(os.path.join(session_path, 'samples.feather'))
         
         fixations = saccades = blinks = samples.copy(True) # whatever

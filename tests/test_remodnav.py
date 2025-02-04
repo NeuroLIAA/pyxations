@@ -6,10 +6,6 @@ from pathlib import Path
 import pyxations.formats.webgazer.parse as webgazer_parse
 
 
-
-current_path = Path(__file__).resolve()
-current_folder = current_path.parent.parent
-
 current_path = Path(__file__).resolve()
 data_folder = os.path.join(current_path.parent, 'data')
 
@@ -33,7 +29,7 @@ class TestRemodnav(unittest.TestCase):
         
 
     def test_remodnav_with_eyelink_dataset(self):
-        session_folder_path = os.path.join(data_folder, "derivatives", "example_dataset_derivatives", 'sub-0001/ses-second')
+        session_folder_path = os.path.join(data_folder, "example_dataset_derivatives", 'sub-0001/ses-second')
         dfSamples = pd.read_feather(os.path.join(session_folder_path, 'samples.feather'))
         dfSamples = dfSamples[dfSamples['trial_number'] == 1]
 
@@ -76,10 +72,11 @@ class TestRemodnav(unittest.TestCase):
         self.assertTrue(result)
 
     def test_tobii_remodnav(self):
-        df_samples = pd.read_hdf(os.path.join(data_folder, "derivatives", 'tobii_dataset_derivatives', 'sub-0001/ses-sceneviewing/samples.hdf5'))
+        df_samples = pd.read_hdf(os.path.join(data_folder, "derivatives", 'tobii_dataset_derivatives', 
+                                              'sub-0001/ses-sceneviewing/samples.hdf5'))
         
         remodnav = RemodnavDetection(
-            Path(current_folder),
+            Path(os.path.join(data_folder, "derivatives", 'tobii_dataset_derivatives', 'sub-0001/ses-sceneviewing')),
             df_samples
         )
         
