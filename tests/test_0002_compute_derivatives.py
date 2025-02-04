@@ -15,8 +15,9 @@ class TestComputeDerivatives(unittest.TestCase):
         derivatives_path = os.path.join(data_folder, "example_dataset_derivatives")
         
         # Remove the target directory to ensure a clean test environment.
+        if os.path.exists(derivatives_path):
+            shutil.rmtree(derivatives_path)
 
-        shutil.rmtree(derivatives_path)
         
         msg_keywords = ["begin","end","press"]
         start_msgs = {'search':['beginning_of_stimuli']}
@@ -35,7 +36,9 @@ class TestComputeDerivatives(unittest.TestCase):
         derivatives_path = os.path.join(data_folder, "example_dataset_derivatives")
         
         # Remove the target directory to ensure a clean test environment.
-        shutil.rmtree(derivatives_path)
+        if os.path.exists(derivatives_path):
+            shutil.rmtree(derivatives_path)
+
 
 
         msg_keywords = ["begin","end","press"]
@@ -58,7 +61,9 @@ class TestComputeDerivatives(unittest.TestCase):
         derivatives_path = os.path.join(data_folder, "antisacadas_dataset_derivatives")
         
         # Remove the target directory to ensure a clean test environment.
-        shutil.rmtree(derivatives_path)
+        if os.path.exists(derivatives_path):
+            shutil.rmtree(derivatives_path)
+
         
         start_times = {
             0: [100, 501, 1001],
@@ -78,16 +83,17 @@ class TestComputeDerivatives(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas")))
         self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas", "samples.hdf5")))
 
-
     def test_compute_derivatives_tobii(self):
         bids_dataset_folder = os.path.join(data_folder,"tobii_dataset")
         derivatives_path = os.path.join(data_folder, "tobii_dataset_derivatives")
         
         # Remove the target directory to ensure a clean test environment.
-        shutil.rmtree(derivatives_path)
+        if os.path.exists(derivatives_path):
+            shutil.rmtree(derivatives_path)
         
         detection_algorithm = 'remodnav'
-        compute_derivatives_for_dataset(bids_dataset_folder, 'tobii', detection_algorithm, exp_format=HDF5_EXPORT, overwrite=True)
+        compute_derivatives_for_dataset(
+            bids_dataset_folder, 'tobii', detection_algorithm, exp_format=HDF5_EXPORT, overwrite=True)
         self.assertTrue(os.path.exists(os.path.join(data_folder, "tobii_dataset_derivatives")))
         self.assertTrue(os.path.exists(os.path.join(data_folder, "tobii_dataset_derivatives", "sub-0001")))
         self.assertTrue(os.path.exists(os.path.join(data_folder, "tobii_dataset_derivatives", "sub-0001", "ses-sceneviewing")))
@@ -98,7 +104,8 @@ class TestComputeDerivatives(unittest.TestCase):
         derivatives_path = os.path.join(data_folder, "gazepoint_dataset_derivatives")
 
         # Remove the target directory to ensure a clean test environment.
-        shutil.rmtree(derivatives_path)
+        if os.path.exists(derivatives_path):
+            shutil.rmtree(derivatives_path)
 
         detection_algorithm = 'remodnav'
         compute_derivatives_for_dataset(bids_dataset_folder, 'gaze', detection_algorithm, 
@@ -119,9 +126,7 @@ class TestComputeDerivatives(unittest.TestCase):
         compute_derivatives_for_dataset(bids_dataset_folder, dataset_type, detection_algorithm, 
                                         msg_keywords=msg_keywords,start_msgs=start_msgs, 
                                         end_msgs=end_msgs, overwrite=True, export_format=FEATHER_EXPORT)
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001", "ses-second")))
+
         self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001", "ses-second", "samples.feather")))
 
     def test_compute_derivatives_webgazer_feather(self):
@@ -130,7 +135,9 @@ class TestComputeDerivatives(unittest.TestCase):
         derivatives_path = os.path.join(data_folder, "antisacadas_dataset_derivatives")
         
         # Remove the target directory to ensure a clean test environment.
-        shutil.rmtree(derivatives_path)
+        if os.path.exists(derivatives_path):
+            shutil.rmtree(derivatives_path)
+
         
         dataset_type = 'webgazer'
         detection_algorithm = 'remodnav'

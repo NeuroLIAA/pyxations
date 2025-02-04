@@ -33,8 +33,8 @@ class Test(unittest.TestCase):
 
     def testAnimWebgazer(self):
 
-        df_path = os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas", "samples.hdf5")
-        df = pd.read_hdf(df_path)
+        df_path = os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas", "samples.feather")
+        df = pd.read_feather(df_path)
         
         vis  = SampleVisualization(df, screen_width=1366, screen_height=768)
         vis.animate(display=False, out_file='animWebgazer.gif')
