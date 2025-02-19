@@ -7,7 +7,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 from pyxations.analysis.generic import Experiment, Subject, Session, Trial, _find_fixation_cutoff, STIMULI_FOLDER, ITEMS_FOLDER
-
+import multimatch_gaze as mm
 
 
 class VisualSearchExperiment(Experiment):
@@ -901,6 +901,19 @@ class VisualSearchTrial(Trial):
         saccades["memory_set_size"] = len(self._memory_set)
         saccades["target"] = self._target
         return saccades
+
+    def compute_multimatch(self,other_trial: "VisualSearchTrial",screen_height,screen_width):
+        trial_scanpath = self.search_fixations()
+        trial_to_compare_scanpath = other_trial.search_fixations()
+        # Turn trial scanpath into list of tuples
+        trial_scanpath = [tuple(row) for row in trial_scanpath[["xAvg", "yAvg", "duration"]].values]
+        trial_to_compare_scanpath = [tuple(row) for row in trial_to_compare_scanpath[["xAvg", "yAvg", "duration"]].values]
+
+        # Convert the list of tuples into a numpy array with the format needed for the multimatch function
+        trial_scanpath = np.array(trial_scanpath, dtype=[('start_x', '<f8'), ('start_y', '<f8'), ('duration', '<f8')])
+        trial_to_compare_scanpath = np.array(trial_to_compare_scanpath, dtype=[('start_x', '<f8'), ('start_y', '<f8'), ('duration', '<f8')])
+
+        return mm.docomparison(trial_scanpath, trial_to_compare_scanpath, (screen_width, screen_height))
 
     def search_fixations(self):
         return self.fixations()[self._fix["phase"] == self._search_phase_name].sort_values(by="tStart")
