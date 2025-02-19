@@ -7,7 +7,7 @@ Created on Jan 8, 2025
 import unittest
 import os
 from pyxations.bids_formatting import compute_derivatives_for_dataset
-from pyxations.post_processing import Experiment
+from pyxations.analysis.generic import Experiment
 from pyxations.export import FEATHER_EXPORT
 from pathlib import Path
 
