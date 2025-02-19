@@ -4,7 +4,7 @@ name: Run Tests
 on:
   push:
     branches:
-      - cpa  # Cambia "main" si usas otro nombre de rama principal
+      - restructure  # Cambia "main" si usas otro nombre de rama principal
   pull_request:
 
 jobs:
@@ -27,9 +27,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install setuptools --upgrade
-          pip install -r pyxations/requirements.txt
+          pip install -r requirements.txt
+
+      - name: Download edf2asc binary
+        run: |
+          curl -L -o /usr/local/bin/edf2asc https://github.com/ihrke/pypillometry/raw/refs/heads/master/external/edf2asc-linux
+          chmod +x /usr/local/bin/edf2asc
+
 
       # Ejecutar tests
       - name: Run tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
-          pytest pyxations/tests
+          pytest tests

@@ -1,7 +1,7 @@
 # Ignore all derivatives
 example_dataset_derivatives/
 example_dataset/
-
+*.pyc
 
 
 # Ignore Pycharm .idea directory
