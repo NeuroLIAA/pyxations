@@ -3,12 +3,13 @@ import pandas as pd
 
 
 class PreProcessing:
-    def __init__(self, samples, fixations,saccades,blinks, user_messages):
+    def __init__(self, samples, fixations,saccades,blinks, user_messages,session_path):
         self.samples = samples
         self.fixations = fixations
         self.saccades = saccades
         self.blinks = blinks
         self.user_messages = user_messages
+        self.session_path = session_path
 
     def split_all_into_trials(self,start_times: dict[list[int]], end_times: dict[list[int]],trial_labels:dict[list[str]] = None):
         self.split_into_trials(self.samples,start_times,end_times,trial_labels)
@@ -133,14 +134,16 @@ class PreProcessing:
 
             # Raise exception if no timestamps are found
             if len(timestamps) == 0:
-                raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages))
+                raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages, self.session_path))
             timestamps_dict[key] = timestamps
 
         return timestamps_dict
     
-    def split_into_trials(self,data:pd.DataFrame, start_times: dict[list[int]], end_times: dict[list[int]],trial_labels:dict[list[str]] = None):
+    def split_into_trials(self, data:pd.DataFrame, start_times: dict[list[int]], end_times: dict[list[int]],trial_labels:dict[list[str]] = None):
         data['phase'] = [''] * len(data)
+        #data['phase'] = [-1] * len(data)
         data['trial_number'] = [-1] * len(data)
+        data['trial_label'] = [''] * len(data)
         for key in start_times.keys():
             start_times_list = start_times[key]
             end_times_list = end_times[key]
@@ -152,31 +155,35 @@ class PreProcessing:
             if len(start_times_list) != len(end_times_list):
                 data.drop('trial_number', axis=1, inplace=True)
                 data.drop('phase', axis=1, inplace=True)
-                raise ValueError("start_times and end_times for {} must have the same length, but they have lengths {} and {} respectively.".format(key,len(start_times_list), len(end_times_list)))
+                raise ValueError("start_times and end_times for {} must have the same length, but they have lengths {} and {} respectively in the session path {}.".format(key,len(start_times_list), len(end_times_list), self.session_path))
 
             # Check that the length of ordered_trials_ids is the same as the number of trials
             if trial_labels_list and len(trial_labels_list) != len(start_times_list):
                 data.drop('trial_number', axis=1, inplace=True)
                 data.drop('phase', axis=1, inplace=True)
-                raise ValueError("The amount of computed trials is {} while the amount of ordered trial ids is {} for key {}.".format(len(start_times_list), len(trial_labels_list)), key)
+                raise ValueError("The amount of computed trials is {} while the amount of ordered trial ids is {} for key {} in the session path {}.".format(len(start_times_list), len(trial_labels_list)), key, self.session_path)
 
 
+            print(data['phase'].dtypes)
 
             # Divide in trials according to start_times_list and end_times_list
             if 'tSample' in data.columns:
                 for i in range(len(start_times_list)):
                     data.loc[(data['tSample'] >= start_times_list[i]) & (data['tSample'] <= end_times_list[i]), 'trial_number'] = i
-                    data.loc[(data['tSample'] >= start_times_list[i]) & (data['tSample'] <= end_times_list[i]), 'phase'] = key
+                    data.loc[(data['tSample'] >= start_times_list[i]) & (data['tSample'] <= end_times_list[i]), 'phase'] = str(key)
             elif 'tStart' in data.columns and 'tEnd' in data.columns:
                 for i in range(len(start_times_list)):
                     data.loc[(data['tStart'] >= start_times_list[i]) & (data['tEnd'] <= end_times_list[i]), 'trial_number'] = i
-                    data.loc[(data['tStart'] >= start_times_list[i]) & (data['tEnd'] <= end_times_list[i]), 'phase'] = key
+                    data.loc[(data['tStart'] >= start_times_list[i]) & (data['tEnd'] <= end_times_list[i]), 'phase'] = str(key)
             else:
                 data.drop('trial_number', axis=1, inplace=True)
                 data.drop('phase', axis=1, inplace=True)
                 raise ValueError("The DataFrame must contain either the 'tSample' column or the 'tStart' and 'tEnd' columns.")
 
             if trial_labels_list:
-                data['trial_label'] = [''] * len(data)
+                #data['trial_label'] = [''] * len(data)
                 for i in range(len(start_times_list)):
                     data.loc[data['trial_number'] == i, 'trial_label'] = trial_labels_list[i]
+                    
+            print(len(data['phase']), data['phase'].dtypes)
+            print(len(data['phase']))

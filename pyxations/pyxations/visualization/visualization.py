@@ -4,7 +4,7 @@ import matplotlib.colors as mplcolors
 import numpy as np
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
-from .bids_formatting import EYE_MOVEMENT_DETECTION_DICT
+from pyxations.bids_formatting import EYE_MOVEMENT_DETECTION_DICT
 from pathlib import Path
 
 
@@ -16,7 +16,7 @@ class Visualization():
         self.events_detection_folder = Path(events_detection_algorithm+'_events')
 
     def scanpath(self,fixations:pd.DataFrame,screen_height:int, screen_width:int,folder_path:str=None,
-                 tmin:int=None, tmax:int=None, img_path:str=None,saccades:pd.DataFrame=None,samples:pd.DataFrame=None, display:bool=True):
+                 tmin:int=None, tmax:int=None, saccades:pd.DataFrame=None,samples:pd.DataFrame=None, phase_data:dict=None, display:bool=True):
         """
         Plots the scanpath, including fixations, saccades, and optionally an image background and gaze samples.
 
@@ -35,14 +35,22 @@ class Visualization():
             The minimum time for filtering the data.
         tmax : int, optional
             The maximum time for filtering the data.
-        img_path : str, optional
-            Path to an image file to be used as a background.
         saccades : pd.DataFrame, optional
             DataFrame containing saccade data with the following columns:
             'tStart', 'tEnd', 'ampDeg', 'vPeak', 'xStart', 'xEnd', 'yStart', 'yEnd'.
         samples : pd.DataFrame, optional
             DataFrame containing gaze samples data with the following columns:
             'tSample', 'LX', 'LY', 'RX', 'RY'.
+        phase_data: dict, optional
+            This dictionary should have the phase as key and as value it should have a dictionary with the following:
+                img_paths : list of strs, optional
+                    Paths to image files to be plotted.
+                img_plot_coords : list of tuples, optional
+                    Tuples with the coordinates of the images to plot. The tuples should be in the format (x1, y1, x2, y2) where
+                    (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner.
+                bbox : tuple, optional
+                    Tuple with the coordinates of the bounding box to plot. The tuple should be in the format (x1, y1, x2, y2) where
+                    (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner.
         display: bool
             Show plot
 
@@ -120,21 +128,29 @@ class Visualization():
             cb.ax.set_yticklabels([fix_num[0], fix_num[int(len(fix_num)/2)], fix_num[-1]])
             cb.set_label('# of fixation')
 
-
             #----- Plot image if provided -----#
-            if img_path is not None:
-                # Load search image
-                img = mpimg.imread(img_path)
-                
-                # Get image size
-                img_res_x = img.shape[1]
-                img_res_y = img.shape[0]
-                
-                # Define box in axes to plot image
-                image_box_extent = ((screen_width - img_res_x) / 2, img_res_x + (screen_width - img_res_x) / 2, (screen_height - img_res_y) / 2, img_res_y + (screen_height - img_res_y) / 2) 
-                
-                # Plot
-                ax_main.imshow(img, extent=image_box_extent, zorder=0)
+            if phase_data is not None:
+                phase_data_current = phase_data.get(phase, {})
+                img_paths = phase_data_current.get('img_paths',None)
+                bbox = phase_data_current.get('bbox',None)
+                if img_paths is not None:
+                    for i, img_path in enumerate(img_paths):
+                        # Load search image
+                        img = mpimg.imread(img_path)
+                        img_bbox = phase_data_current.get('img_plot_coords', None)[i]
+
+                        # Define box in axes to plot image, because the image should be centered even if it doesn't have the same resolution as the screen
+                        image_box_extent = [img_bbox[0], img_bbox[2], img_bbox[1], img_bbox[3]]
+                        # Plot
+                        ax_main.imshow(img, extent=image_box_extent, zorder=0)
+                if bbox is not None:
+                    # Define the bounding box in red
+                    x1, y1, x2, y2 = bbox
+                    # The bounding box was defined as if the top left corner was the origin, so we need to adjust it to the bottom left corner
+                    y1 = screen_height - y1
+                    y2 = screen_height - y2
+
+                    ax_main.plot([x1, x2, x2, x1, x1], [y1, y1, y2, y2, y1], color='red', linewidth=1.5, zorder=3)
 
             #----- Plot scanpath and gaze if samples provided -----#
             if plot_samples:
@@ -269,12 +285,13 @@ class Visualization():
     def plot_multipanel(self,fixations:pd.DataFrame,saccades:pd.DataFrame, display:bool=True):
         folder_path = self.derivatives_folder_path / self.events_detection_folder / "plots"
         plt.rcParams.update({'font.size': 12})
-        fig, axs = plt.subplots(2, 2, figsize=(12, 7))
+        
         fixations = fixations[fixations["trial_number"] != -1]
         saccades = saccades[saccades["trial_number"] != -1]
         valid_phases = fixations['phase'].unique()
         valid_phases = [phase for phase in valid_phases if phase != '']
         for phase in fixations['phase'].unique():
+            fig, axs = plt.subplots(2, 2, figsize=(12, 7))
             fixations_phase = fixations[fixations['phase'] == phase]
             saccades_phase = saccades[saccades['phase'] == phase]
 
