@@ -45,6 +45,21 @@ dependencies = [
     "tzdata==2024.2"
 ]
 
+dev = [
+    "pytest",
+    "pytest-cov",
+    "black",
+    "ruff",
+    "pre-commit"
+]
+
+[project.optional-dependencies]
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings[python]"
+]
+
 [project.urls]
 Homepage = "https://github.com/NeuroLIAA/pyxations"
 

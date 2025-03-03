@@ -1,7 +1,7 @@
 # Pyxations
 
 <div>
-  <img src="static/images/pyxations_improved_logo.png" alt="pyxations logo" style="width: 200px; float: left; margin-right: 20px;"/>
+  <img src="docs/images/pyxations_improved_logo.png" alt="pyxations logo" style="width: 200px; float: left; margin-right: 20px;"/>
   <p>
     <strong>Pyxations</strong> is a Python library designed to analyze eye-tracking data, whether you are working with raw eye-tracking data or processed datasets. It helps researchers and developers extract useful insights from complex eye movements using Python's robust ecosystem.
   </p>
@@ -20,34 +20,40 @@
 - **Saccades Direction Classification**: Classify saccades based on their start and end coordinates into four primary directions: right, left, up, and down.
 
   
-## Prerequisites
-- Ensure you have Python 3.10 or higher installed. 
+## Requirements
 
-- The `edf2asc` software from EyeLink is required for converting EDF files to ASCII format. Please ensure that the EyeLink software is installed and accessible in your system's PATH. The program is provided with the lastest version of the [EyeLink Developers Kit](https://www.sr-research.com/support/thread-7.html)
+* `Python 3.10` or newer is required.
+* The `edf2asc` software from EyeLink is required for converting EDF files to ASCII format. Please ensure that the EyeLink software is installed and accessible in your system's PATH. The program is provided with the lastest version of the EyeLink Developers Kit
 
-- To run the script, you also need to install the required Python packages. You can do this by executing the following command:
-```bash
-pip install -r requirements.txt
-```
+### Dependencies
+
+Pyxations relies on several scientific computing and visualization libraries, including:
+
+- `numpy`
+- `pandas`
+- `matplotlib`
+- `seaborn`
+- `scipy`
+- `statsmodels`
+- `pyarrow`
+- `remodnav`
+- `multimatch-gaze`
+
+The full list of dependencies is specified in `pyproject.toml`.
+
 
 ## Installation
 
-You can install **pyxations** via pip: **[WORK IN PROGRESS]**
+You can install Pyxations using `uv` (recommended for modern workflows):
+
+```bash
+uv pip install pyxations
+```
+
+Or directly with `pip`:
 
 ```bash
 pip install pyxations
-```
-
-or from local package:
-
-```bash
-cd /path/to/your/package
-pip install .
-```
-If you're developing the package and want changes to the code to be immediately reflected without reinstalling, you can use the -e option to install the package in "editable" mode:
-
-```bash
-pip install -e .
 ```
 ## Usage
 ### Minimal example
@@ -68,7 +74,23 @@ pyx.compute_derivatives_for_dataset(
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request or open an Issue on the [GitHub repository](https://github.com/NeuroLIAA/pyxations).
+Contributions are welcome! Please check out the [issues](https://github.com/NeuroLIAA/pyxations/issues) and submit a pull request if you'd like to help.
+
+### To develop locally
+
+```bash
+# Clone repository
+git clone https://github.com/NeuroLIAA/pyxations.git
+cd pyxations
+
+# Create virtual environment and install
+uv venv
+uv pip install -e '.[dev]'
+
+# To work on documentation
+uv pip install -e '.[docs]'
+```
+
 
 ## License
 
