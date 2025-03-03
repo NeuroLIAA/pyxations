@@ -32,6 +32,7 @@ nav:
   - Requirements: requirements.md
   - Installation: installation.md
   - Usage: usage.md
+  - API reference: api_reference.md
   - Contributing: contributing.md
   - License: license.md
 
@@ -63,11 +64,12 @@ extra:
       link: https://github.com/NeuroLIAA/pyxations
 
 plugins:
-  - search
   - mkdocstrings:
       handlers:
         python:
           options:
-            show_source: false
+            docstring_style: google
+
+  - search
 
 copyright: Copyright &copy; 2025 Laboratorio de Inteligencia Artificial Aplicada (ICC-UBA-CONICET)
