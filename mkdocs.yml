@@ -1,0 +1,73 @@
+site_name: Pyxations Documentation
+site_url: https://neuroliaa.github.io/pyxations/
+repo_url: https://github.com/NeuroLIAA/pyxations
+
+theme:
+  name: material
+  logo: images/pyxations_improved_logo.png
+  palette:
+    # Dark Mode
+    - scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Dark mode
+      primary: green
+      accent: deep purple
+
+    # Light Mode
+    - scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Light mode
+      primary: blue
+      accent: deep orange
+  features:
+    - navigation.sections
+    - search.highlight
+    - search.share
+
+nav:
+  - Home: index.md
+  - Features: features.md
+  - Requirements: requirements.md
+  - Installation: installation.md
+  - Usage: usage.md
+  - Contributing: contributing.md
+  - License: license.md
+
+markdown_extensions:
+  - attr_list
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/NeuroLIAA/pyxations
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+
+copyright: Copyright &copy; 2025 Laboratorio de Inteligencia Artificial Aplicada (ICC-UBA-CONICET)
