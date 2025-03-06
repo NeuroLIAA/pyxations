@@ -28,7 +28,6 @@ theme:
 
 nav:
   - Home: index.md
-  - Features: features.md
   - Requirements: requirements.md
   - Installation: installation.md
   - Usage: usage.md
@@ -68,7 +67,7 @@ plugins:
       handlers:
         python:
           options:
-            docstring_style: google
+            docstring_style: numpy
 
   - search
 
