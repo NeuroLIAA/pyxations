@@ -285,16 +285,23 @@ class VisualSearchExperiment(Experiment):
         plt.show()
         plt.close()
 
-    def remove_poor_accuracy_sessions(self, threshold=0.5):
-        keys = list(self.subjects.keys())
-        dict_removed = {"subject":[],"session":[]}
-        for subject in keys:
-            dict_subject = self.subjects[subject].remove_poor_accuracy_sessions(threshold)
-            for session in dict_subject["session"]:
-                dict_removed["session"].append((subject,session))
-            for sub in dict_subject["subject"]:
-                dict_removed["subject"].append(sub)
-        return dict_removed
+    def remove_non_answered_trials(self, print_flag=True):
+        amount_trials_before_removal = self.get_search_rts().shape[0]
+        for subject in list(self.subjects.values()):
+            subject.remove_non_answered_trials(False)
+
+        if print_flag:
+            print(f"Removed {amount_trials_before_removal - self.get_search_rts().shape[0]} non answered trials")
+
+    def remove_poor_accuracy_sessions(self, threshold=0.5, print_flag=True):
+        amount_sessions_total = sum([len(subject.sessions) for subject in self.subjects.values()])
+        for subject in list(self.subjects.keys()):
+            self.subjects[subject].remove_poor_accuracy_sessions(threshold,False)
+
+        if print_flag:
+            print(f"Removed {amount_sessions_total - sum([len(subject.sessions) for subject in self.subjects.values()])} sessions with poor accuracy")                
+
+
 
     def scanpaths_by_stimuli(self):
         return pd.concat([subject.scanpaths_by_stimuli() for subject in self.subjects.values()], ignore_index=True)
@@ -325,16 +332,44 @@ class VisualSearchExperiment(Experiment):
 
         return grouped[["target_present", "memory_set_size", "fix_cutoff"]]
 
+    def remove_trials_for_stimuli(self,stimuli,print_flag=True):
+        '''
+        Remove trials for stimuli that are in the list of stimuli.
+        Parameters:
+            - stimuli: list of stimuli to remove
+            - print_flag: if True, print the number of trials removed
+        '''
+        # Get the trials for the stimuli to remove
+        amount_trials_removed = 0
+        subj_keys = list(self.subjects.keys())
+        for subject_key in subj_keys:
+            subject = self.subjects[subject_key]
+            session_keys = list(subject.sessions.keys())
+            for session_key in session_keys:
+                session = subject.sessions[session_key]
+                trial_keys = list(session.trials.keys())
+                for trial_key in trial_keys:
+                    trial = session.trials[trial_key]
+                    if trial.stimulus in stimuli:
+                        trial.unlink_session()
+                        amount_trials_removed += 1
+                if len(session.trials) == 0:
+                    session.unlink_subject()
+            if len(subject.sessions) == 0:
+                subject.unlink_experiment()
+        if print_flag:
+            print(f"Removed {amount_trials_removed} trials for stimuli {stimuli}")
 
 
-    def remove_trials_for_stimuli_with_poor_accuracy(self, threshold=0.5):
+
+    def remove_trials_for_stimuli_with_poor_accuracy(self, threshold=0.5, print_flag=True):
         '''For now this will be done without grouping by target_present'''
         scanpaths_by_stimuli = self.scanpaths_by_stimuli()
         grouped = scanpaths_by_stimuli.groupby(["stimulus", "memory_set_size"])
         poor_accuracy_stimuli = grouped["correct_response"].mean() < threshold
         poor_accuracy_stimuli = poor_accuracy_stimuli[poor_accuracy_stimuli].index
+        amount_trials_removed = 0
         subj_keys = list(self.subjects.keys())
-        dict_removed= {"subject":[],"session":[],"trial":[]}
         for subject_key in subj_keys:
             subject = self.subjects[subject_key]
             session_keys = list(subject.sessions.keys())
@@ -344,15 +379,14 @@ class VisualSearchExperiment(Experiment):
                 for trial_key in trial_keys:
                     trial = session.trials[trial_key]
                     if (trial.stimulus, trial.memory_set_size) in poor_accuracy_stimuli:
-                        dict_removed["trial"].append((subject_key,session_key,trial_key))
                         trial.unlink_session()
+                        amount_trials_removed += 1
                 if len(session.trials) == 0:
-                    dict_removed["session"].append((subject_key,session_key))
                     session.unlink_subject()
             if len(subject.sessions) == 0:
-                dict_removed["subject"].append(subject_key)
                 subject.unlink_experiment()
-        return dict_removed
+        if print_flag:
+            print(f"Removed {amount_trials_removed} trials from stimuli with less than {threshold} accuracy.")
     
     def cumulative_correct_trials_by_fixation(self, group_cutoffs=None):
         if group_cutoffs is None:
@@ -570,6 +604,17 @@ class VisualSearchSubject(Subject):
         accuracy["subject_id"] = self.subject_id
 
         return accuracy
+    
+    def remove_non_answered_trials(self, print_flag=True):
+        # Remove non answered trials from all sessions
+        amount_trials_before_removal = self.get_search_rts().shape[0]
+        for session in list(self.sessions.values()):
+            session.remove_non_answered_trials(False)
+
+        if print_flag:
+            print(f"Removed {amount_trials_before_removal - self.get_search_rts().shape[0]} non answered trials from subject {self.subject_id}")
+
+
 
     def find_fixation_cutoff(self, percentile=1.0):
          # 1. Gather fixation counts
@@ -595,20 +640,18 @@ class VisualSearchSubject(Subject):
 
         return grouped[["target_present", "memory_set_size", "fix_cutoff"]]    
 
-    def remove_poor_accuracy_sessions(self, threshold=0.5):
+    def remove_poor_accuracy_sessions(self, threshold=0.5, print_flag=True):
         poor_accuracy_sessions = []
         keys = list(self.sessions.keys())
-        dict_removed = {"subject":[],"session":[]}
         for key in keys:
             session = self.sessions[key]
             if session.has_poor_accuracy(threshold):
                 poor_accuracy_sessions.append(session.session_id)
-                dict_removed["session"].append(session.session_id)
                 session.unlink_subject()
         if len(poor_accuracy_sessions) == len(keys):
-            dict_removed["subject"].append(self.subject_id)
             self.unlink_experiment()
-        return dict_removed
+        if print_flag:
+            print(f"Removed {len(poor_accuracy_sessions)} sessions with poor accuracy from subject {self.subject_id}")
 
     def cumulative_correct_trials_by_fixation(self, group_cutoffs=None):
         if group_cutoffs is None:
@@ -765,6 +808,15 @@ class VisualSearchSession(Session):
 
         return accuracy
 
+    def remove_non_answered_trials(self,print_flag=True):
+        # Remove trials that were not answered
+        non_answered_trials = [trial for trial in self.trials if not self.trials[trial].was_answered]
+        for trial in non_answered_trials:
+            if trial in self.trials:
+                self.trials[trial].unlink_session()
+        if print_flag:
+            print(f"Removed {len(non_answered_trials)} non answered trials from session {self.session_id}")
+
     def has_poor_accuracy(self, threshold=0.5):
         correct_trials = self.get_search_rts()[["target_present", "correct_response", "memory_set_size"]]
         accuracy = correct_trials["correct_response"].sum() / correct_trials["correct_response"].count()
@@ -867,6 +919,10 @@ class VisualSearchTrial(Trial):
     @property
     def stimulus(self):
         return self._stimulus
+    
+    @property
+    def was_answered(self):
+        return self._was_answered
 
     def save_rts(self):
         if hasattr(self, "rts"):

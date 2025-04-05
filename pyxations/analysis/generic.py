@@ -79,11 +79,19 @@ class Experiment:
         for subject in self.subjects.values():
             subject.filter_saccades(max_sacc_dur)
 
-    def drop_trials_with_nan_threshold(self, threshold=0.5):
-        #TODO: TEST after the changes
-        sessions_results = {subject: self.subjects[subject].drop_trials_with_nan_threshold(threshold) for subject in self.subjects}
-        bad_trials_total = {subject: sessions_results[subject][2] for subject in sessions_results.keys()}
-        return bad_trials_total
+    def drop_trials_with_nan_threshold(self, phase, threshold=0.1,print_flag=True):
+        amount_trials_total = self.get_rts().shape[0]
+        for subject in list(self.subjects.values()):
+            subject.drop_trials_with_nan_threshold(phase,threshold,False)
+        if print_flag:
+            print(f"Removed {amount_trials_total - self.get_rts().shape[0]} trials with NaN values.")
+
+    def drop_trials_longer_than(self, seconds,phase, print_flag=True):
+        amount_trials_total = self.get_rts().shape[0]
+        for subject in list(self.subjects.values()):
+            subject.drop_trials_longer_than(seconds,phase,False)
+        if print_flag:
+            print(f"Removed {amount_trials_total - self.get_rts().shape[0]} trials longer than {seconds} seconds.")
     
     def plot_scanpaths(self,screen_height,screen_width,display: bool = False):
         with ProcessPoolExecutor() as executor:
@@ -181,17 +189,28 @@ class Subject:
         for session in self.sessions.values():
             session.filter_saccades(max_sacc_dur)
 
-    def drop_trials_with_nan_threshold(self, threshold=0.5):
+    def drop_trials_with_nan_threshold(self,phase, threshold=0.1, print_flag=True):
         total_sessions = len(self.sessions)
-        sessions_results = {session: self.sessions[session].drop_trials_with_nan_threshold(threshold) for session in self.sessions}
+        amount_trials_total = self.get_rts().shape[0]
+        for session in list(self.sessions.values()):
+            session.drop_trials_with_nan_threshold(phase,threshold,False)
         bad_sessions_count = total_sessions - len(self.sessions)
-        bad_trials_subject = {session: {"bad_trials": sessions_results[session][0], "total_trials": sessions_results[session][1]} for session in sessions_results.keys()}
+
 
         # If the proportion of bad sessions exceeds the threshold, remove all sessions
         if bad_sessions_count / total_sessions > threshold:
             self.unlink_experiment()
+        
+        if print_flag:
+            print(f"Removed {amount_trials_total - self.get_rts().shape[0]} trials with NaN values.")
 
-        return bad_sessions_count, total_sessions, bad_trials_subject
+    def drop_trials_longer_than(self, seconds,phase, print_flag=True):
+        amount_trials_total = self.get_rts().shape[0]
+        for session in list(self.sessions.values()):
+            session.drop_trials_longer_than(seconds,phase,False)
+        if print_flag:
+            print(f"Removed {amount_trials_total - self.get_rts().shape[0]} trials longer than {seconds} seconds.")
+
 
     def plot_scanpaths(self,screen_height,screen_width, display: bool = False):
         for session in self.sessions.values():
@@ -259,19 +278,36 @@ class Session():
         self.subject.remove_session(self.session_id)
         self.subject = None
 
-    def drop_trials_with_nan_threshold(self, threshold=0.5):
+    def drop_trials_with_nan_threshold(self, phase, threshold=0.1, print_flag=True):
         bad_trials = []
         total_trials = len(self.trials)
         # Filter bad trials
 
-        bad_trials = [trial for trial in self.trials.keys() if self.trials[trial].is_trial_bad(threshold)]
+        bad_trials = [trial for trial in self.trials.keys() if self.trials[trial].is_trial_bad(phase, threshold)]
         if len(bad_trials)/total_trials > threshold:
             bad_trials = self._trials
             self.unlink_subject()
         else:
             for trial in bad_trials:
                 self.trials[trial].unlink_session()
-        return bad_trials, total_trials
+        
+        if print_flag:
+            print(f"Removed {len(bad_trials)} trials with NaN values.")
+
+    def drop_trials_longer_than(self, seconds,phase, print_flag=True):
+        bad_trials = []
+
+        # Filter bad trials
+
+        bad_trials = [trial for trial in self.trials.keys() if self.trials[trial].is_trial_longer_than(seconds,phase)]
+        for trial in bad_trials:
+            self.trials[trial].unlink_session()
+        
+        if len(self.trials) == 0:
+            self.unlink_subject()
+               
+        if print_flag:
+            print(f"Removed {len(bad_trials)} trials longer than {seconds} seconds.")
 
     def load_behavior_data(self):
         # This should be implemented for each type of experiment
@@ -418,9 +454,27 @@ class Trial:
             self.save_rts()
         return self.rts
     
-    def is_trial_bad(self, threshold=0.5):
-        nan_values = self._samples.isna().sum().sum()
-        bad_values = self._samples["bad"].sum()
-        bad_and_nan_percentage = (nan_values + bad_values) / len(self._samples)
+    def is_trial_bad(self,phase, threshold=0.1):
+        samples = self._samples.copy()[self._samples["phase"] == phase].reset_index(drop=True)
+        
+        # Remove samples that fall within any blink period
+        if self._blink is not None and not self._blink.empty:
+            blink_start = self._blink["tStart"].values
+            blink_end = self._blink["tEnd"].values
+            
+            # Mask to keep samples that do not fall in any blink interval
+            mask = ~samples["tSample"].apply(
+                lambda t: any(start < t < end for start, end in zip(blink_start, blink_end))
+            )
+            samples = samples[mask]
+        
+        # Compute bad and NaN values
+        nan_values = samples.isna().sum().sum()
+        bad_values = samples["bad"].sum()
+        
+        bad_and_nan_percentage = (nan_values + bad_values) / len(samples) if len(samples) > 0 else 1.0
+        
         return bad_and_nan_percentage > threshold
     
+    def is_trial_longer_than(self, seconds, phase):
+        return self.get_rts()[self.get_rts()["phase"] == phase]["rt"].values[0] > seconds * 1000.0
