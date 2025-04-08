@@ -1,5 +1,5 @@
 from pathlib import Path
-import pandas as pd
+import polars as pl
 from pyxations.visualization.visualization import Visualization
 from concurrent.futures import ProcessPoolExecutor,ThreadPoolExecutor, as_completed
 from pyxations.export import FEATHER_EXPORT, get_exporter
@@ -34,12 +34,13 @@ class Experiment:
     def __init__(self, dataset_path: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
         self.dataset_path = Path(dataset_path)
         self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
-        self.metadata = pd.read_csv(self.dataset_path / "participants.tsv", sep="\t", 
-                                    dtype={"subject_id": str, "old_subject_id": str})
+        self.metadata = pl.read_csv(self.dataset_path / "participants.tsv", separator="\t", 
+                                    dtypes={"subject_id": pl.Utf8, "old_subject_id": pl.Utf8})
         self.subjects = { subject_id:
             Subject(subject_id, old_subject_id, self, 
                      excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}),export_format)
-            for subject_id, old_subject_id in zip(self.metadata["subject_id"], self.metadata["old_subject_id"])
+            for subject_id, old_subject_id in zip(self.metadata.select("subject_id").to_series(),
+                                                  self.metadata.select("old_subject_id").to_series())
             if subject_id not in excluded_subjects and old_subject_id not in excluded_subjects
         }
         self.export_format = export_format
@@ -65,8 +66,8 @@ class Experiment:
             subject.load_data(detection_algorithm)
 
     def plot_multipanel(self, display: bool):
-        fixations = pd.concat([subject.fixations() for subject in self.subjects.values()], ignore_index=True)
-        saccades = pd.concat([subject.saccades() for subject in self.subjects.values()], ignore_index=True)
+        fixations = pl.concat([subject.fixations() for subject in self.subjects.values()])
+        saccades = pl.concat([subject.saccades() for subject in self.subjects.values()])
 
         vis = Visualization(self.derivatives_path, self.detection_algorithm)
         vis.plot_multipanel(fixations, saccades, display)
@@ -102,7 +103,7 @@ class Experiment:
 
     def get_rts(self):
         rts = [subject.get_rts() for subject in self.subjects.values()]
-        return pd.concat(rts, ignore_index=True)
+        return pl.concat(rts)
 
     def get_subject(self, subject_id):
         return self.subjects[subject_id]
@@ -116,13 +117,13 @@ class Experiment:
         return session.get_trial(trial_number)
     
     def fixations(self):
-        return pd.concat([subject.fixations() for subject in self.subjects.values()], ignore_index=True)
+        return pl.concat([subject.fixations() for subject in self.subjects.values()])
     
     def saccades(self):
-        return pd.concat([subject.saccades() for subject in self.subjects.values()], ignore_index=True)
+        return pl.concat([subject.saccades() for subject in self.subjects.values()])
     
     def samples(self):
-        return pd.concat([subject.samples() for subject in self.subjects.values()], ignore_index=True)
+        return pl.concat([subject.samples() for subject in self.subjects.values()])
     
     def remove_subject(self, subject_id):
         del self.subjects[subject_id]
@@ -218,8 +219,8 @@ class Subject:
 
     def get_rts(self):
         rts = [session.get_rts() for session in self.sessions.values()]
-        rts = pd.concat(rts, ignore_index=True)
-        rts["subject_id"] = self.subject_id
+        rts = pl.concat(rts).with_columns([
+            (pl.lit(self.subject_id)).alias("subject_id"),])
         return rts
 
     def get_session(self, session_id):
@@ -230,18 +231,18 @@ class Subject:
         return session.get_trial(trial_number)
     
     def fixations(self):
-        df = pd.concat([session.fixations() for session in self.sessions.values()], ignore_index=True)
-        df["subject_id"] = self.subject_id
+        df = pl.concat([session.fixations() for session in self.sessions.values()]).with_columns([
+            (pl.lit(self.subject_id)).alias("subject_id"),])
         return df
     
     def saccades(self):
-        df = pd.concat([session.saccades() for session in self.sessions.values()], ignore_index=True)
-        df["subject_id"] = self.subject_id
+        df = pl.concat([session.saccades() for session in self.sessions.values()]).with_columns([
+            (pl.lit(self.subject_id)).alias("subject_id"),])
         return df
     
     def samples(self):
-        df = pd.concat([session.samples() for session in self.sessions.values()], ignore_index=True)
-        df["subject_id"] = self.subject_id
+        df = pl.concat([session.samples() for session in self.sessions.values()]).with_columns([
+            (pl.lit(self.subject_id)).alias("subject_id"),])
         return df
 
     def remove_session(self, session_id):
@@ -334,7 +335,7 @@ class Session():
 
 
     def _init_trials(self,samples,fix,sacc,blink,events_path):
-        cosas = [trial for trial in samples["trial_number"].unique() if trial != -1 and trial not in self.excluded_trials]
+        cosas = [trial for trial in samples.select("trial_number").to_series().unique() if trial != -1 and trial not in self.excluded_trials]
         self._trials = {trial:
             Trial(trial, self, samples, fix, sacc, blink, events_path)
             for trial in cosas
@@ -366,24 +367,24 @@ class Session():
 
     def get_rts(self):
         rts = [trial.get_rts() for trial in self.trials.values()]
-        rts = pd.concat(rts, ignore_index=True)
-        rts["session_id"] = self.session_id
+        rts = pl.concat(rts).with_columns([
+            (pl.lit(self.session_id)).alias("session_id"),])
         return rts
 
     def fixations(self):
-        df = pd.concat([trial.fixations() for trial in self.trials.values()], ignore_index=True)
-        df["session_id"] = self.session_id
+        df = pl.concat([trial.fixations() for trial in self.trials.values()]).with_columns([
+            (pl.lit(self.session_id)).alias("session_id"),])
         return df
     
     def saccades(self):
-        df = pd.concat([trial.saccades() for trial in self.trials.values()], ignore_index=True)
-        df["session_id"] = self.session_id
+        df = pl.concat([trial.saccades() for trial in self.trials.values()]).with_columns([
+            (pl.lit(self.session_id)).alias("session_id"),])
         return df
         
     
     def samples(self):
-        df = pd.concat([trial.samples() for trial in self.trials.values()], ignore_index=True)
-        df["session_id"] = self.session_id
+        df = pl.concat([trial.samples() for trial in self.trials.values()]).with_columns([
+            (pl.lit(self.session_id)).alias("session_id"),])
         return df
 
     def remove_trial(self, trial_number):
@@ -391,23 +392,40 @@ class Session():
 
 class Trial:
 
-    def __init__(self, trial_number: int, session: Session, samples: pd.DataFrame, fix: pd.DataFrame, 
-                 sacc: pd.DataFrame, blink: pd.DataFrame, events_path: Path):
+    def __init__(self, trial_number: int, session: Session, samples: pl.DataFrame, fix: pl.DataFrame, 
+                sacc: pl.DataFrame, blink: pl.DataFrame, events_path: Path):
         self.trial_number = trial_number
         self.session = session
-        self._samples = samples[samples["trial_number"] == trial_number].reset_index(drop=True)
-        self._fix = fix[fix["trial_number"] == trial_number].reset_index(drop=True)
-        self._sacc = sacc[sacc["trial_number"] == trial_number].reset_index(drop=True)
-        self._blink = blink[blink["trial_number"] == trial_number].reset_index(drop=True) if blink is not None else None
-        start_time = self._samples["tSample"].iloc[0]
-        self._samples["tSample"] = self._samples["tSample"] - start_time
-        self._fix["tStart"] = self._fix["tStart"] - start_time
-        self._fix["tEnd"] = self._fix["tEnd"] - start_time
-        self._sacc["tStart"] = self._sacc["tStart"] - start_time
-        self._sacc["tEnd"] = self._sacc["tEnd"] - start_time
+
+        # Filter per trial
+        self._samples = samples.filter(pl.col("trial_number") == trial_number)
+        self._fix = fix.filter(pl.col("trial_number") == trial_number)
+        self._sacc = sacc.filter(pl.col("trial_number") == trial_number)
+        self._blink = blink.filter(pl.col("trial_number") == trial_number) if blink is not None else None
+
+        # Get the start time
+        start_time = self._samples.select("tSample").to_series()[0]
+
+        # Time normalization
+        self._samples = self._samples.with_columns([
+            (pl.col("tSample") - start_time).alias("tSample")
+        ])
+
+        self._fix = self._fix.with_columns([
+            (pl.col("tStart") - start_time).alias("tStart"),
+            (pl.col("tEnd") - start_time).alias("tEnd")
+        ])
+
+        self._sacc = self._sacc.with_columns([
+            (pl.col("tStart") - start_time).alias("tStart"),
+            (pl.col("tEnd") - start_time).alias("tEnd")
+        ])
+
         if self._blink is not None:
-            self._blink["tStart"] = self._blink["tStart"] - start_time
-            self._blink["tEnd"] = self._blink["tEnd"] - start_time
+            self._blink = self._blink.with_columns([
+                (pl.col("tStart") - start_time).alias("tStart"),
+                (pl.col("tEnd") - start_time).alias("tEnd")
+            ])
 
         self.events_path = events_path
         self.detection_algorithm = events_path.name[:-7]
@@ -445,36 +463,58 @@ class Trial:
     def save_rts(self):
         if hasattr(self, "rts"):
             return
-        rts = self._samples[self._samples["phase"] != ""].groupby(["phase"])["tSample"].agg(lambda x: x.iloc[-1] - x.iloc[0])
-        self.rts = rts.reset_index().rename(columns={"tSample": "rt"})
-        self.rts["trial_number"] = self.trial_number
+
+        # Filter out empty phase rows
+        filtered = self._samples.filter(pl.col("phase") != "")
+
+        # Calculate RT as the difference between last and first tSample per phase
+        rts = (
+            filtered
+            .group_by("phase")
+            .agg([
+                (pl.col("tSample").max() - pl.col("tSample").min()).alias("rt")
+            ])
+            .with_columns([
+                pl.lit(self.trial_number).alias("trial_number")
+            ])
+        )
+
+        self.rts = rts
+
 
     def get_rts(self):
         if not hasattr(self, "rts"):
             self.save_rts()
         return self.rts
     
-    def is_trial_bad(self,phase, threshold=0.1):
-        samples = self._samples.copy()[self._samples["phase"] == phase].reset_index(drop=True)
-        
-        # Remove samples that fall within any blink period
-        if self._blink is not None and not self._blink.empty:
-            blink_start = self._blink["tStart"].values
-            blink_end = self._blink["tEnd"].values
-            
-            # Mask to keep samples that do not fall in any blink interval
-            mask = ~samples["tSample"].apply(
-                lambda t: any(start < t < end for start, end in zip(blink_start, blink_end))
-            )
-            samples = samples[mask]
-        
-        # Compute bad and NaN values
-        nan_values = samples.isna().sum().sum()
-        bad_values = samples["bad"].sum()
-        
-        bad_and_nan_percentage = (nan_values + bad_values) / len(samples) if len(samples) > 0 else 1.0
-        
+    def is_trial_bad(self, phase, threshold=0.1):
+        # Filter samples for the given phase
+        samples = self._samples.filter(pl.col("phase") == phase)
+
+        # Remove samples during blinks
+        if self._blink is not None and self._blink.height > 0:
+            for blink in self._blink.iter_rows(named=True):
+                start, end = blink["tStart"], blink["tEnd"]
+                samples = samples.filter(~((pl.col("tSample") > start) & (pl.col("tSample") < end)))
+
+        total_samples = samples.height
+        if total_samples == 0:
+            return True  # If no samples remain, consider it bad
+
+        # Count total NaNs across all columns
+        nan_counts = samples.select([pl.col(c).is_null().sum().alias(c) for c in samples.columns])
+        nan_total = sum(nan_counts.row(0))
+
+        # Count "bad" values
+        bad_values = samples.select(pl.col("bad").sum()).item()
+
+        bad_and_nan_percentage = (nan_total + bad_values) / total_samples
+
         return bad_and_nan_percentage > threshold
+
     
     def is_trial_longer_than(self, seconds, phase):
-        return self.get_rts()[self.get_rts()["phase"] == phase]["rt"].values[0] > seconds * 1000.0
+        rt_row = self.get_rts().filter(pl.col("phase") == phase)
+        if rt_row.is_empty():
+            return False  # Or True if no data should be considered long
+        return rt_row.select("rt").item() > seconds * 1000.0
