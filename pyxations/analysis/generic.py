@@ -3,7 +3,8 @@ import polars as pl
 from pyxations.visualization.visualization import Visualization
 from concurrent.futures import ProcessPoolExecutor,ThreadPoolExecutor, as_completed
 from pyxations.export import FEATHER_EXPORT, get_exporter
-
+from math import hypot
+import numpy as np
 
 STIMULI_FOLDER = "stimuli"
 ITEMS_FOLDER = "items"
@@ -72,13 +73,19 @@ class Experiment:
         vis = Visualization(self.derivatives_path, self.detection_algorithm)
         vis.plot_multipanel(fixations, saccades, display)
 
-    def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
+    def filter_fixations(self, min_fix_dur=50, print_flag=True):
+        amount_fix = self.fixations().shape[0]
         for subject in self.subjects.values():
-            subject.filter_fixations(min_fix_dur, max_fix_dur)
+            subject.filter_fixations(min_fix_dur)
 
-    def filter_saccades(self, max_sacc_dur=100):
+        if print_flag:
+            print(f"Removed {amount_fix - self.fixations().shape[0]} fixations shorter than {min_fix_dur} ms.")
+    def collapse_fixations(self, threshold_px: float, print_flag=True):
+        amount_fix = self.fixations().shape[0]
         for subject in self.subjects.values():
-            subject.filter_saccades(max_sacc_dur)
+            subject.collapse_fixations(threshold_px)
+        if print_flag:
+            print(f"Removed {amount_fix - self.fixations().shape[0]} fixations that were merged.")
 
     def drop_trials_with_nan_threshold(self, phase, threshold=0.1,print_flag=True):
         amount_trials_total = self.get_rts().shape[0]
@@ -182,13 +189,13 @@ class Subject:
             session.load_data(detection_algorithm)
 
 
-    def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
+    def filter_fixations(self, min_fix_dur=50):
         for session in self.sessions.values():
-            session.filter_fixations(min_fix_dur, max_fix_dur)
+            session.filter_fixations(min_fix_dur)
 
-    def filter_saccades(self, max_sacc_dur=100):
+    def collapse_fixations(self, threshold_px: float):
         for session in self.sessions.values():
-            session.filter_saccades(max_sacc_dur)
+            session.collapse_fixations(threshold_px)
 
     def drop_trials_with_nan_threshold(self,phase, threshold=0.1, print_flag=True):
         total_sessions = len(self.sessions)
@@ -357,13 +364,13 @@ class Session():
     def get_trial(self, trial_number):
         return self._trials[trial_number]
 
-    def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
+    def filter_fixations(self, min_fix_dur=50):
         for trial in self.trials.values():
-            trial.filter_fixations(min_fix_dur, max_fix_dur)
+            trial.filter_fixations(min_fix_dur)
 
-    def filter_saccades(self, max_sacc_dur=100):
+    def collapse_fixations(self, threshold_px: float):
         for trial in self.trials.values():
-            trial.filter_saccades(max_sacc_dur)
+            trial.collapse_fixations(threshold_px)
 
     def get_rts(self):
         rts = [trial.get_rts() for trial in self.trials.values()]
@@ -454,11 +461,255 @@ class Trial:
         vis.scanpath(fixations=self._fix, saccades=self._sacc, samples=self._samples, screen_height=screen_height, screen_width=screen_width, 
                       folder_path=self.events_path / "plots", **kwargs)
 
-    def filter_fixations(self, min_fix_dur=50, max_fix_dur=1000):
-        self._fix = self._fix.query(f"{min_fix_dur} < duration < {max_fix_dur} and bad == False").reset_index(drop=True)
+    def filter_fixations(self, min_fix_dur: int = 50):
+        """
+        1.  Delete fixations shorter than `min_fix_dur` (ms).
+        2.  Merge the two saccades that flank each deleted fixation
+            into one longer saccade, always staying inside a single
+            (“phase”, “eye”) stream.
 
-    def filter_saccades(self, max_sacc_dur=100):
-        self._sacc = self._sacc.query(f"duration < {max_sacc_dur} and bad == False").reset_index(drop=True)
+        Returns
+        -------
+        self   # so you can do:  trial.filter_fixations().is_trial_bad()
+        """
+        # ─────────────────────── 0 · split keep / drop ──────────────────────
+        short_fix = self._fix.filter(pl.col("duration") < min_fix_dur)
+        keep_fix  = self._fix.filter(pl.col("duration") >= min_fix_dur)
+
+        if short_fix.is_empty():
+            return                                # nothing to do
+
+        # ─────────────────────── 1 · prepare saccades ───────────────────────
+        sacc = (self._sacc       # add an integer key that survives every shuffle
+                .with_row_count("idx")
+                .sort(["phase", "eye", "tStart"]))
+
+        prev_src = sacc.select(["idx", "phase", "eye",
+                                pl.col("tEnd").alias("t")])
+        next_src = sacc.select(["idx", "phase", "eye",
+                                pl.col("tStart").alias("t")])
+
+        # ─────────────────────── 2 · find neighbour IDs ─────────────────────
+        short_fix = short_fix.rename({"tStart": "tStart_fix",
+                                    "tEnd":   "tEnd_fix"})
+
+        short_fix = (short_fix
+                    .join_asof(prev_src,
+                                left_on="tStart_fix", right_on="t",
+                                by=["phase", "eye"],
+                                strategy="backward")
+                    .rename({"idx": "idx_prev"})
+                    .drop("t")
+                    .join_asof(next_src,
+                                left_on="tEnd_fix", right_on="t",
+                                by=["phase", "eye"],
+                                strategy="forward")
+                    .rename({"idx": "idx_next"})
+                    .drop("t"))
+
+        # only keep rows where we found BOTH neighbours
+        short_fix_pairs = short_fix.select(["idx_prev", "idx_next"]).drop_nulls()
+        if short_fix_pairs.is_empty():
+            # we could not build any (prev,next) pair → only delete fixations
+            self._fix = keep_fix.sort(["phase", "tStart"])
+            return self
+
+        # ───────────────────── 3 · join the two saccades ────────────────────
+        pair_df = (short_fix_pairs.unique()
+                .join(sacc, left_on="idx_prev", right_on="idx", how="inner")
+                .join(sacc, left_on="idx_next", right_on="idx", suffix="_nxt"))
+
+        # keep **prev** row plus ONLY the four _nxt columns that we still need
+        prev_cols = [c for c in pair_df.columns if not c.endswith("_nxt")]
+        need_nxt  = ["tEnd_nxt", "xEnd_nxt", "yEnd_nxt", "vPeak_nxt"]
+        merged = pair_df.select(prev_cols + need_nxt)
+
+        # ───────── overwrite / derive fields that span both flanks ──────────
+        merged = merged.with_columns([
+            pl.col("tEnd_nxt").alias("tEnd"),
+            (pl.col("tEnd_nxt") - pl.col("tStart")).alias("duration"),
+            pl.col("xEnd_nxt").alias("xEnd"),
+            pl.col("yEnd_nxt").alias("yEnd"),
+            pl.max_horizontal("vPeak", "vPeak_nxt").alias("vPeak"),
+            (
+                (pl.col("xEnd_nxt") - pl.col("xStart"))**2
+            + (pl.col("yEnd_nxt") - pl.col("yStart"))**2
+            ).sqrt().alias("ampDeg"),
+        ])
+
+        # drop helper columns that end in _nxt (no longer needed)
+        merged = merged.drop([c for c in merged.columns if c.endswith("_nxt")])
+
+        # 4 · bring schema in line with original  --------------------------------
+        base_cols = sacc.drop("idx").columns
+
+        for col in base_cols:
+            if col not in merged.columns:
+                if f"{col}_nxt" in pair_df.columns:
+                    merged = merged.with_columns(pl.col(f"{col}_nxt").alias(col))
+                else:
+                    merged = merged.with_columns(
+                        pl.lit(None).cast(sacc[col].dtype).alias(col)
+                    )
+
+        # --- NEW: make sure every dtype matches the canonical sacc table ----
+        for col in base_cols:
+            if merged[col].dtype != sacc[col].dtype:
+                merged = merged.with_columns(pl.col(col).cast(sacc[col].dtype))
+
+        merged = merged.select(base_cols)
+
+        # ───────────────────── 5 · build the final saccade table ────────────
+        to_drop = pl.concat([short_fix_pairs["idx_prev"],
+                            short_fix_pairs["idx_next"]]).unique()
+        new_sacc = (sacc
+                    .filter(~pl.col("idx").is_in(to_drop))
+                    .drop("idx")          # helper column gone
+                    .vstack(merged)       # add fused rows
+                    .sort(["phase", "eye", "tStart"]))
+
+        # ───────────────────── 6 · store back and return ────────────────────
+        self._fix  = keep_fix.sort(["phase", "tStart"])
+        self._sacc = new_sacc
+        
+
+
+    def collapse_fixations(self, threshold_px: float) -> None:
+        """
+        Collapse consecutive fixations that lie ≤ `threshold_px` apart
+        *within each phase separately*.  Saccades whose whole time‑span
+        falls between the first and last fixation of a pool are discarded.
+        The saccade immediately before the pool has its (xEnd, yEnd)
+        adjusted to the merged‑fixation centroid; the saccade immediately
+        after the pool has its (xStart, yStart) adjusted likewise.
+
+        After running:
+            self._fix   → collapsed fixations
+            self._sacc  → original saccades minus the discarded ones,
+                        plus the updated coordinates for the two
+                        bordering saccades.
+        """
+
+        # ────────────────── 0 · prepare helpers ──────────────────
+        fix = self._fix.sort("tStart").with_row_count("fix_idx")
+        sac = self._sacc.sort("tStart").with_row_count("sac_idx")
+
+        new_fix_rows: list[dict] = []
+        drop_sac_idx: set[int]   = set()
+        mod_sac: dict[int, dict] = {}          # idx → partial‑row updates
+
+        # ────────────────── 1 · loop over phases ─────────────────
+        for phase_val in fix["phase"].unique():               # ① per phase
+            fix_p = fix.filter(pl.col("phase") == phase_val)
+            sac_p = sac.filter(pl.col("phase") == phase_val)
+
+            i, n_fix = 0, len(fix_p)
+            while i < n_fix:
+
+                # ── grow one pool ───────────────────────────────
+                pool = [fix_p.row(i, named=True)]
+                j = i + 1
+                while j < n_fix:
+                    dx = fix_p["xAvg"][j] - fix_p["xAvg"][j - 1]
+                    dy = fix_p["yAvg"][j] - fix_p["yAvg"][j - 1]
+                    if hypot(dx, dy) <= threshold_px:
+                        pool.append(fix_p.row(j, named=True))
+                        j += 1
+                    else:
+                        break
+
+                # ── pool of size 1: keep as‑is ──────────────────
+                if len(pool) == 1:
+                    new_fix_rows.append(pool[0].copy())        # unchanged
+                    i = j
+                    continue
+
+                # ── merge the pool (>1 fix) ─────────────────────
+                first_fix, last_fix = pool[0], pool[-1]
+
+                merged_fix = first_fix.copy()
+                merged_fix.update({
+                    "tEnd":     last_fix["tEnd"],
+                    "duration": sum(f["duration"] for f in pool),
+                    "xAvg":     np.mean([f["xAvg"] for f in pool]),
+                    "yAvg":     np.mean([f["yAvg"] for f in pool]),
+                    "pupilAvg": np.mean([f["pupilAvg"] for f in pool]),
+                })
+                new_fix_rows.append(merged_fix)
+
+                # ── identify & drop fully‑internal saccades ─────
+                inside = sac_p.filter(
+                    (pl.col("tStart") >= first_fix["tEnd"]) &
+                    (pl.col("tEnd")   <= last_fix["tStart"])
+                )
+                drop_sac_idx.update(inside["sac_idx"].to_list())
+
+                # ── adjust bordering saccades ───────────────────
+                merged_x = merged_fix["xAvg"]
+                merged_y = merged_fix["yAvg"]
+
+                # previous saccade (ends at first_fix.tStart)
+                prev_df = sac_p.filter(pl.col("tEnd") <= first_fix["tStart"]).tail(1)
+                if prev_df.height:
+                    prev = prev_df.row(0, named=True)
+                    idx  = prev["sac_idx"]
+                    upd  = {
+                        "xEnd": merged_x,
+                        "yEnd": merged_y,
+                        "dx":   merged_x - prev["xStart"],
+                        "dy":   merged_y - prev["yStart"],
+                    }
+                    upd["amplitude"] = hypot(upd["dx"], upd["dy"])
+                    mod_sac.setdefault(idx, {}).update(upd)
+
+                # next saccade (starts at last_fix.tEnd)
+                next_df = sac_p.filter(pl.col("tStart") >= last_fix["tEnd"]).head(1)
+                if next_df.height:
+                    nxt = next_df.row(0, named=True)
+                    idx = nxt["sac_idx"]
+                    upd = {
+                        "xStart": merged_x,
+                        "yStart": merged_y,
+                        "dx":     nxt["xEnd"] - merged_x,
+                        "dy":     nxt["yEnd"] - merged_y,
+                    }
+                    upd["amplitude"] = hypot(upd["dx"], upd["dy"])
+                    mod_sac.setdefault(idx, {}).update(upd)
+
+                i = j                                         # advance
+
+        # ────────────────── 2 · rebuild tables ──────────────────
+        # 2‑a  fixations
+        new_fix = (
+            pl.DataFrame(new_fix_rows,
+                        schema=fix.drop("fix_idx").schema,
+                        orient="row")
+            .sort(["phase", "tStart"])
+        )
+
+        # 2‑b  saccades: drop + modify in one pass
+        new_sac_rows = []
+        for row in sac.iter_rows(named=True):
+            idx = row["sac_idx"]
+            if idx in drop_sac_idx:
+                continue                                     # discard
+            if idx in mod_sac:                               # apply edits
+                row.update(mod_sac[idx])
+                # re‑compute amplitude in case only dx/dy were provided
+                if "amplitude" not in mod_sac[idx]:
+                    row["amplitude"] = hypot(row["dx"], row["dy"])
+            new_sac_rows.append({k: v for k, v in row.items() if k != "sac_idx"})
+
+        new_sac = (
+            pl.DataFrame(new_sac_rows,
+                        schema=sac.drop("sac_idx").schema,
+                        orient="row")
+            .sort(["phase", "tStart"])
+        )
+
+        # ────────────────── 3 · store back ──────────────────────
+        self._fix  = new_fix
+        self._sacc = new_sac
 
     def save_rts(self):
         if hasattr(self, "rts"):
