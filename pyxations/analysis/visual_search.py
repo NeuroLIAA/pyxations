@@ -69,11 +69,10 @@ class VisualSearchExperiment(Experiment):
                 pl.col("rt").mean().alias("rt"),
                 pl.col("correct_response").mean().alias("accuracy")
             ])
-            .sort(by=["memory_set_size", "target_present", "stimulus"])
         )
 
         # Convert to pandas for Seaborn
-        accuracy = accuracy.to_pandas()
+        accuracy = accuracy.to_pandas().sort_values(by=["memory_set_size", "target_present","accuracy"])
 
         # Convert target_present to bool (in case it's int 0/1)
         accuracy["target_present"] = accuracy["target_present"].astype(bool)
@@ -578,7 +577,7 @@ class VisualSearchExperiment(Experiment):
                 axs[i, j].set_title(f"Memory Set Size {mem_size}, Target Present {bool(tp)}")
                 axs[i, j].set_xlabel("RT Bins (s)")
                 axs[i, j].set_ylabel("Correct Trials")
-                axs[i, j].set_xticks(np.arange(0, bin_end + bin_step, bin_step * 3))
+                axs[i, j].set_xticks(range(0, int(bin_end/bin_step)+3, 3))
 
         plt.tight_layout()
         plt.show()
@@ -624,7 +623,7 @@ class VisualSearchExperiment(Experiment):
                 axs[i, j].set_title(f"Memory Set Size {mem_size}, Target Present {bool(tp)}")
                 axs[i, j].set_xlabel("RT Bins (s)")
                 axs[i, j].set_ylabel("Incorrect Trials")
-                axs[i, j].set_xticks(np.arange(0, bin_end + bin_step, bin_step * 3))
+                axs[i, j].set_xticks(range(0, int(bin_end/bin_step)+3, 3))
 
         plt.tight_layout()
         plt.show()
