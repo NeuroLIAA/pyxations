@@ -290,7 +290,7 @@ class Experiment:
         plt.figure(figsize=(20, 24))
         sns.heatmap(
             heatmap_data,
-            cmap=cmap, center=0.5, vmin=0, vmax=2,
+            cmap=cmap, center=0.5, vmin=0,
             linewidths=0.3, linecolor="grey", cbar_kws=dict(label="Avg. error (°)")
         )
         plt.xlabel("Trial #")
