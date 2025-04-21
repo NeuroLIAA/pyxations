@@ -63,7 +63,7 @@ class VisualSearchExperiment(Experiment):
     def plot_accuracy_by_stimulus(self):
         # Group and compute mean RT and accuracy per stimulus
         accuracy = (
-            self.get_search_rts()
+            self.search_rts()
             .group_by(["target_present", "memory_set_size", "stimulus"])
             .agg([
                 pl.col("rt").mean().alias("rt"),
@@ -105,22 +105,22 @@ class VisualSearchExperiment(Experiment):
         plt.show()
         plt.close()
 
-    def get_search_rts(self):
-        rts = self.get_rts().filter(pl.col("phase") == self._search_phase_name)
+    def search_rts(self):
+        rts = self.rts().filter(pl.col("phase") == self._search_phase_name)
         return rts
     
-    def get_search_saccades(self):
+    def search_saccades(self):
         saccades = self.saccades().filter(pl.col("phase") == self._search_phase_name)
         return saccades
 
-    def get_search_fixations(self):
+    def search_fixations(self):
         fixations = self.fixations().filter(pl.col("phase") == self._search_phase_name)
         return fixations
 
     def plot_speed_accuracy_tradeoff_by_subject(self):
         # 1) Aggregate the data
         speed_accuracy = (
-            self.get_search_rts()
+            self.search_rts()
             .group_by(["target_present", "memory_set_size", "subject_id"])
             .agg([
                 pl.col("rt").mean().alias("rt"),
@@ -202,7 +202,7 @@ class VisualSearchExperiment(Experiment):
     def plot_speed_accuracy_tradeoff_by_stimulus(self):
         # 1) Aggregate the data
         speed_accuracy = (
-            self.get_search_rts()
+            self.search_rts()
             .group_by(["target_present", "memory_set_size", "stimulus"])
             .agg([
                 pl.col("rt").mean().alias("rt"),
@@ -285,12 +285,12 @@ class VisualSearchExperiment(Experiment):
         plt.close()
 
     def remove_non_answered_trials(self, print_flag=True):
-        amount_trials_before_removal = self.get_search_rts().shape[0]
+        amount_trials_before_removal = self.search_rts().shape[0]
         for subject in list(self.subjects.values()):
             subject.remove_non_answered_trials(False)
 
         if print_flag:
-            print(f"Removed {amount_trials_before_removal - self.get_search_rts().shape[0]} non answered trials")
+            print(f"Removed {amount_trials_before_removal - self.search_rts().shape[0]} non answered trials")
 
     def remove_poor_accuracy_sessions(self, threshold=0.5, print_flag=True):
         amount_sessions_total = sum([len(subject.sessions) for subject in self.subjects.values()])
@@ -519,7 +519,7 @@ class VisualSearchExperiment(Experiment):
 
     def trials_by_rt_bins(self, bin_end, bin_step):
         # 1. Get and filter RTs
-        rts = self.get_rts().filter(pl.col("phase") == self._search_phase_name)
+        rts = self.rts().filter(pl.col("phase") == self._search_phase_name)
         rts = rts.with_columns([
             (pl.col("rt") / 1000).alias("rt")
         ])
@@ -728,21 +728,21 @@ class VisualSearchSubject(Subject):
     def scanpaths_by_stimuli(self):
         return pl.concat([session.scanpaths_by_stimuli() for session in self.sessions.values()])
     
-    def get_search_rts(self):
-        rts = self.get_rts().filter(pl.col("phase") == self._search_phase_name)
+    def search_rts(self):
+        rts = self.rts().filter(pl.col("phase") == self._search_phase_name)
         return rts
     
-    def get_search_saccades(self):
+    def search_saccades(self):
         saccades = self.saccades().filter(pl.col("phase") == self._search_phase_name)
         return saccades
     
-    def get_search_fixations(self):
+    def search_fixations(self):
         fixations = self.fixations().filter(pl.col("phase") == self._search_phase_name)
         return fixations
     
     def accuracy(self):
         # Accuracy should be grouped by target present and memory set size
-        correct_trials = self.get_search_rts()[["target_present", "correct_response", "memory_set_size"]]
+        correct_trials = self.search_rts()[["target_present", "correct_response", "memory_set_size"]]
         accuracy = correct_trials.group_by(["target_present", "memory_set_size"]).agg(
             pl.col("correct_response").mean().alias("accuracy")
         )
@@ -753,12 +753,12 @@ class VisualSearchSubject(Subject):
     
     def remove_non_answered_trials(self, print_flag=True):
         # Remove non answered trials from all sessions
-        amount_trials_before_removal = self.get_search_rts().height
+        amount_trials_before_removal = self.search_rts().height
         for session in list(self.sessions.values()):
             session.remove_non_answered_trials(False)
 
         if print_flag:
-            print(f"Removed {amount_trials_before_removal - self.get_search_rts().height} non answered trials from subject {self.subject_id}")
+            print(f"Removed {amount_trials_before_removal - self.search_rts().height} non answered trials from subject {self.subject_id}")
 
 
 
@@ -923,21 +923,21 @@ class VisualSearchSession(Session):
         super().load_data(detection_algorithm)
 
 
-    def get_search_rts(self):
-        rts = self.get_rts().filter(pl.col("phase") == self._search_phase_name)
+    def search_rts(self):
+        rts = self.rts().filter(pl.col("phase") == self._search_phase_name)
         return rts
     
-    def get_search_saccades(self):
+    def search_saccades(self):
         saccades = self.saccades().filter(pl.col("phase") == self._search_phase_name)
         return saccades
 
-    def get_search_fixations(self):
+    def search_fixations(self):
         fixations = self.fixations().filter(pl.col("phase") == self._search_phase_name)
         return fixations
 
     def accuracy(self):
         # Accuracy should be grouped by target present and memory set size
-        correct_trials = self.get_search_rts()[["target_present", "correct_response", "memory_set_size"]]
+        correct_trials = self.search_rts()[["target_present", "correct_response", "memory_set_size"]]
         accuracy = correct_trials.groupby(["target_present", "memory_set_size"]).mean().reset_index()
         # Change the column name to accuracy
         accuracy.rename(columns={"correct_response": "accuracy"}, inplace=True)
@@ -955,7 +955,7 @@ class VisualSearchSession(Session):
             print(f"Removed {len(non_answered_trials)} non answered trials from session {self.session_id}")
 
     def has_poor_accuracy(self, threshold=0.5):
-        correct_trials = self.get_search_rts()[["target_present", "correct_response", "memory_set_size"]]
+        correct_trials = self.search_rts()[["target_present", "correct_response", "memory_set_size"]]
         accuracy = correct_trials["correct_response"].sum() / correct_trials["correct_response"].count()
         return accuracy < threshold
     
@@ -1088,7 +1088,7 @@ class VisualSearchTrial(Trial):
         return self._was_answered
 
     def save_rts(self):
-        if hasattr(self, "rts"):
+        if hasattr(self, "_rts"):
             return
 
         # Filter out empty phase rows
@@ -1105,21 +1105,21 @@ class VisualSearchTrial(Trial):
                 pl.lit(self.trial_number).alias("trial_number")
             ])
         )
-        self.rts = rts
+        self._rts = rts
         # add trial number to a new column
-        self.rts = self.rts.with_columns([
+        self._rts = self._rts.with_columns([
             pl.lit(self.trial_number).alias("trial_number")])
-        self.rts = self.rts.with_columns([
+        self._rts = self._rts.with_columns([
             pl.lit(len(self._memory_set)).alias("memory_set_size")])
-        self.rts = self.rts.with_columns([
+        self._rts = self._rts.with_columns([
             pl.lit(self._target_present).alias("target_present")])
-        self.rts = self.rts.with_columns([
+        self._rts = self._rts.with_columns([
             pl.lit(self._correct_response).alias("correct_response")])
-        self.rts = self.rts.with_columns([
+        self._rts = self._rts.with_columns([
             pl.lit(self._stimulus).alias("stimulus")])
-        self.rts = self.rts.with_columns([
+        self._rts = self._rts.with_columns([
             pl.lit(self._target).alias("target")])
-        self.rts = self.rts.with_columns([
+        self._rts = self._rts.with_columns([
             pl.lit(self._was_answered).alias("was_answered")])
 
 
@@ -1157,8 +1157,8 @@ class VisualSearchTrial(Trial):
         return saccades
 
     def compute_multimatch(self,other_trial: "VisualSearchTrial",screen_height,screen_width):
-        trial_scanpath = self.search_fixations()
-        trial_to_compare_scanpath = other_trial.search_fixations()
+        trial_scanpath = self.search_fixations().to_pandas()
+        trial_to_compare_scanpath = other_trial.search_fixations().to_pandas()
         # Turn trial scanpath into list of tuples
         trial_scanpath = [tuple(row) for row in trial_scanpath[["xAvg", "yAvg", "duration"]].values]
         trial_to_compare_scanpath = [tuple(row) for row in trial_to_compare_scanpath[["xAvg", "yAvg", "duration"]].values]

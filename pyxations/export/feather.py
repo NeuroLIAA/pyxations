@@ -13,7 +13,7 @@ class FeatherExport(object):
 
 
     def read(self, path, data_name):
-        return pl.read_ipc((path / f'{data_name}.feather')).drop("__index_level_0__",strict=False)
+        return pl.read_ipc((path / f'{data_name}.feather')).drop(["__index_level_0__","line_number"],strict=False)
 
     def extension(self):
         return '.feather'
