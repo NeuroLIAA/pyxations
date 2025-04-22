@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib import colormaps
+import weakref
 
 STIMULI_FOLDER = "stimuli"
 ITEMS_FOLDER = "items"
@@ -180,6 +181,17 @@ class Experiment:
             for future in as_completed(futures):
                 future.result()
 
+    def drop_poor_or_non_calibrated_trials(self, threshold=1.0, print_flag=True):
+        '''
+        Drop trials that are not calibrated or have a poor calibration.
+        A trial is considered not calibrated if there is no validation data for its calibration index.
+        A trial is considered poorly calibrated if the average error is greater than the threshold.
+        '''
+        amount_trials_total = self.rts().shape[0]
+        for subject in list(self.subjects.values()):
+            subject.drop_poor_or_non_calibrated_trials(threshold,False)
+        if print_flag:
+            print(f"Removed {amount_trials_total - self.rts().shape[0]} trials with poor calibration.")
 
     def rts(self):
         rts = [subject.rts() for subject in self.subjects.values()]
@@ -206,7 +218,8 @@ class Experiment:
         return pl.concat([subject.samples() for subject in self.subjects.values()])
     
     def remove_subject(self, subject_id):
-        del self.subjects[subject_id]
+        if subject_id in self.subjects:
+            del self.subjects[subject_id]
 
     def calib_data(self):
         calib_data = [subject.calib_data() for subject in self.subjects.values()]
@@ -256,7 +269,7 @@ class Experiment:
             .join(trial_numbers, on=["subject_id", "session_id", "Calib_index"],how="right")
             .drop("Calib_index")
         )
-        # Replace nans in avg_error with 3
+        # Replace nans in avg_error with -1
         calib_data = calib_data.with_columns(
             pl.when(pl.col("avg_error").is_null()).then(-1).otherwise(pl.col("avg_error")).alias("avg_error")
         )
@@ -306,12 +319,12 @@ class Subject:
                  excluded_sessions: list = [], excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
         self.subject_id = subject_id
         self.old_subject_id = old_subject_id
-        self.experiment = experiment
+        self.experiment = weakref.ref(experiment)
         self._sessions = None  # Lazy load sessions
         self.excluded_sessions = excluded_sessions
         self.excluded_trials = excluded_trials
-        self.subject_dataset_path = self.experiment.dataset_path / f"sub-{self.subject_id}"
-        self.subject_derivatives_path = self.experiment.derivatives_path / f"sub-{self.subject_id}"
+        self.subject_dataset_path = self.experiment().dataset_path / f"sub-{self.subject_id}"
+        self.subject_derivatives_path = self.experiment().derivatives_path / f"sub-{self.subject_id}"
         self.export_format = export_format
 
     @property
@@ -335,17 +348,21 @@ class Subject:
         return len(self.sessions)
     
     def __repr__(self):
-        return f"Subject = '{self.subject_id}', " + self.experiment.__repr__()
+        return f"Subject = '{self.subject_id}', " + self.experiment().__repr__()
     
     def __next__(self):
         return next(self.sessions)
     
-    def unlink_experiment(self):
-        keys = list(self.sessions.keys())
-        for session in keys:
-            self.sessions[session].unlink_subject()
-        self.experiment.remove_subject(self.subject_id)
-        self.experiment = None
+
+    def remove_session(self, session_id):
+        if self._sessions and session_id in self._sessions:
+            del self._sessions[session_id]
+            if len(self._sessions) == 0:
+                exp = self.experiment()
+                if exp:
+                    exp.remove_subject(self.subject_id)
+                self._sessions = None
+                self.experiment = lambda: None
     
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
@@ -371,10 +388,22 @@ class Subject:
 
         # If the proportion of bad sessions exceeds the threshold, remove all sessions
         if bad_sessions_count / total_sessions > threshold:
-            self.unlink_experiment()
+            self.experiment().remove_subject(self.subject_id)
         
         if print_flag:
             print(f"Removed {amount_trials_total - self.rts().shape[0]} trials with NaN values.")
+
+    def drop_poor_or_non_calibrated_trials(self, threshold=1.0, print_flag=True):
+        '''
+        Drop trials that are not calibrated or have a poor calibration.
+        A trial is considered not calibrated if there is no validation data for its calibration index.
+        A trial is considered poorly calibrated if the average error is greater than the threshold.
+        '''
+        amount_trials_total = self.rts().shape[0]
+        for session in list(self.sessions.values()):
+            session.drop_poor_or_non_calibrated_trials(threshold,False)
+        if print_flag:
+            print(f"Removed {amount_trials_total - self.rts().shape[0]} trials with poor calibration.")
 
     def drop_trials_longer_than(self, seconds,phase, print_flag=True):
         amount_trials_total = self.rts().shape[0]
@@ -416,9 +445,6 @@ class Subject:
             (pl.lit(self.subject_id)).alias("subject_id"),])
         return df
 
-    def remove_session(self, session_id):
-        del self._sessions[session_id]
-
     def calib_data(self):
         calib_data = [session.calib_data() for session in self.sessions.values()]
         calib_indexes = pl.concat([calib_data[1] for calib_data in calib_data]).with_columns([
@@ -431,10 +457,10 @@ class Session():
     
     def __init__(self, session_id: str, subject: Subject, excluded_trials: list = [],export_format = FEATHER_EXPORT):
         self.session_id = session_id
-        self.subject = subject
+        self.subject = weakref.ref(subject)
         self.excluded_trials = excluded_trials
-        self.session_dataset_path = self.subject.subject_dataset_path / f"ses-{self.session_id}"
-        self.session_derivatives_path = self.subject.subject_derivatives_path / f"ses-{self.session_id}"
+        self.session_dataset_path = self.subject().subject_dataset_path / f"ses-{self.session_id}"
+        self.session_derivatives_path = self.subject().subject_derivatives_path / f"ses-{self.session_id}"
         self._trials = None  # Lazy load trials
         self.export_format = export_format
 
@@ -449,43 +475,79 @@ class Session():
         return self._trials
 
     def __repr__(self):
-        return f"Session = '{self.session_id}', " + self.subject.__repr__()
+        return f"Session = '{self.session_id}', " + self.subject().__repr__()
     
-    def unlink_subject(self):
-        keys = list(self.trials.keys())
-        for trial in keys:
-            self.trials[trial].unlink_session()
-        self.subject.remove_session(self.session_id)
-        self.subject = None
-
     def drop_trials_with_nan_threshold(self, phase, threshold=0.1, print_flag=True):
-        bad_trials = []
         total_trials = len(self.trials)
         # Filter bad trials
 
         bad_trials = [trial for trial in self.trials.keys() if self.trials[trial].is_trial_bad(phase, threshold)]
         if len(bad_trials)/total_trials > threshold:
-            bad_trials = self._trials
-            self.unlink_subject()
-        else:
-            for trial in bad_trials:
-                self.trials[trial].unlink_session()
+            self.subject().remove_session(self.session_id)
+
         
         if print_flag:
             print(f"Removed {len(bad_trials)} trials with NaN values.")
+    
+    def drop_poor_or_non_calibrated_trials(self, threshold=1.0, print_flag=True):
+        '''
+        Drop trials that are not calibrated or have a poor calibration.
+        A trial is considered not calibrated if there is no validation data for its calibration index.
+        A trial is considered poorly calibrated if the average error is greater than the threshold.
+        '''
+        trial_numbers = [trial for trial in self.trials.keys()]
+        # Step 1: Get only rows with max validation_id per group
+        calib_data, trial_numbers = self.calib_data()
+        calib_data = calib_data.drop("session_id")
+        max_vals = (
+            calib_data
+            .group_by(["Calib_index", "eye"])
+            .agg(pl.col("validation_id").max().alias("max_validation_id"))
+        )
+
+        calib_data = (
+            calib_data
+            .join(max_vals, on=["Calib_index", "eye"])
+            .filter(pl.col("validation_id") == pl.col("max_validation_id"))
+            .drop(["max_validation_id", "validation_id"])
+        )
+
+        # Step 2: Choose best eye (lowest avg_error) per calibration
+        best_eyes = (
+            calib_data
+            .group_by(["Calib_index"])
+            .agg(pl.col("avg_error").min().alias("best_eye_error"))
+        )
+
+        calib_data = (
+            calib_data
+            .join(best_eyes, on=["Calib_index"])
+            .filter(pl.col("avg_error") == pl.col("best_eye_error"))
+            .drop(["eye", "best_eye_error"])
+        )
+
+        calib_data = (
+            calib_data
+            .join(trial_numbers, on=["Calib_index"],how="right")
+            .drop("Calib_index")
+        )
+        # Bad trials are those with avg_error > threshold, or those that have NaN values in avg_error
+        bad_trials = calib_data.filter((pl.col("avg_error") > threshold) | (pl.col("avg_error").is_null())).select("trial_number").to_series().unique().to_list()
+
+        for trial in bad_trials:
+            self.remove_trial(trial)
+        
+        if print_flag:
+            print(f"Removed {len(bad_trials)} trials with poor calibration.")
 
     def drop_trials_longer_than(self, seconds,phase, print_flag=True):
-        bad_trials = []
 
         # Filter bad trials
 
         bad_trials = [trial for trial in self.trials.keys() if self.trials[trial].is_trial_longer_than(seconds,phase)]
         for trial in bad_trials:
-            self.trials[trial].unlink_session()
-        
-        if len(self.trials) == 0:
-            self.unlink_subject()
-               
+            self.remove_trial(trial)
+                      
         if print_flag:
             print(f"Removed {len(bad_trials)} trials longer than {seconds} seconds.")
 
@@ -515,7 +577,7 @@ class Session():
 
     def calib_data(self):
         if self._calib_data is None:
-            raise ValueError(f"Calibration data for session {self.session_id} and subject {self.subject.subject_id} not loaded. Please load data first.")
+            raise ValueError(f"Calibration data for session {self.session_id} and subject {self.subject().subject_id} not loaded. Please load data first.")
         
         calib_indexes = [(trial.trial_number,trial.calib_index) for trial in self.trials.values() if trial.calib_index is not None]
         calib_indexes = pl.DataFrame(calib_indexes, schema=["trial_number","Calib_index"],orient="row").with_columns([
@@ -579,8 +641,14 @@ class Session():
         return df
 
     def remove_trial(self, trial_number):
-        del self._trials[trial_number]
-
+        if self._trials and trial_number in self._trials:
+            del self._trials[trial_number]
+            if len(self._trials) == 0:
+                subj = self.subject()
+                if subj:
+                    subj.remove_session(self.session_id)
+                self._trials = None
+                self.subject = lambda: None
 class Trial:
 
     def __init__(self, trial_number: int, session: Session, samples: pl.DataFrame, fix: pl.DataFrame, 
@@ -644,10 +712,6 @@ class Trial:
 
     def __repr__(self):
         return f"Trial = '{self.trial_number}', " + self.session.__repr__()
-
-    def unlink_session(self):
-        self.session.remove_trial(self.trial_number)
-        self.session = None
 
     def plot_scanpath(self,screen_height,screen_width, **kwargs):
         vis = Visualization(self.events_path, self.detection_algorithm)
