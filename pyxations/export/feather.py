@@ -9,7 +9,7 @@ import pyarrow
 
 class FeatherExport(object):
     def save(self, df, path, data_name, *args, **kwargs):
-        df.write_ipc((path / f'{data_name}.feather'), )
+        df.write_ipc((path / f'{data_name}.feather'), ) if isinstance(df, pl.DataFrame) else df.to_feather((path / f'{data_name}.feather'))
 
 
     def read(self, path, data_name):
