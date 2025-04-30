@@ -250,10 +250,10 @@ class EyelinkParse(BidsParse):
                 for arg in kwargs
                 if arg in inspect.signature(pre_processing.bad_samples).parameters
             },
-            'split_all_into_trials' : {
+            'split_all_into_trials' if use_split_all else 'split_all_into_trials_by_msgs': {
                 arg: kwargs[arg]
                 for arg in kwargs
-                if arg in sig_trials
+                if arg in (sig_trials if use_split_all else inspect.signature(pre_processing.split_all_into_trials_by_msgs).parameters)
             },
             'saccades_direction': {}
         })

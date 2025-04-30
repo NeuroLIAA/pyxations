@@ -170,12 +170,12 @@ def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detecti
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
         futures = []
         for subject in bids_folders:
-            subject_name = subject.name
-            subject_path = bids_dataset_folder / subject_name
+            subject_name = subject.name[4:]  # Remove "sub-" prefix
+            subject_path = bids_dataset_folder / subject.name
 
             for session in subject_path.iterdir():
                 if session.name.startswith("ses-") and session.is_dir():
-                    session_name = session.name
+                    session_name = session.name[4:]  # Remove "ses-" prefix
 
                     # Build per-session kwargs
                     session_kwargs = dict(kwargs)  # base kwargs
@@ -188,7 +188,7 @@ def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detecti
                         executor.submit(
                             process_session,
                             session / "ET", dataset_format, detection_algorithm,
-                            derivatives_folder / subject_name / session_name,
+                            derivatives_folder / subject.name / session.name,
                             force_best_eye, keep_ascii, overwrite, exp_format,
                             **session_kwargs
                         )
