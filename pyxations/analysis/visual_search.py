@@ -1056,6 +1056,13 @@ class VisualSearchTrial(Trial):
         self._memorization_phase_name = memorization_phase_name
         self._was_answered = trial_data.select("was_answered").item()
 
+    @property
+    def target(self):
+        return self._target
+
+    @property
+    def target_location(self):
+        return self._target_location
 
     @property
     def target_present(self):
@@ -1070,8 +1077,20 @@ class VisualSearchTrial(Trial):
         return len(self._memory_set)
     
     @property
+    def memory_set_locations(self):
+        return self._memory_set_locations
+    
+    @property
+    def memory_set(self):
+        return self._memory_set
+    
+    @property
     def stimulus(self):
         return self._stimulus
+    
+    @property
+    def stimulus_coords(self):
+        return self._stimulus_coords
     
     @property
     def was_answered(self):

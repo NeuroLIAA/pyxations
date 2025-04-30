@@ -240,9 +240,23 @@ class EyelinkParse(BidsParse):
     
         
         pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg, self.session_folder_path)
-        pre_processing.process({'bad_samples': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.bad_samples).parameters.keys()},
-                                'split_all_into_trials_by_msgs': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.split_all_into_trials_by_msgs).parameters.keys()},
-                                'saccades_direction': {},})
+
+        sig_trials = inspect.signature(pre_processing.split_all_into_trials).parameters.keys()
+        use_split_all = any(arg in kwargs for arg in sig_trials)
+
+        pre_processing.process({
+            'bad_samples': {
+                arg: kwargs[arg]
+                for arg in kwargs
+                if arg in inspect.signature(pre_processing.bad_samples).parameters
+            },
+            'split_all_into_trials' if use_split_all else 'split_all_into_trials_by_msgs': {
+                arg: kwargs[arg]
+                for arg in kwargs
+                if arg in (sig_trials if use_split_all else inspect.signature(pre_processing.split_all_into_trials_by_msgs).parameters)
+            },
+            'saccades_direction': {}
+        })
     
         if not keep_ascii:
             ascii_file_path.unlink(missing_ok=True)

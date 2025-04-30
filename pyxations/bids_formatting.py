@@ -154,20 +154,45 @@ def process_session(eye_tracking_data_path, dataset_format, detection_algorithm,
 
 def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detection_algorithm='remodnav', num_processes=4,
                                     force_best_eye=True, keep_ascii=True, overwrite=False, exp_format=FEATHER_EXPORT, **kwargs):
-    derivatives_folder = str(bids_dataset_folder) + "_derivatives"
-    derivatives_folder = Path(derivatives_folder)
+    derivatives_folder = Path(str(bids_dataset_folder) + "_derivatives")
     bids_dataset_folder = Path(bids_dataset_folder)
     derivatives_folder.mkdir(exist_ok=True)
 
-    bids_folders = [folder for folder in bids_dataset_folder.iterdir() if folder.is_dir() and folder.name.startswith("sub-")]
+    # Extract and remove start_times and end_times from kwargs if present
+    start_times = kwargs.pop("start_times", None)
+    end_times = kwargs.pop("end_times", None)
+
+    bids_folders = [
+        folder for folder in bids_dataset_folder.iterdir()
+        if folder.is_dir() and folder.name.startswith("sub-")
+    ]
 
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
-        
-        futures = [
-            executor.submit(process_session, session / "ET", dataset_format, detection_algorithm, derivatives_folder / subject.name / session.name, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
-            for subject in bids_folders
-            for session in (bids_dataset_folder / subject.name).iterdir() if session.name.startswith("ses-") and (bids_dataset_folder / subject.name / session.name).is_dir()
-        ]
+        futures = []
+        for subject in bids_folders:
+            subject_name = subject.name
+            subject_path = bids_dataset_folder / subject_name
+
+            for session in subject_path.iterdir():
+                if session.name.startswith("ses-") and session.is_dir():
+                    session_name = session.name
+
+                    # Build per-session kwargs
+                    session_kwargs = dict(kwargs)  # base kwargs
+                    if start_times and subject_name in start_times and session_name in start_times[subject_name]:
+                        session_kwargs["start_times"] = start_times[subject_name][session_name]
+                    if end_times and subject_name in end_times and session_name in end_times[subject_name]:
+                        session_kwargs["end_times"] = end_times[subject_name][session_name]
+
+                    futures.append(
+                        executor.submit(
+                            process_session,
+                            session / "ET", dataset_format, detection_algorithm,
+                            derivatives_folder / subject_name / session_name,
+                            force_best_eye, keep_ascii, overwrite, exp_format,
+                            **session_kwargs
+                        )
+                    )
 
         for future in futures:
             future.result()
