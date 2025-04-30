@@ -167,10 +167,18 @@ def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detecti
         if folder.is_dir() and folder.name.startswith("sub-")
     ]
 
+    participants_file = bids_dataset_folder / "participants.tsv"
+    participants_tsv = pd.read_csv(participants_file, sep="\t")
+
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
         futures = []
         for subject in bids_folders:
-            subject_name = subject.name[4:]  # Remove "sub-" prefix
+            # To get subject_name go to the bids_dataset_folder and open the "participants.tsv" file
+            # There are two columns: subject_id and old_subject_id
+            # subject_id equals subject.name[4:] and old_subject_id is the one we want to use in this case
+
+
+            subject_name = participants_tsv.loc[participants_tsv['subject_id'] == subject.name[4:], 'old_subject_id'].values[0]
             subject_path = bids_dataset_folder / subject.name
 
             for session in subject_path.iterdir():
