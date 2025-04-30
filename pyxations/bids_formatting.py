@@ -168,7 +168,7 @@ def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detecti
     ]
 
     participants_file = bids_dataset_folder / "participants.tsv"
-    participants_tsv = pd.read_csv(participants_file, sep="\t")
+    participants_tsv = pd.read_csv(participants_file, sep="\t",dtype={'subject_id': str, 'old_subject_id': str})
 
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
         futures = []
