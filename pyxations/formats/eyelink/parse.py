@@ -23,7 +23,7 @@ def process_session(eye_tracking_data_path, detection_algorithm, session_folder_
     (session_folder_path / 'eyelink_events').mkdir(parents=True, exist_ok=True)
 
        
-    msg_keywords = kwargs.pop('msg_keywords')
+    msg_keywords = kwargs.pop('msg_keywords', None)
     
     EyelinkParse(session_folder_path, exp_format).parse(edf_file_path, detection_algorithm, msg_keywords, force_best_eye,
                          keep_ascii, overwrite, **kwargs)
