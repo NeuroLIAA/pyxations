@@ -109,14 +109,14 @@ class EyelinkParse(BidsParse):
                 elif '!MODE RECORD' in line and calibration_flag:
                     calibration_flag = False
                     start_flag = True
-                elif calibration_flag and not(line.split()[0] == 'MSG' and any(keyword in line for keyword in msg_keywords)):
+                elif calibration_flag and not(line.split()[0] == 'MSG' and msg_keywords and any(keyword in line for keyword in msg_keywords)):
                     # The failsafe is in place because some messages might kick off after the calibration is done.
                     # This will only take into account the messages, not the samples.
                     line_type = 'Calibration'
                 elif not start_flag: # Data before the first successful calibration is discarded. 
                     # After the first successul calibration, EVERY sample is taken into account.
                     line_type = 'Non_calibrated_samples'
-                elif line.split()[0] == 'MSG' and any(keyword in line for keyword in msg_keywords):
+                elif line.split()[0] == 'MSG' and msg_keywords and any(keyword in line for keyword in msg_keywords):
                     line_type = 'MSG'
                 elif line.split()[0] == 'ESACC':
                     line_type = 'ESACC'
@@ -175,15 +175,15 @@ class EyelinkParse(BidsParse):
             kwargs['screen_width'], kwargs['screen_height'] = int(screen_size[-2]), int(screen_size[-1])
     
         # Optimized processing of dfMsg to extract timestamp and message
-        if dfMsg.empty:
-            raise ValueError(f"No messages {msg_keywords} found in the ASC file for session {self.session_folder_path}.")
-        # Extracting timestamp and message in a single step
-        dfMsg[['timestamp', 'message']] = dfMsg['line'].str.replace('MSG ', '').str.split(n=1,expand=True).values
-        dfMsg.drop(columns=['line'], inplace=True)
-    
-        # Convert timestamp to numeric in one operation
-        dfMsg['timestamp'] = pd.to_numeric(dfMsg['timestamp'], errors='raise')
-        dfMsg = dfMsg[['timestamp', 'message', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
+        if not dfMsg.empty:
+
+            # Extracting timestamp and message in a single step
+            dfMsg[['timestamp', 'message']] = dfMsg['line'].str.replace('MSG ', '').str.split(n=1,expand=True).values
+            dfMsg.drop(columns=['line'], inplace=True)
+        
+            # Convert timestamp to numeric in one operation
+            dfMsg['timestamp'] = pd.to_numeric(dfMsg['timestamp'], errors='raise')
+            dfMsg = dfMsg[['timestamp', 'message', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
     
         # Optimized blink data extraction and conversion
         dfBlink['line'] = dfBlink['line'].str.replace('EBLINK ', '')
@@ -263,7 +263,8 @@ class EyelinkParse(BidsParse):
     
         # Save DataFrames to disk in one go to minimize memory usage during processing
         self.save_dataframe(dfHeader, self.session_folder_path, 'header', key='header')
-        self.save_dataframe(dfMsg, self.session_folder_path, 'msg', key='msg')
+        if not dfMsg.empty:
+            self.save_dataframe(dfMsg, self.session_folder_path, 'msg', key='msg')
         self.save_dataframe(dfCalib, self.session_folder_path, 'calib', key='calib')
         self.save_dataframe(dfSamples, self.session_folder_path, 'samples', key='samples')
         self.save_dataframe(dfBlink, (self.session_folder_path / f'{detection_algorithm}_events'), 'blink', key='blink')
