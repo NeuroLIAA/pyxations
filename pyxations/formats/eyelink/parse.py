@@ -227,15 +227,19 @@ class EyelinkParse(BidsParse):
             calib_indexes = dfCalib['Calib_index'].unique()
             best_eyes = dfCalib.groupby('Calib_index').apply(find_besteye).values
             if best_eyes[0] == 'M':
-                # TODO: everything in samples, fix, blink, sacc for the first best_eyes that are equal to 'M' should be marked as uncalibrated, using the calib_indexes to do so.
-                raise ValueError("No calibration validation found in the first block.")
-            # Replace the 'M' values with the previous value that is not 'M'
-            for i in range(1, len(best_eyes)):
-                if best_eyes[i] == 'M':
-                    best_eyes[i] = best_eyes[i - 1]
-            dfslist = [keep_eye(best_eyes[i], dfSamples[dfSamples['Calib_index'] == ci], dfFix[dfFix['Calib_index'] == ci], dfBlink[dfBlink['Calib_index'] == ci], dfSacc[dfSacc['Calib_index'] == ci]) for i, ci in enumerate(calib_indexes)]
-            dfSamples, dfFix, dfBlink, dfSacc = [pd.concat([dfslist[i][j] for i in range(len(best_eyes))]) for j in range(4)]
-            del dfslist
+                # Print a warning if the first calibration is missing, and tell the user it did not compute the best eye
+                print(f'Warning: The first calibration validation for subject {self.session_folder_path.parent.name} in session {self.session_folder_path.name} is missing. The best eye was not computed.')
+
+            else:   
+                # Replace the 'M' values with the previous value that is not 'M'
+                for i in range(1, len(best_eyes)):
+                    if best_eyes[i] == 'M':
+                        # Print a warning if the calibration is missing, and tell the user it will use the previous value
+                        print(f'Warning: A calibration validation for subject {self.session_folder_path.parent.name} in session {self.session_folder_path.name} is missing. Using the previous value: {best_eyes[i - 1]}')
+                        best_eyes[i] = best_eyes[i - 1]
+                dfslist = [keep_eye(best_eyes[i], dfSamples[dfSamples['Calib_index'] == ci], dfFix[dfFix['Calib_index'] == ci], dfBlink[dfBlink['Calib_index'] == ci], dfSacc[dfSacc['Calib_index'] == ci]) for i, ci in enumerate(calib_indexes)]
+                dfSamples, dfFix, dfBlink, dfSacc = [pd.concat([dfslist[i][j] for i in range(len(best_eyes))]) for j in range(4)]
+                del dfslist
     
     
         

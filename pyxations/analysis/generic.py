@@ -858,83 +858,85 @@ class Trial:
 
         # ────────────────── 1 · loop over phases ─────────────────
         for phase_val in fix["phase"].unique():               # ① per phase
-            fix_p = fix.filter(pl.col("phase") == phase_val)
-            sac_p = sac.filter(pl.col("phase") == phase_val)
+            # Loop over eyes if needed
+            for eye in fix["eye"].unique():
+                fix_p = fix.filter((pl.col("phase") == phase_val) & (pl.col("eye") == eye))
+                sac_p = sac.filter((pl.col("phase") == phase_val) & (pl.col("eye") == eye))
 
-            i, n_fix = 0, len(fix_p)
-            while i < n_fix:
+                i, n_fix = 0, len(fix_p)
+                while i < n_fix:
 
-                # ── grow one pool ───────────────────────────────
-                pool = [fix_p.row(i, named=True)]
-                j = i + 1
-                while j < n_fix:
-                    dx = fix_p["xAvg"][j] - fix_p["xAvg"][j - 1]
-                    dy = fix_p["yAvg"][j] - fix_p["yAvg"][j - 1]
-                    if hypot(dx, dy) <= threshold_px:
-                        pool.append(fix_p.row(j, named=True))
-                        j += 1
-                    else:
-                        break
+                    # ── grow one pool ───────────────────────────────
+                    pool = [fix_p.row(i, named=True)]
+                    j = i + 1
+                    while j < n_fix:
+                        dx = fix_p["xAvg"][j] - fix_p["xAvg"][j - 1]
+                        dy = fix_p["yAvg"][j] - fix_p["yAvg"][j - 1]
+                        if hypot(dx, dy) <= threshold_px:
+                            pool.append(fix_p.row(j, named=True))
+                            j += 1
+                        else:
+                            break
 
-                # ── pool of size 1: keep as‑is ──────────────────
-                if len(pool) == 1:
-                    new_fix_rows.append(pool[0].copy())        # unchanged
-                    i = j
-                    continue
+                    # ── pool of size 1: keep as‑is ──────────────────
+                    if len(pool) == 1:
+                        new_fix_rows.append(pool[0].copy())        # unchanged
+                        i = j
+                        continue
 
-                # ── merge the pool (>1 fix) ─────────────────────
-                first_fix, last_fix = pool[0], pool[-1]
+                    # ── merge the pool (>1 fix) ─────────────────────
+                    first_fix, last_fix = pool[0], pool[-1]
 
-                merged_fix = first_fix.copy()
-                merged_fix.update({
-                    "tEnd":     last_fix["tEnd"],
-                    "duration": sum(f["duration"] for f in pool),
-                    "xAvg":     np.mean([f["xAvg"] for f in pool]),
-                    "yAvg":     np.mean([f["yAvg"] for f in pool]),
-                    "pupilAvg": np.mean([f["pupilAvg"] for f in pool]),
-                })
-                new_fix_rows.append(merged_fix)
+                    merged_fix = first_fix.copy()
+                    merged_fix.update({
+                        "tEnd":     last_fix["tEnd"],
+                        "duration": sum(f["duration"] for f in pool),
+                        "xAvg":     np.mean([f["xAvg"] for f in pool]),
+                        "yAvg":     np.mean([f["yAvg"] for f in pool]),
+                        "pupilAvg": np.mean([f["pupilAvg"] for f in pool]),
+                    })
+                    new_fix_rows.append(merged_fix)
 
-                # ── identify & drop fully‑internal saccades ─────
-                inside = sac_p.filter(
-                    (pl.col("tStart") >= first_fix["tEnd"]) &
-                    (pl.col("tEnd")   <= last_fix["tStart"])
-                )
-                drop_sac_idx.update(inside["sac_idx"].to_list())
+                    # ── identify & drop fully‑internal saccades ─────
+                    inside = sac_p.filter(
+                        (pl.col("tStart") >= first_fix["tEnd"]) &
+                        (pl.col("tEnd")   <= last_fix["tStart"])
+                    )
+                    drop_sac_idx.update(inside["sac_idx"].to_list())
 
-                # ── adjust bordering saccades ───────────────────
-                merged_x = merged_fix["xAvg"]
-                merged_y = merged_fix["yAvg"]
+                    # ── adjust bordering saccades ───────────────────
+                    merged_x = merged_fix["xAvg"]
+                    merged_y = merged_fix["yAvg"]
 
-                # previous saccade (ends at first_fix.tStart)
-                prev_df = sac_p.filter(pl.col("tEnd") <= first_fix["tStart"]).tail(1)
-                if prev_df.height:
-                    prev = prev_df.row(0, named=True)
-                    idx  = prev["sac_idx"]
-                    upd  = {
-                        "xEnd": merged_x,
-                        "yEnd": merged_y,
-                        "dx":   merged_x - prev["xStart"],
-                        "dy":   merged_y - prev["yStart"],
-                    }
-                    upd["amplitude"] = hypot(upd["dx"], upd["dy"])
-                    mod_sac.setdefault(idx, {}).update(upd)
+                    # previous saccade (ends at first_fix.tStart)
+                    prev_df = sac_p.filter(pl.col("tEnd") <= first_fix["tStart"]).tail(1)
+                    if prev_df.height:
+                        prev = prev_df.row(0, named=True)
+                        idx  = prev["sac_idx"]
+                        upd  = {
+                            "xEnd": merged_x,
+                            "yEnd": merged_y,
+                            "dx":   merged_x - prev["xStart"],
+                            "dy":   merged_y - prev["yStart"],
+                        }
+                        upd["amplitude"] = hypot(upd["dx"], upd["dy"])
+                        mod_sac.setdefault(idx, {}).update(upd)
 
-                # next saccade (starts at last_fix.tEnd)
-                next_df = sac_p.filter(pl.col("tStart") >= last_fix["tEnd"]).head(1)
-                if next_df.height:
-                    nxt = next_df.row(0, named=True)
-                    idx = nxt["sac_idx"]
-                    upd = {
-                        "xStart": merged_x,
-                        "yStart": merged_y,
-                        "dx":     nxt["xEnd"] - merged_x,
-                        "dy":     nxt["yEnd"] - merged_y,
-                    }
-                    upd["amplitude"] = hypot(upd["dx"], upd["dy"])
-                    mod_sac.setdefault(idx, {}).update(upd)
+                    # next saccade (starts at last_fix.tEnd)
+                    next_df = sac_p.filter(pl.col("tStart") >= last_fix["tEnd"]).head(1)
+                    if next_df.height:
+                        nxt = next_df.row(0, named=True)
+                        idx = nxt["sac_idx"]
+                        upd = {
+                            "xStart": merged_x,
+                            "yStart": merged_y,
+                            "dx":     nxt["xEnd"] - merged_x,
+                            "dy":     nxt["yEnd"] - merged_y,
+                        }
+                        upd["amplitude"] = hypot(upd["dx"], upd["dy"])
+                        mod_sac.setdefault(idx, {}).update(upd)
 
-                i = j                                         # advance
+                    i = j                                         # advance
 
         # ────────────────── 2 · rebuild tables ──────────────────
         # 2‑a  fixations
