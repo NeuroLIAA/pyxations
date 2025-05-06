@@ -1213,10 +1213,11 @@ class VisualSearchTrial(Trial):
 
         
         phase_data = {self._search_phase_name:{}, self._memorization_phase_name:{}}
-        phase_data[self._search_phase_name]["img_paths"] = [self.session.subject.experiment.dataset_path.parent / STIMULI_FOLDER / self._stimulus]
+        dataset_parent_folder = self.events_path.parent.parent.parent.parent
+        phase_data[self._search_phase_name]["img_paths"] = [dataset_parent_folder / STIMULI_FOLDER / self._stimulus]
         phase_data[self._search_phase_name]["img_plot_coords"] = [self._stimulus_coords]
         if self._memorization_phase_name is not None:
-            phase_data[self._memorization_phase_name]["img_paths"] = [self.session.subject.experiment.dataset_path.parent / ITEMS_FOLDER / img for img in self._memory_set]
+            phase_data[self._memorization_phase_name]["img_paths"] = [dataset_parent_folder / ITEMS_FOLDER / img for img in self._memory_set]
             phase_data[self._memorization_phase_name]["img_plot_coords"] = self._memory_set_locations
 
         # If the target is present add the "bbox" to the search_phase phase as a key-value pair

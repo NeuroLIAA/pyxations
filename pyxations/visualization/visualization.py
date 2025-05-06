@@ -60,8 +60,8 @@ class Visualization():
         """
         plot_saccades = not saccades is None
         plot_samples = not samples is None
-        trial_index = fixations.select(pl.col('trial_number')).to_numpy()[0]
-        
+        trial_index = fixations.select(pl.col('trial_number')).to_numpy().ravel()[0]
+
         if folder_path:
             scanpath_file_name = 'scanpath' + f'_{trial_index}'+ f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) 
             
@@ -90,7 +90,7 @@ class Visualization():
         if plot_samples:
             filtered_samples = filtered_samples.filter(pl.col('phase') != '')
         
-        for phase in filtered_fixations.select(pl.col('phase')).unique().to_numpy():
+        for phase in filtered_fixations.select(pl.col('phase')).unique().to_numpy().ravel():
             phase_fixations = filtered_fixations.filter(pl.col('phase') == phase)
             if plot_saccades:
                 phase_saccades = filtered_saccades.filter(pl.col('phase') == phase)
@@ -111,7 +111,7 @@ class Visualization():
 
             #----- Plot fixations as dots if any in time interval -----#
             # Colormap: Get fixation durations for scatter circle size
-            sizes = phase_fixations.select(pl.col('duration')).to_numpy()
+            sizes = phase_fixations.select(pl.col('duration')).to_numpy().ravel()
             
             # Define rainwbow cmap for fixations
             cmap = plt.cm.rainbow
@@ -123,7 +123,7 @@ class Visualization():
 
             
             # Plot
-            ax_main.scatter(phase_fixations.select(pl.col('xAvg')).to_numpy(), phase_fixations.select(pl.col('yAvg')).to_numpy(), c=fix_num, s=sizes, cmap=cmap, norm=norm, alpha=0.5, zorder=2)
+            ax_main.scatter(phase_fixations.select(pl.col('xAvg')).to_numpy().ravel(), phase_fixations.select(pl.col('yAvg')).to_numpy().ravel(), c=fix_num, s=sizes, cmap=cmap, norm=norm, alpha=0.5, zorder=2)
 
             # Colorbar
             PCM = ax_main.get_children()[0]  # When the fixations dots for color mappable were ploted (first)
@@ -157,12 +157,12 @@ class Visualization():
 
             #----- Plot scanpath and gaze if samples provided -----#
             if plot_samples:
-                starting_time = phase_samples.select(pl.col('tSample')).to_numpy()[0]
+                starting_time = phase_samples.select(pl.col('tSample')).to_numpy().ravel()[0]
                 tSamples_from_start = (phase_samples.select(pl.col('tSample')).to_numpy() - starting_time) / 1000
                 # Left eye
                 try:
-                    phase_samples_lx = phase_samples.select(pl.col('LX')).to_numpy()
-                    phase_samples_ly = phase_samples.select(pl.col('LY')).to_numpy()
+                    phase_samples_lx = phase_samples.select(pl.col('LX')).to_numpy().ravel()
+                    phase_samples_ly = phase_samples.select(pl.col('LY')).to_numpy().ravel()
                     ax_main.plot(phase_samples_lx, phase_samples_ly, '--', color='C0', zorder=1)
                     ax_gaze.plot(tSamples_from_start, phase_samples_lx, label='Left X')
                     ax_gaze.plot(tSamples_from_start, phase_samples_ly, label='Left Y')
@@ -170,16 +170,16 @@ class Visualization():
                     pass
                 # Right eye
                 try:
-                    phase_samples_rx = phase_samples.select(pl.col('RX')).to_numpy()
-                    phase_samples_ry = phase_samples.select(pl.col('RY')).to_numpy()
+                    phase_samples_rx = phase_samples.select(pl.col('RX')).to_numpy().ravel()
+                    phase_samples_ry = phase_samples.select(pl.col('RY')).to_numpy().ravel()
                     ax_main.plot(phase_samples_rx, phase_samples_ry, '--', color='black', zorder=1)
                     ax_gaze.plot(tSamples_from_start, phase_samples_rx, label='Right X')
                     ax_gaze.plot(tSamples_from_start, phase_samples_ry, label='Right Y')
                 except:
                     pass
                 try:
-                    phase_samples_x = phase_samples.select(pl.col('X')).to_numpy()
-                    phase_samples_y = phase_samples.select(pl.col('Y')).to_numpy()
+                    phase_samples_x = phase_samples.select(pl.col('X')).to_numpy().ravel()
+                    phase_samples_y = phase_samples.select(pl.col('Y')).to_numpy().ravel()
                     ax_main.plot(phase_samples_x, phase_samples_y, '--', color='black', zorder=1)
                     ax_gaze.plot(tSamples_from_start, phase_samples_x, label='X')
                     ax_gaze.plot(tSamples_from_start, phase_samples_y, label='Y')
@@ -187,14 +187,14 @@ class Visualization():
                     pass
                 plot_min, plot_max = ax_gaze.get_ylim()
                 # Plot fixations as color span in gaze axes
-                for fix_idx,(_, fixation) in enumerate(phase_fixations.iter_rows(named=True)):
+                for fix_idx, fixation in enumerate(phase_fixations.iter_rows(named=True)):
                     color = cmap(norm(fix_idx + 1))
                     
                     ax_gaze.axvspan(ymin=0, ymax=1, xmin=(fixation['tStart'] - starting_time), xmax=(fixation['tStart'] - starting_time + fixation['duration']), color=color, alpha=0.4, label='fix')
                 
                 # Plor saccades as vlines in gaze axes
                 if plot_saccades:
-                    for _, saccade in phase_saccades.iter_rows(named=True):
+                    for saccade in phase_saccades.iter_rows(named=True):
                         ax_gaze.vlines(x=(saccade['tStart']- starting_time), ymin=plot_min, ymax=plot_max, colors='red', linestyles='--', label='sac', linewidth=0.8)
 
                 # Legend
@@ -203,7 +203,7 @@ class Visualization():
                 plt.legend(by_label.values(), by_label.keys(),  loc='center left', bbox_to_anchor=(1, 0.5))
                 ax_gaze.set_ylabel('Gaze')
                 ax_gaze.set_xlabel('Time [ms]')
-            plt.tight_layout()  
+            plt.tight_layout()
             if folder_path:
                 file_path = folder_path / (scanpath_file_name + f'_{phase}.png')
                 fig.savefig(file_path)
@@ -218,7 +218,7 @@ class Visualization():
         if ax is None:
             fig, ax = plt.subplots()
 
-        ax.hist(fixations.select(pl.col('duration')).to_numpy(), bins=100, edgecolor='black', linewidth=1.2, density=True)
+        ax.hist(fixations.select(pl.col('duration')).to_numpy().ravel(), bins=100, edgecolor='black', linewidth=1.2, density=True)
         ax.set_title('Fixation duration')
         ax.set_xlabel('Time (ms)')
         ax.set_ylabel('Density')

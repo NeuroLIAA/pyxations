@@ -327,6 +327,19 @@ class Subject:
         self.subject_derivatives_path = self.experiment().derivatives_path / f"sub-{self.subject_id}"
         self.export_format = export_format
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Save the parent *id* instead of the weakref itself
+        exp = state.pop("experiment", None)
+        state["_experiment_id"] = id(exp()) if exp else None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # In a worker the real Experiment instance isn’t available
+        # – keep a placeholder or rebuild if you can look it up.
+        self.experiment = lambda: None      # callable that returns None
+
     @property
     def sessions(self):
         if self._sessions is None:
@@ -467,7 +480,16 @@ class Session():
         if not self.session_derivatives_path.exists():
             raise FileNotFoundError(f"Session path not found: {self.session_derivatives_path}")
         
-    
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        sess_parent = state.pop("subject", None)
+        state["_subject_id"] = id(sess_parent()) if sess_parent else None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.subject = lambda: None
+
     @property
     def trials(self):
         if self._trials is None:
