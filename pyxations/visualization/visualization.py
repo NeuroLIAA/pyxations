@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import matplotlib.colors as mplcolors
 import numpy as np
-import pandas as pd
+import polars as pl
 from concurrent.futures import ProcessPoolExecutor
 from pyxations.bids_formatting import EYE_MOVEMENT_DETECTION_DICT
 from pathlib import Path
@@ -15,8 +15,8 @@ class Visualization():
             raise ValueError(f"Detection algorithm {events_detection_algorithm} not found.")
         self.events_detection_folder = Path(events_detection_algorithm+'_events')
 
-    def scanpath(self,fixations:pd.DataFrame,screen_height:int, screen_width:int,folder_path:str=None,
-                 tmin:int=None, tmax:int=None, saccades:pd.DataFrame=None,samples:pd.DataFrame=None, phase_data:dict=None, display:bool=True):
+    def scanpath(self,fixations:pl.DataFrame,screen_height:int, screen_width:int,folder_path:str=None,
+                 tmin:int=None, tmax:int=None, saccades:pl.DataFrame=None,samples:pl.DataFrame=None, phase_data:dict=None, display:bool=True):
         """
         Plots the scanpath, including fixations, saccades, and optionally an image background and gaze samples.
 
@@ -60,7 +60,7 @@ class Visualization():
         """
         plot_saccades = not saccades is None
         plot_samples = not samples is None
-        trial_index = fixations['trial_number'].iloc[0]
+        trial_index = fixations.select(pl.col('trial_number')).to_numpy()[0]
         
         if folder_path:
             scanpath_file_name = 'scanpath' + f'_{trial_index}'+ f'_{tmin}_{tmax}'*(tmin is not None and tmax is not None) 
@@ -68,11 +68,14 @@ class Visualization():
        
         #----- Filter saccades, fixations and samples to defined time interval -----#
         if tmax is not None and tmin is not None:
-            filtered_fixations = fixations[(fixations['tStart'] >= tmin) & (fixations['tStart'] <= tmax)]
+            filtered_fixations = fixations.filter(pl.col('tStart').is_between(tmin, tmax))
+
+
             if plot_saccades:
-                filtered_saccades = saccades[(saccades['tStart'] >= tmin) & (saccades['tStart'] <= tmax)]
+                filtered_saccades = saccades.filter(pl.col('tStart').is_between(tmin, tmax))
+
             if plot_samples:
-                filtered_samples = samples[(samples['tSample'] >= tmin) & (samples['tSample'] <= tmax)]
+                filtered_samples = samples.filter(pl.col('tSample').is_between(tmin, tmax))
         else:
             filtered_fixations = fixations
             if plot_saccades:
@@ -81,18 +84,18 @@ class Visualization():
                 filtered_samples = samples
         
         # Filter the data where the "phase" is not empty
-        filtered_fixations = filtered_fixations[filtered_fixations['phase'] != '']
+        filtered_fixations = filtered_fixations.filter(pl.col('phase') != '')
         if plot_saccades:
-            filtered_saccades = filtered_saccades[filtered_saccades['phase'] != '']
+            filtered_saccades = filtered_saccades.filter(pl.col('phase') != '')
         if plot_samples:
-            filtered_samples = filtered_samples[filtered_samples['phase'] != '']
+            filtered_samples = filtered_samples.filter(pl.col('phase') != '')
         
-        for phase in filtered_fixations['phase'].unique():
-            phase_fixations = filtered_fixations[filtered_fixations['phase'] == phase]
+        for phase in filtered_fixations.select(pl.col('phase')).unique().to_numpy():
+            phase_fixations = filtered_fixations.filter(pl.col('phase') == phase)
             if plot_saccades:
-                phase_saccades = filtered_saccades[filtered_saccades['phase'] == phase]
+                phase_saccades = filtered_saccades.filter(pl.col('phase') == phase)
             if plot_samples:
-                phase_samples = filtered_samples[filtered_samples['phase'] == phase]
+                phase_samples = filtered_samples.filter(pl.col('phase') == phase)
 
             #----- Define figure and axes -----#
             if plot_samples:
@@ -108,7 +111,7 @@ class Visualization():
 
             #----- Plot fixations as dots if any in time interval -----#
             # Colormap: Get fixation durations for scatter circle size
-            sizes = phase_fixations['duration']
+            sizes = phase_fixations.select(pl.col('duration')).to_numpy()
             
             # Define rainwbow cmap for fixations
             cmap = plt.cm.rainbow
@@ -120,7 +123,7 @@ class Visualization():
 
             
             # Plot
-            ax_main.scatter(phase_fixations['xAvg'], phase_fixations['yAvg'], c=fix_num, s=sizes, cmap=cmap, norm=norm, alpha=0.5, zorder=2)
+            ax_main.scatter(phase_fixations.select(pl.col('xAvg')).to_numpy(), phase_fixations.select(pl.col('yAvg')).to_numpy(), c=fix_num, s=sizes, cmap=cmap, norm=norm, alpha=0.5, zorder=2)
 
             # Colorbar
             PCM = ax_main.get_children()[0]  # When the fixations dots for color mappable were ploted (first)
@@ -154,37 +157,44 @@ class Visualization():
 
             #----- Plot scanpath and gaze if samples provided -----#
             if plot_samples:
-                starting_time = phase_samples['tSample'].iloc[0]
-                tSamples_from_start = (phase_samples['tSample'] - starting_time)
+                starting_time = phase_samples.select(pl.col('tSample')).to_numpy()[0]
+                tSamples_from_start = (phase_samples.select(pl.col('tSample')).to_numpy() - starting_time) / 1000
                 # Left eye
                 try:
-                    ax_main.plot(phase_samples['LX'], phase_samples['LY'], '--', color='C0', zorder=1)
-                    ax_gaze.plot(tSamples_from_start, phase_samples['LX'], label='Left X')
-                    ax_gaze.plot(tSamples_from_start, phase_samples['LY'], label='Left Y')
+                    phase_samples_lx = phase_samples.select(pl.col('LX')).to_numpy()
+                    phase_samples_ly = phase_samples.select(pl.col('LY')).to_numpy()
+                    ax_main.plot(phase_samples_lx, phase_samples_ly, '--', color='C0', zorder=1)
+                    ax_gaze.plot(tSamples_from_start, phase_samples_lx, label='Left X')
+                    ax_gaze.plot(tSamples_from_start, phase_samples_ly, label='Left Y')
                 except:
                     pass
                 # Right eye
                 try:
-                    ax_main.plot(phase_samples['X'], phase_samples['Y'], '--', color='black', zorder=1)
-                    ax_gaze.plot(tSamples_from_start, phase_samples['X'], label='Right X')
-                    ax_gaze.plot(tSamples_from_start, phase_samples['RY'], label='Right Y')
+                    phase_samples_rx = phase_samples.select(pl.col('RX')).to_numpy()
+                    phase_samples_ry = phase_samples.select(pl.col('RY')).to_numpy()
+                    ax_main.plot(phase_samples_rx, phase_samples_ry, '--', color='black', zorder=1)
+                    ax_gaze.plot(tSamples_from_start, phase_samples_rx, label='Right X')
+                    ax_gaze.plot(tSamples_from_start, phase_samples_ry, label='Right Y')
                 except:
                     pass
                 try:
-                    ax_main.plot(phase_samples['X'], phase_samples['Y'], '--', color='black', zorder=1)
-                    ax_gaze.plot(tSamples_from_start, phase_samples['X'], label='X')
-                    ax_gaze.plot(tSamples_from_start, phase_samples['Y'], label='Y')
+                    phase_samples_x = phase_samples.select(pl.col('X')).to_numpy()
+                    phase_samples_y = phase_samples.select(pl.col('Y')).to_numpy()
+                    ax_main.plot(phase_samples_x, phase_samples_y, '--', color='black', zorder=1)
+                    ax_gaze.plot(tSamples_from_start, phase_samples_x, label='X')
+                    ax_gaze.plot(tSamples_from_start, phase_samples_y, label='Y')
                 except:
                     pass
                 plot_min, plot_max = ax_gaze.get_ylim()
                 # Plot fixations as color span in gaze axes
-                for fix_idx,(_, fixation) in enumerate(phase_fixations.iterrows()):
+                for fix_idx,(_, fixation) in enumerate(phase_fixations.iter_rows(named=True)):
                     color = cmap(norm(fix_idx + 1))
+                    
                     ax_gaze.axvspan(ymin=0, ymax=1, xmin=(fixation['tStart'] - starting_time), xmax=(fixation['tStart'] - starting_time + fixation['duration']), color=color, alpha=0.4, label='fix')
                 
                 # Plor saccades as vlines in gaze axes
                 if plot_saccades:
-                    for _, saccade in phase_saccades.iterrows():
+                    for _, saccade in phase_saccades.iter_rows(named=True):
                         ax_gaze.vlines(x=(saccade['tStart']- starting_time), ymin=plot_min, ymax=plot_max, colors='red', linestyles='--', label='sac', linewidth=0.8)
 
                 # Legend
@@ -202,32 +212,32 @@ class Visualization():
             plt.close()
 
 
-    def fix_duration(self,fixations:pd.DataFrame,axs=None):
+    def fix_duration(self,fixations:pl.DataFrame,axs=None):
         
         ax = axs
         if ax is None:
             fig, ax = plt.subplots()
 
-        ax.hist(fixations['duration'], bins=100, edgecolor='black', linewidth=1.2, density=True)
+        ax.hist(fixations.select(pl.col('duration')).to_numpy(), bins=100, edgecolor='black', linewidth=1.2, density=True)
         ax.set_title('Fixation duration')
         ax.set_xlabel('Time (ms)')
         ax.set_ylabel('Density')
 
 
-    def sacc_amplitude(self,saccades:pd.DataFrame,axs=None):
+    def sacc_amplitude(self,saccades:pl.DataFrame,axs=None):
 
         ax = axs
         if ax is None:
             fig, ax = plt.subplots()
 
-        saccades_amp = saccades['ampDeg']
+        saccades_amp = saccades.select(pl.col('ampDeg')).to_numpy().ravel()
         ax.hist(saccades_amp, bins=100, range=(0, 20), edgecolor='black', linewidth=1.2, density=True)
         ax.set_title('Saccades amplitude')
         ax.set_xlabel('Amplitude (deg)')
         ax.set_ylabel('Density')
 
 
-    def sacc_direction(self,saccades:pd.DataFrame,axs=None,figs=None):
+    def sacc_direction(self,saccades:pl.DataFrame,axs=None,figs=None):
 
         ax = axs
         if ax is None:
@@ -239,7 +249,7 @@ class Visualization():
         if 'deg' not in saccades.columns or 'dir' not in saccades.columns:
             raise ValueError('Compute saccades direction first by using saccades_direction function from the PreProcessing module.')
         # Convert from deg to rad
-        saccades_rad = saccades['deg'] * np.pi / 180 
+        saccades_rad = saccades.select(pl.col('deg')).to_numpy().ravel() * np.pi / 180
 
         n_bins = 24
         ang_hist, bin_edges = np.histogram(saccades_rad, bins=24, density=True)
@@ -253,7 +263,7 @@ class Visualization():
             bar.set_facecolor(plt.cm.Blues(r / np.max(ang_hist)))
 
 
-    def sacc_main_sequence(self,saccades:pd.DataFrame,axs=None, hline=None):
+    def sacc_main_sequence(self,saccades:pl.DataFrame,axs=None, hline=None):
 
         ax = axs
         if ax is None:
@@ -262,8 +272,8 @@ class Visualization():
         XL = np.log10(25)  # Adjusted to fit the xlim
         YL = np.log10(1000)  # Adjusted to fit the ylim
 
-        saccades_peak_vel = saccades['vPeak']
-        saccades_amp = saccades['ampDeg']
+        saccades_peak_vel = saccades.select(pl.col('vPeak')).to_numpy().ravel()
+        saccades_amp = saccades.select(pl.col('ampDeg')).to_numpy().ravel()
 
         # Create a 2D histogram with logarithmic bins
         ax.hist2d(saccades_amp, saccades_peak_vel, bins=[np.logspace(-1, XL, 50), np.logspace(0, YL, 50)])
@@ -282,27 +292,53 @@ class Visualization():
         ax.set_aspect('equal')
 
 
-    def plot_multipanel(self,fixations:pd.DataFrame,saccades:pd.DataFrame, display:bool=True):
-        folder_path = self.derivatives_folder_path / self.events_detection_folder / "plots"
-        plt.rcParams.update({'font.size': 12})
-        
-        fixations = fixations[fixations["trial_number"] != -1]
-        saccades = saccades[saccades["trial_number"] != -1]
-        valid_phases = fixations['phase'].unique()
-        valid_phases = [phase for phase in valid_phases if phase != '']
-        for phase in fixations['phase'].unique():
-            fig, axs = plt.subplots(2, 2, figsize=(12, 7))
-            fixations_phase = fixations[fixations['phase'] == phase]
-            saccades_phase = saccades[saccades['phase'] == phase]
+    def plot_multipanel(
+            self,
+            fixations: pl.DataFrame,
+            saccades: pl.DataFrame,
+            display: bool = True
+        ) -> None:
+        """
+        Create a 2×2 multi‑panel diagnostic plot for every non‑empty
+        phase label and save it as PNG in
+        <derivatives_folder_path>/<events_detection_folder>/plots/.
+        """
+        # ── paths & matplotlib style ────────────────────────────────
+        folder_path: Path = (
+            self.derivatives_folder_path
+            / self.events_detection_folder
+            / "plots"
+        )
+        folder_path.mkdir(parents=True, exist_ok=True)
+        plt.rcParams.update({"font.size": 12})
 
-            self.fix_duration(fixations_phase,axs=axs[0, 0])
-            self.sacc_main_sequence(saccades_phase,axs=axs[1, 1])
-            self.sacc_direction(saccades_phase,axs=axs[1, 0],figs=fig)
-            self.sacc_amplitude(saccades_phase,axs=axs[0, 1])
+        # ── drop practice / invalid trials ─────────────────────────
+        fixations = fixations.filter(pl.col("trial_number") != -1)
+        saccades  = saccades.filter(pl.col("trial_number") != -1)
+
+        # ── collect valid phase labels (skip empty string) ─────────
+        phases = (
+            fixations
+            .select(pl.col("phase").filter(pl.col("phase") != ""))
+            .unique()           # unique values in this Series
+            .to_series()
+            .to_list()          # plain Python list of strings
+        )
+
+        # ── one figure per phase ───────────────────────────────────
+        for phase in phases:
+            fix_phase   = fixations.filter(pl.col("phase") == phase)
+            sacc_phase  = saccades.filter(pl.col("phase") == phase)
+
+            fig, axs = plt.subplots(2, 2, figsize=(12, 7))
+
+            self.fix_duration(fix_phase , axs=axs[0, 0])
+            self.sacc_main_sequence(sacc_phase, axs=axs[1, 1])
+            self.sacc_direction(sacc_phase, axs=axs[1, 0], figs=fig)
+            self.sacc_amplitude(sacc_phase, axs=axs[0, 1])
 
             fig.tight_layout()
-            folder_path.mkdir(parents=True, exist_ok=True)
-            plt.savefig(folder_path / f'multipanel_{phase}.png')
+            plt.savefig(folder_path / f"multipanel_{phase}.png")
             if display:
                 plt.show()
             plt.close()
