@@ -5,7 +5,6 @@ Created on 2 dic 2024
 '''
 
 import polars as pl
-import pyarrow
 
 class FeatherExport(object):
     def save(self, df, path, data_name, *args, **kwargs):
@@ -13,7 +12,7 @@ class FeatherExport(object):
 
 
     def read(self, path, data_name):
-        return pl.read_ipc((path / f'{data_name}.feather')).drop(["__index_level_0__","line_number"],strict=False)
+        return pl.read_ipc((path / f'{data_name}.feather'),memory_map=False).drop(["__index_level_0__","line_number"],strict=False)
 
     def extension(self):
         return '.feather'

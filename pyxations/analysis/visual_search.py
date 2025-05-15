@@ -32,14 +32,27 @@ class VisualSearchExperiment(Experiment):
         return accuracy
     
     def plot_accuracy_by_subject(self):
-        accuracy = self.accuracy().sort(by=["memory_set_size", "target_present","accuracy"])
+        
+        correct_responses = self.search_rts()
+        # Sort by the sum of correct responses of each subject
+        correct_responses_aux = (
+            correct_responses
+            .group_by(["subject_id", "memory_set_size", "target_present"])
+            .agg(pl.col("correct_response").mean().alias("correct_response_mean"))
+        ).select(["subject_id", "memory_set_size", "target_present", "correct_response_mean"])
+        # Merge the correct_responses with the correct_responses_aux
+        correct_responses = correct_responses.join(
+            correct_responses_aux,
+            on=["subject_id", "memory_set_size", "target_present"],
+            how="left"
+        ).sort(by=["memory_set_size", "target_present","correct_response_mean"])
 
-        accuracy = accuracy.to_pandas()
+        correct_responses = correct_responses.to_pandas()
         # target present to bool
-        accuracy["target_present"] = accuracy["target_present"].astype(bool)
+        correct_responses["target_present"] = correct_responses["target_present"].astype(bool)
         # There should be an ax for each memory set size
 
-        mem_set_sizes = accuracy["memory_set_size"].unique()
+        mem_set_sizes = correct_responses["memory_set_size"].unique()
         mem_set_sizes.sort()
 
         n_rows = len(mem_set_sizes)
@@ -49,8 +62,8 @@ class VisualSearchExperiment(Experiment):
             axs = np.array([axs])
 
         for i, row in enumerate(mem_set_sizes):
-            data = accuracy[(accuracy["memory_set_size"] == row)]
-            sns.barplot(x="subject_id", y="accuracy", data=data, ax=axs[i],estimator="mean", hue="target_present")
+            data = correct_responses[(correct_responses["memory_set_size"] == row)]
+            sns.lineplot(x='subject_id',y='correct_response',data=data,hue='target_present',errorbar='se',ax=axs[i],estimator='mean')
             axs[i].set_title(f"Memory Set Size {row}")
             axs[i].tick_params(axis='x', rotation=90)
             axs[i].set_xlabel("Subject ID")
@@ -61,24 +74,26 @@ class VisualSearchExperiment(Experiment):
         plt.close()
     
     def plot_accuracy_by_stimulus(self):
-        # Group and compute mean RT and accuracy per stimulus
-        accuracy = (
-            self.search_rts()
-            .group_by(["target_present", "memory_set_size", "stimulus"])
-            .agg([
-                pl.col("rt").mean().alias("rt"),
-                pl.col("correct_response").mean().alias("accuracy")
-            ])
-        )
-
         # Convert to pandas for Seaborn
-        accuracy = accuracy.to_pandas().sort_values(by=["memory_set_size", "target_present","accuracy"])
+        correct_responses = self.search_rts()
+        correct_responses_aux = (
+            correct_responses
+            .group_by(["stimulus", "memory_set_size", "target_present"])
+            .agg(pl.col("correct_response").mean().alias("correct_response_mean"))
+        ).select(["stimulus", "memory_set_size", "target_present", "correct_response_mean"])
+
+        # Merge the correct_responses with the correct_responses_aux
+        correct_responses = correct_responses.join(
+            correct_responses_aux,
+            on=["stimulus", "memory_set_size", "target_present"],
+            how="left"
+        ).to_pandas().sort_values(by=["memory_set_size", "target_present", "correct_response_mean"])
 
         # Convert target_present to bool (in case it's int 0/1)
-        accuracy["target_present"] = accuracy["target_present"].astype(bool)
+        correct_responses["target_present"] = correct_responses["target_present"].astype(bool)
 
         # One subplot per memory set size
-        mem_set_sizes = sorted(accuracy["memory_set_size"].unique())
+        mem_set_sizes = sorted(correct_responses["memory_set_size"].unique())
         n_rows = len(mem_set_sizes)
 
         fig, axs = plt.subplots(n_rows, 1, figsize=(10, 5 * n_rows), sharey=True)
@@ -87,15 +102,8 @@ class VisualSearchExperiment(Experiment):
             axs = np.array([axs])
 
         for i, mem_size in enumerate(mem_set_sizes):
-            data = accuracy[accuracy["memory_set_size"] == mem_size]
-            sns.barplot(
-                x="stimulus",
-                y="accuracy",
-                hue="target_present",
-                data=data,
-                estimator="mean",
-                ax=axs[i]
-            )
+            data = correct_responses[correct_responses["memory_set_size"] == mem_size]
+            sns.lineplot(x='stimulus',y='correct_response',data=data,hue='target_present',errorbar='se',ax=axs[i],estimator='mean')
             axs[i].set_title(f"Memory Set Size {mem_size}")
             axs[i].tick_params(axis='x', rotation=90)
             axs[i].set_xlabel("Stimulus")
@@ -415,53 +423,16 @@ class VisualSearchExperiment(Experiment):
 
         return cumulative_correct
 
-    def cumulative_performance_by_fixation(self, group_cutoffs=None):
-        if group_cutoffs is None:
-            group_cutoffs = self.find_fixation_cutoff()
-
-        cumulative_correct = self.cumulative_correct_trials_by_fixation(group_cutoffs)
-        group_keys = ["memory_set_size", "target_present"]
-
-        records_mean = []
-        records_sem = []
-
-        # Get unique group combinations
-        unique_groups = cumulative_correct.select(group_keys).unique().to_dicts()
-
-        for group in unique_groups:
-            mem_size = group["memory_set_size"]
-            target_present = group["target_present"]
-
-            group_df = cumulative_correct.filter(
-                (pl.col("memory_set_size") == mem_size) &
-                (pl.col("target_present") == target_present)
-            )
-
-            data = group_df["cumulative_correct"].to_list()  # list of numpy arrays
-
-            # Compute mean and SEM
-            group_mean = np.mean(data, axis=0)
-            group_sem = np.std(data, axis=0) / np.sqrt(len(data))
-
-            records_mean.append({
-                "memory_set_size": mem_size,
-                "target_present": target_present,
-                "cumulative_correct": group_mean
-            })
-
-            records_sem.append({
-                "memory_set_size": mem_size,
-                "target_present": target_present,
-                "cumulative_correct": group_sem
-            })
-
-        return pl.DataFrame(records_mean), pl.DataFrame(records_sem)
 
     
     def plot_cumulative_performance(self, group_cutoffs=None):
         if group_cutoffs is None:
             group_cutoffs = self.find_fixation_cutoff()
-        cumulative_performance, cumulative_performance_sem = self.cumulative_performance_by_fixation(group_cutoffs)
+        cumulative_performance = self.cumulative_correct_trials_by_fixation(group_cutoffs).join(
+            group_cutoffs,
+            on=["target_present", "memory_set_size"],
+            how="left"
+        )
 
         tp_ta = cumulative_performance.select(pl.col("target_present")).unique().to_series()
         tp_ta.sort()
@@ -470,7 +441,6 @@ class VisualSearchExperiment(Experiment):
 
         # Convert to pandas for Seaborn
         cumulative_performance = cumulative_performance.to_pandas()
-        cumulative_performance_sem = cumulative_performance_sem.to_pandas()
 
         n_cols = len(tp_ta)
         n_rows = len(mem_set_sizes)
@@ -489,18 +459,32 @@ class VisualSearchExperiment(Experiment):
         for i, row in enumerate(mem_set_sizes):
             for j, col in enumerate(tp_ta):
                 # Get the max fix for the current group, groups_cutoff is in polars
-                max_fix_for_group = group_cutoffs.filter(
-                    (pl.col("memory_set_size") == row) &
-                    (pl.col("target_present") == col)
-                ).select(pl.col("fix_cutoff")).to_numpy()[0][0]
-                data_mean = cumulative_performance[(cumulative_performance["memory_set_size"] == row) & (cumulative_performance["target_present"] == col)]["cumulative_correct"].values[0]
-                data_sem = cumulative_performance_sem[(cumulative_performance_sem["memory_set_size"] == row) & (cumulative_performance_sem["target_present"] == col)]["cumulative_correct"].values[0]
-                axs[i, j].plot(data_mean,color="black")
-                axs[i, j].fill_between(np.arange(0, max_fix_for_group), data_mean - data_sem, data_mean + data_sem, color="gray", alpha=0.5)
+
+                data = cumulative_performance[(cumulative_performance["memory_set_size"] == row) & (cumulative_performance["target_present"] == col)]
+                max_fix = int(data["fix_cutoff"].iloc[0])
+
+                # 1. Trim every array to the same length (optional but handy)
+                trimmed = data["cumulative_correct"].apply(lambda arr: arr[:max_fix])
+
+                # 2. Turn the Series-of-lists into long form
+                exploded = trimmed.explode().reset_index(drop=True).to_frame("cumulative_correct")
+
+                # 3. Add a 1-based fixation index
+                exploded["fixation_number"] = (np.tile(np.arange(1, max_fix + 1), len(data))  # repeat 1..max_fix for every original row
+    )
+                sns.lineplot(
+                    x="fixation_number",
+                    y="cumulative_correct",
+                    data=exploded,
+                    ax=axs[i, j],
+                    errorbar='se',
+                    estimator='mean',
+                    color="black"
+                )
                 axs[i, j].set_title(f"Memory Set Size {int(row)}, Target Present {bool(col)}")
                 # Ticks every 5 fixations
-                axs[i, j].set_xticks(range(0, max_fix_for_group, 5))
-                axs[i, j].set_xticklabels(range(1, max_fix_for_group+1, 5))
+                axs[i, j].set_xticks(range(0, max_fix, 5))
+                axs[i, j].set_xticklabels(range(1, max_fix+1, 5))
                 axs[i, j].set_xlabel("Fixation Number")
                 axs[i, j].set_ylabel("Accuracy")
 
