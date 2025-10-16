@@ -34,9 +34,9 @@ class WebGazerParse(BidsParse):
         
         df['line_number'] = df.index
         # columna importante 
-        dfSamples = df[df['webgazer_data'].notna()].reset_index()
-        dfSamples['data'] = dfSamples['webgazer_data'].apply(json.loads)
-        df_exploded = dfSamples.explode('data')
+        dfSample = df[df['webgazer_data'].notna()].reset_index()
+        dfSample['data'] = dfSample['webgazer_data'].apply(json.loads)
+        df_exploded = dfSample.explode('data')
         
         df_exploded['data'] = df_exploded.apply(
             lambda row: {**row['data'], 't_acum': row['data']['t'] + row['time_elapsed']}, axis=1
@@ -49,34 +49,70 @@ class WebGazerParse(BidsParse):
         axis=1
         )
         
-        dfSamples = expanded_df.rename(columns={"x": "X", "y": "Y", 't': 'tSample'})
+        dfSample = expanded_df.rename(columns={"x": "X", "y": "Y", 't': 'tSample'})
     
         # Calibration messages    
         dfCalib = df[df['rastoc-type'] == 'calibration-stimulus']
     
         # Eye movement
-        eye_movement_detector = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path=session_folder_path,samples=dfSamples)
+        eye_movement_detector = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path=session_folder_path,samples=dfSample)
         config = {
             'savgol_length': 0.195,
             'max_pso_dur': 0.1
         }
         
-        dfFix, dfSacc = eye_movement_detector.run_eye_movement_from_samples(dfSamples, 30, config=config)
+        dfFix, dfSacc = eye_movement_detector.run_eye_movement_from_samples(30, config=config)
 
-        dfBlink = pd.DataFrame(columns=dfSamples.columns)
-        dfMsg = pd.DataFrame(columns=dfSamples.columns)
+        dfBlink = pd.DataFrame(columns=dfSample.columns)
+        dfMsg = pd.DataFrame(columns=dfSample.columns)
 
 
-        pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg, session_folder_path)
-        preprocessing_parameters = inspect.signature(pre_processing.split_all_into_trials).parameters.keys()
-        if all([arg in kwargs for arg in preprocessing_parameters]):
-            pre_processing.process({
-                #'bad_samples': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.bad_samples).parameters.keys()},
-                'split_all_into_trials': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.split_all_into_trials).parameters.keys()},
-                #'saccades_direction': {},
-            })
+        pre_processing = PreProcessing(dfSample, dfFix, dfSacc, dfBlink, dfMsg, self.session_folder_path)
+
+        # ---- Decide which trialing API to use ----
+        prefer_durations = kwargs.get("prefer_durations", False)
+
+        have_explicit_times = ("start_times" in kwargs) and ("end_times" in kwargs)
+        have_durations     = ("start_msgs" in kwargs) and ("durations" in kwargs)
+        have_message_times = ("start_msgs" in kwargs) and ("end_msgs" in kwargs)
+
+        if not (have_explicit_times or have_durations or have_message_times):
+            print(
+                "Skipping preprocessing: not enough parameters for trial segmentation "
+                "(need (start_times & end_times) or (start_msgs & durations) or (start_msgs & end_msgs))."
+            )
         else:
-            print('Skipping preprocessing: not enough parameters.')
+            if have_explicit_times:
+                seg_func_name = "split_all_into_trials"
+            elif have_durations and (prefer_durations or not have_message_times):
+                seg_func_name = "split_all_into_trials_by_durations"
+            else:
+                seg_func_name = "split_all_into_trials_by_msgs"
+
+            seg_func = getattr(pre_processing, seg_func_name)
+            seg_sig = inspect.signature(seg_func).parameters
+            allowed = set(seg_sig.keys())
+
+            # superset of possible keys across the three APIs
+            candidate_keys = {
+                # common
+                "trial_labels",
+                # explicit times
+                "start_times", "end_times", "allow_open_last", "require_nonoverlap",
+                # messages (both _by_msgs and _by_durations use start_msgs)
+                "start_msgs", "end_msgs",
+                # durations
+                "durations",
+                # message-matching extras
+                "case_insensitive", "use_regex", "return_match_token",
+            }
+
+            seg_params = {k: v for k, v in kwargs.items() if (k in candidate_keys and k in allowed)}
+
+            # Run via the declarative orchestrator (writes recipe/provenance JSONs)
+            pre_processing.process({
+                seg_func_name: seg_params
+            })
 
 
     
@@ -87,26 +123,18 @@ class WebGazerParse(BidsParse):
         self.store_dataframes(pp.samples, dfCalib, pp.fixations, pp.saccades, pp.blinks, pp.user_messages)
             
 
-        # Save DataFrames to disk in one go to minimize memory usage during processing
-        #self.save_dataframe(dfCalib, session_folder_path, 'calib', key='calib')
-        #self.save_dataframe(dfSamples, session_folder_path, 'samples', key='samples')
-        
-        #(session_folder_path / f'{detection_algorithm}_events').mkdir(parents=True, exist_ok=True)
-        #self.save_dataframe(dfFix, (session_folder_path / f'{detection_algorithm}_events'), 'fix', key='fix')
-        #self.save_dataframe(dfSacc, (session_folder_path / f'{detection_algorithm}_events'), 'sacc', key='sacc')
-    
 
-def get_samples_for_remodnav(df_samples, rate_recorded=60, r_pupil=1, l_pupil=1):
-    df_samples['Rate_recorded'] = rate_recorded
-    df_samples['LX'] = df_samples['X'] 
-    df_samples['RX'] = df_samples['X']
-    df_samples['LY'] = df_samples['Y']
-    df_samples['RY'] = df_samples['Y']
-    df_samples['LPupil'] = l_pupil
-    df_samples['RPupil'] = r_pupil
-    df_samples['Calib_index'] = 1
-    df_samples['Eyes_recorded'] = 'LR'
+def get_samples_for_remodnav(df_sample, rate_recorded=60, r_pupil=1, l_pupil=1):
+    df_sample['Rate_recorded'] = rate_recorded
+    df_sample['LX'] = df_sample['X'] 
+    df_sample['RX'] = df_sample['X']
+    df_sample['LY'] = df_sample['Y']
+    df_sample['RY'] = df_sample['Y']
+    df_sample['LPupil'] = l_pupil
+    df_sample['RPupil'] = r_pupil
+    df_sample['Calib_index'] = 1
+    df_sample['Eyes_recorded'] = 'LR'
 
-    return df_samples
+    return df_sample
         
         

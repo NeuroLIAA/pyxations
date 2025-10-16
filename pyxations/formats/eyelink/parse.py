@@ -243,25 +243,84 @@ class EyelinkParse(BidsParse):
     
     
         
-        pre_processing = PreProcessing(dfSamples, dfFix,dfSacc,dfBlink, dfMsg, self.session_folder_path)
+        pre_processing = PreProcessing(dfSamples, dfFix, dfSacc, dfBlink, dfMsg, self.session_folder_path)
 
-        sig_trials = inspect.signature(pre_processing.split_all_into_trials).parameters.keys()
-        use_split_all = any(arg in kwargs for arg in sig_trials)
+        # --- 0) Set session metadata once (so bad_samples can infer width/height) ---
+        if isinstance(screen_res, (tuple, list)) and len(screen_res) == 2:
+            sw, sh = screen_res
+            pre_processing.set_metadata(screen_width=sw, screen_height=sh)
+        else:
+            # Fallback if screen_res not provided as (w, h)
+            sw = kwargs.get("screen_width")
+            sh = kwargs.get("screen_height")
+            if sw and sh:
+                pre_processing.set_metadata(screen_width=sw, screen_height=sh)
 
-        pre_processing.process({
-            'bad_samples': {
-                arg: kwargs[arg]
-                for arg in kwargs
-                if arg in inspect.signature(pre_processing.bad_samples).parameters
-            },
-            'split_all_into_trials' if use_split_all else 'split_all_into_trials_by_msgs': {
-                arg: kwargs[arg]
-                for arg in kwargs
-                if arg in (sig_trials if use_split_all else inspect.signature(pre_processing.split_all_into_trials_by_msgs).parameters)
-            },
-            'saccades_direction': {}
-        })
-    
+        prefer_durations = kwargs.get("prefer_durations", False)
+
+        have_explicit_times = ("start_times" in kwargs) and ("end_times" in kwargs)
+        have_durations     = ("start_msgs" in kwargs) and ("durations" in kwargs)
+        have_message_times = ("start_msgs" in kwargs) and ("end_msgs" in kwargs)
+
+        if not (have_explicit_times or have_durations or have_message_times):
+            raise ValueError(
+                "Provide one of: "
+                "(start_times & end_times) or (start_msgs & durations) or (start_msgs & end_msgs)."
+            )
+
+        # Choose function name by priority (or preference)
+        if have_explicit_times:
+            seg_func_name = "split_all_into_trials"
+        elif have_durations and (prefer_durations or not have_message_times):
+            seg_func_name = "split_all_into_trials_by_durations"
+        else:
+            seg_func_name = "split_all_into_trials_by_msgs"
+
+        seg_func = getattr(pre_processing, seg_func_name)
+        seg_params = {}
+
+        # --- 2) Collect allowed params for the chosen segmentation function ---
+        seg_sig = inspect.signature(seg_func).parameters
+        # Super-set of possible keys across the three APIs:
+        candidate_keys = {
+            # common
+            "trial_labels",
+            # explicit-time API
+            "start_times", "end_times", "allow_open_last", "require_nonoverlap",
+            # message-based APIs
+            "start_msgs", "end_msgs",
+            # durations API
+            "durations",
+            # message matching extras (only used by *_by_msgs / *_by_durations)
+            "case_insensitive", "use_regex", "return_match_token",
+        }
+        for k in candidate_keys:
+            if (k in kwargs) and (k in seg_sig):
+                seg_params[k] = kwargs[k]
+
+        # --- 2) bad_samples params (optional) ---
+        bad_params = {}
+        bad_sig = inspect.signature(pre_processing.bad_samples).parameters
+        for k in ("screen_height", "screen_width", "mark_nan_as_bad", "inclusive_bounds"):
+            if k in kwargs and k in bad_sig:
+                bad_params[k] = kwargs[k]
+        # If screen sizes weren’t passed, they’ll be taken from the metadata set above.
+
+        # --- 3) saccades_direction params (optional) ---
+        dir_params = {}
+        dir_sig = inspect.signature(pre_processing.saccades_direction).parameters
+        if "tol_deg" in kwargs and "tol_deg" in dir_sig:
+            dir_params["tol_deg"] = kwargs["tol_deg"]
+
+        # --- 4) Run as a declarative recipe (also saves provenance JSONs) ---
+        recipe = {
+            "bad_samples": bad_params,               # can be {} if you rely on metadata defaults
+            seg_func_name: seg_params,
+            "saccades_direction": dir_params,        # {} okay (uses default tol_deg=15)
+        }
+        pre_processing.process(recipe)
+
+
         if not keep_ascii:
             ascii_file_path.unlink(missing_ok=True)
     

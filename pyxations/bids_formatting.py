@@ -2,7 +2,8 @@ from pathlib import Path
 import shutil
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
-from .eye_movement_detection import RemodnavDetection
+from pyxations.methods.eyemovement.REMoDNaV import RemodnavDetection
+from pyxations.methods.eyemovement.engbert import EngbertDetection
 
 from pyxations.formats.webgazer.bids import WebGazerBidsConverter
 from pyxations.formats.eyelink.bids import EyeLinkBidsConverter
@@ -14,7 +15,7 @@ from pyxations.formats.tobii.bids import TobiiBidsConverter
 from pyxations.formats.gazepoint.bids import GazepointBidsConverter
 from pyxations.export import FEATHER_EXPORT
 
-EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection}
+EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection, 'engbert': EngbertDetection}
 
 
 def find_besteye(df_cal):

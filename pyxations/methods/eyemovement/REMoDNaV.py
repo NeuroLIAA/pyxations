@@ -2,19 +2,11 @@ import pandas as pd
 import numpy as np
 import math
 from tqdm import tqdm
-from abc import ABC, abstractmethod
 from remodnav.clf import EyegazeClassifier
-import os
-from pathlib import Path
+from pyxations.methods.eyemovement.eye_movement_detection import EyeMovementDetection
 
 
-class EyeMovementDetection(ABC):
-
-    @abstractmethod
-    def detect_eye_movements(self, *args, **kwargs):
-        pass
-
-
+# TODO: force screen_size, screen_width and screen_distance to be present when calling detect_eye_movements or run_eye_movement_from_samples
 class RemodnavDetection(EyeMovementDetection):
 
     def __init__(self, session_folder_path, samples):
@@ -97,7 +89,7 @@ class RemodnavDetection(EyeMovementDetection):
 
 
 
-    def run_eye_movement_from_samples(self, dfSamples, sample_rate, x_label='X', y_label='Y', config={}, **kwargs):
+    def run_eye_movement_from_samples(self, sample_rate, x_label='X', y_label='Y', config={}, **kwargs):
         '''
         Recieves a pandas dataframe, a sample rate, and optional configuration
         :param dfSamples: Pandas dataframe including x and y columns
@@ -106,17 +98,15 @@ class RemodnavDetection(EyeMovementDetection):
         :param y_label: Y column name
         :param config:
         '''
-        starting_time = dfSamples['tSample'].min()
+        starting_time = self.samples['tSample'].min()
         eye_data = {
-            'x': dfSamples[x_label], 
-            'y': dfSamples[y_label]
+            'x': self.samples[x_label], 
+            'y': self.samples[y_label]
         }
         eye_data = np.rec.fromarrays(list(eye_data.values()), names=list(eye_data.keys()))
-        
-        #return self.simple_run_eye_movement(eye_data, sample_rate, starting_time, config, **kwargs)
+
         if 'pupil_data' not in config.keys():
             config['pupil_data'] = pd.Series([0]* len(eye_data['x']))
-        #starting_time = dfSamples['tSample'].min()
         times = np.arange(stop=len(eye_data['x'])) / sample_rate
         
         return self.run_eye_movement(eye_data['x'], eye_data['y'], sample_rate, 
@@ -155,13 +145,8 @@ class RemodnavDetection(EyeMovementDetection):
         
         
         sac_fix = clf(pp, classify_isp=True, sort_events=True)
-        
-        
-        # Show gaze
-        #clf.show_gaze(pp=pp, events=sac_fix, show_vels=False)
-        self.show_gaze(pp, sac_fix, clf, eye_data, sample_rate)
-        #self.show_gaze_pylab(eye_data, pp, sac_fix)
-        
+               
+       
         # sac_fix to pandas DataFrame
         sac_fix = pd.DataFrame(sac_fix, columns=['start_time', 'end_time', 'label', 'start_x', 'start_y', 'end_x', 'end_y', 'amp', 'peak_vel', 'med_vel', 'avg_vel'])
         sac_fix['duration'] = sac_fix['end_time'] - sac_fix['start_time']
@@ -280,93 +265,3 @@ class RemodnavDetection(EyeMovementDetection):
 
         return pd.concat(fixations), pd.concat(saccades)
 
-    def show_gaze(self, pp, events, clf, data, sample_rate):
-        
-        args = {}
-        args_outfile = 'remodnav_gaze'
-        
-        import matplotlib
-        #matplotlib.use('agg')
-        import pylab as pl
-    
-        # one inch per second, or as big as PNG software/browsers can handle
-        duration = float(len(data)) / sample_rate
-        pl.figure(figsize=(min(duration, 100), 3), dpi=100) # original min(duration, 400) crashed
-        clf.show_gaze(pp=pp, events=events, show_vels=False)
-        pl.xlim((0, duration))
-        pl.xticks(np.arange(0, duration, step=1))
-        # pl.title('Detected eye movement events, parameters: {}'.format(
-        #     ', '.join([
-        #         '{}={}'.format(k, 'X') #'{}={}'.format(k, getattr(args, k))
-        #         for k in sorted((
-        #             'px2deg', 'sampling_rate', 'velthresh_startvelocity',
-        #             'min_intersaccade_duration', 'min_saccade_duration',
-        #             'max_initial_saccade_freq', 'saccade_context_window_length',
-        #             'max_pso_duration', 'min_fixation_duration',
-        #             'min_pursuit_duration', 'pursuit_velthresh',
-        #             'min_blink_duration', 'dilate_nan',
-        #             'median_filter_length', 'savgol_length', 'savgol_polyord',
-        #             'max_vel', 'lowpass_cutoff_freq', 'noise_factor'))
-        #     ])
-        # ))
-        pl.ylabel('coordinates (pixel)')
-        pl.xlabel('time (seconds)')
-        
-        
-        
-        Path(self.out_folder).mkdir(parents=True, exist_ok=True)
-        pl.savefig(
-            os.path.join(
-                self.out_folder,
-                '{}.png'.format(
-                    args_outfile[:-4] if args_outfile.endswith('.tsv')
-                    else args_outfile)
-            ),
-            bbox_inches='tight', format='png', dpi=100)
-    
-
-    def show_gaze_pylab(self, data=None, pp=None, events=None, show_vels=True):
-        colors = {
-            'FIXA': 'xkcd:beige',
-            'PURS': 'xkcd:burnt sienna',
-            'SACC': 'xkcd:spring green',
-            'ISAC': 'xkcd:pea green',
-            'HPSO': 'xkcd:azure',
-            'IHPS': 'xkcd:azure',
-            'LPSO': 'xkcd:faded blue',
-            'ILPS': 'xkcd:faded blue',
-        }
-
-        import pylab as pl
-        if events is not None:
-            for ev in events:
-                pl.axvspan(
-                    ev['start_time'],
-                    ev['end_time'],
-                    color=colors[ev['label']],
-                    alpha=0.8)
-        ntimepoints = len(pp) if pp is not None else len(data)
-        timepoints = np.linspace(0, ntimepoints / self.sr, ntimepoints)
-        if data is not None:
-            pl.plot(
-                timepoints,
-                data['x'],
-                color='xkcd:pig pink', lw=1)
-            pl.plot(
-                timepoints,
-                data['y'],
-                color='xkcd:pig pink', lw=1)
-        if pp is not None:
-            if show_vels:
-                pl.plot(
-                    timepoints,
-                    pp['vel'],
-                    color='xkcd:gunmetal', lw=1)
-            pl.plot(
-                timepoints,
-                pp['x'],
-                color='black', lw=1)
-            pl.plot(
-                timepoints,
-                pp['y'],
-                color='black', lw=1)

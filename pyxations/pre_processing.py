@@ -1,185 +1,518 @@
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Union
+
 import numpy as np
 import pandas as pd
 
 
+Number = Union[int, float]
+PathLike = Union[str, Path]
+
+
+@dataclass
+class SessionMetadata:
+    """Lightweight metadata container saved alongside derivatives."""
+    coords_unit: str = "px"          # 'px' or 'deg'
+    time_unit: str = "ms"            # 'ms'
+    pupil_unit: str = "arbitrary"
+    screen_width: Optional[int] = None
+    screen_height: Optional[int] = None
+    extra: Dict[str, Union[str, int, float, bool, None]] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "coords_unit": self.coords_unit,
+            "time_unit": self.time_unit,
+            "pupil_unit": self.pupil_unit,
+            "screen_width": self.screen_width,
+            "screen_height": self.screen_height,
+            "extra": self.extra,
+        }
+
+
 class PreProcessing:
-    def __init__(self, samples, fixations,saccades,blinks, user_messages,session_path):
-        self.samples = samples
-        self.fixations = fixations
-        self.saccades = saccades
-        self.blinks = blinks
-        self.user_messages = user_messages
-        self.session_path = session_path
+    """
+    Pyxations preprocessing: trial segmentation, quality flags, and saccade direction.
+    All mutating functions are safe (copy-aware) and validate required columns.
 
-    def split_all_into_trials(self,start_times: dict[list[int]], end_times: dict[list[int]],trial_labels:dict[list[str]] = None):
-        self.split_into_trials(self.samples,start_times,end_times,trial_labels)
-        self.split_into_trials(self.fixations,start_times,end_times,trial_labels)
-        self.split_into_trials(self.saccades,start_times,end_times,trial_labels)
-        self.split_into_trials(self.blinks,start_times,end_times,trial_labels)
-        
-    def split_all_into_trials_by_msgs(self, start_msgs: dict[list[str]], end_msgs: dict[list[str]],trial_labels:dict[list[str]] = None):
-        start_times = self.get_timestamps_from_messages(start_msgs)
-        end_times = self.get_timestamps_from_messages(end_msgs)
-        self.split_into_trials(self.samples,start_times,end_times,trial_labels)
-        self.split_into_trials(self.fixations,start_times,end_times,trial_labels)
-        self.split_into_trials(self.saccades,start_times,end_times,trial_labels)
-        self.split_into_trials(self.blinks,start_times,end_times,trial_labels)
+    Tables (pd.DataFrame) expected:
+        samples:   typically contains 'tSample' (ms), gaze columns (e.g., 'LX','LY','RX','RY' or 'X','Y')
+        fixations: typically contains 'tStart','tEnd' and optional 'xAvg','yAvg'
+        saccades:  typically contains 'tStart','tEnd','xStart','yStart','xEnd','yEnd'
+        blinks:    typically contains 'tStart','tEnd' (optional)
+        user_messages: must contain 'timestamp','message'
 
-    def split_all_into_trials_by_durations(self, start_msgs: dict[list[str]], durations: dict[list[int]],trial_labels:dict[list[str]] = None):
-        # Get the start times for each trial
-        start_times = self.get_timestamps_from_messages(start_msgs)
+    New columns created:
+        - All tables after trialing: 'phase', 'trial_number', 'trial_label' (optional)
+        - samples/fixations/saccades: 'bad' (bool) after bad_samples()
+        - saccades: 'deg' (float degrees), 'dir' (str) after saccades_direction()
+    """
 
-        end_times = {}
-        for key in durations.keys():
-            if len(durations[key]) < len(start_times[key]):
-                raise ValueError("The amount of durations provided is less than the amount of start messages.")
-            end_times[key] = ([(start_time + duration) for start_time, duration in zip(start_times[key],durations[key])])
+    VERSION = "0.2.0"
 
-        self.split_into_trials(self.samples,start_times,end_times,trial_labels)
-        self.split_into_trials(self.fixations,start_times,end_times,trial_labels)
-        self.split_into_trials(self.saccades,start_times,end_times,trial_labels)
-        self.split_into_trials(self.blinks,start_times,end_times,trial_labels)
+    def __init__(
+        self,
+        samples: pd.DataFrame,
+        fixations: pd.DataFrame,
+        saccades: pd.DataFrame,
+        blinks: pd.DataFrame,
+        user_messages: pd.DataFrame,
+        session_path: PathLike,
+        metadata: Optional[SessionMetadata] = None,
+    ):
+        self.samples = samples.copy()
+        self.fixations = fixations.copy()
+        self.saccades = saccades.copy()
+        self.blinks = blinks.copy()
+        self.user_messages = user_messages.copy()
+        self.session_path = Path(session_path)
+        self.metadata = metadata or SessionMetadata()
 
+        # Normalize dtypes where possible (strings for messages)
+        if "message" in self.user_messages.columns:
+            self.user_messages["message"] = self.user_messages["message"].astype(str)
 
+    # ------------------------------- Utilities ------------------------------- #
 
-    def process(self,functions_and_params:dict):
-        for function,params in functions_and_params.items():
-            getattr(self,function)(**params)
+    @staticmethod
+    def _require_columns(
+        df: pd.DataFrame, cols: Sequence[str], context: str
+    ) -> None:
+        missing = [c for c in cols if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"[{context}] Missing required columns: {missing}. "
+                f"Available: {list(df.columns)}"
+            )
 
+    @staticmethod
+    def _assert_nonoverlap(starts: Sequence[int], ends: Sequence[int], key: str, session: Path) -> None:
+        if len(starts) != len(ends):
+            raise ValueError(
+                f"[{key}] start_times and end_times must have the same length, "
+                f"got {len(starts)} vs {len(ends)} in session: {session}"
+            )
+        for i, (s, e) in enumerate(zip(starts, ends)):
+            if not (s < e):
+                raise ValueError(
+                    f"[{key}] Non-positive interval at trial {i}: start={s}, end={e} "
+                    f"in session: {session}"
+                )
+            if i < len(starts) - 1:
+                if e > starts[i + 1]:
+                    raise ValueError(
+                        f"[{key}] Overlapping trials {i}–{i+1}: end[i]={e} > start[i+1]={starts[i+1]} "
+                        f"in session: {session}"
+                    )
 
-    def bad_samples(self, screen_height:int, screen_width:int):
+    @staticmethod
+    def _ensure_columns_exist(df: pd.DataFrame, cols: Sequence[str]) -> List[str]:
+        """Return the subset of 'cols' that actually exist in df."""
+        return [c for c in cols if c in df.columns]
+
+    def _save_json_sidecar(self, obj: dict, filename: str) -> None:
+        outdir = self.session_path
+        outdir.mkdir(parents=True, exist_ok=True)
+        with open(outdir / filename, "w", encoding="utf-8") as f:
+            json.dump(obj, f, indent=2, ensure_ascii=False)
+
+    # ---------------------------- Public API: Meta ---------------------------- #
+
+    def set_metadata(
+        self,
+        coords_unit: Optional[str] = None,
+        time_unit: Optional[str] = None,
+        pupil_unit: Optional[str] = None,
+        screen_width: Optional[int] = None,
+        screen_height: Optional[int] = None,
+        **extra,
+    ) -> None:
+        """Update session-level metadata used in bounds checks and documentation."""
+        if coords_unit is not None:
+            self.metadata.coords_unit = coords_unit
+        if time_unit is not None:
+            self.metadata.time_unit = time_unit
+        if pupil_unit is not None:
+            self.metadata.pupil_unit = pupil_unit
+        if screen_width is not None:
+            self.metadata.screen_width = screen_width
+        if screen_height is not None:
+            self.metadata.screen_height = screen_height
+        self.metadata.extra.update(extra)
+
+    def save_metadata(self, filename: str = "metadata.json") -> None:
+        """Persist metadata next to derivatives for reproducibility."""
+        self._save_json_sidecar(self.metadata.to_dict(), filename)
+
+    # ----------------------- Public API: Message Parsing ---------------------- #
+
+    def get_timestamps_from_messages(
+        self,
+        messages_dict: Dict[str, List[str]],
+        *,
+        case_insensitive: bool = True,
+        use_regex: bool = True,
+        return_match_token: bool = False,
+    ) -> Dict[str, List[int]]:
         """
-        Classifies samples as 'bad' if they fall outside the screen boundaries.
+        Extract ordered timestamps per phase by matching message substrings/patterns.
 
-        This function processes a DataFrame containing gaze samples data,
-        and classifying samples as 'bad' if they fall outside the screen boundaries.
-        If there are NaN values in a given row, they are skipped.
+        Parameters
+        ----------
+        messages_dict : dict
+            e.g., {'trial': ['TRIAL_START', 'BEGIN_TRIAL'], 'stim': ['STIM_ONSET']}
+        case_insensitive : bool
+            If True, ignore case during matching.
+        use_regex : bool
+            If True, treat entries as regex patterns joined by '|'; otherwise escape literals.
+        return_match_token : bool
+            If True, also creates/updates a 'matched_token' column with the first matched pattern.
 
-        Parameters:
-        samples (pd.DataFrame): DataFrame containing gaze samples data with the following columns:
-                                'LX', 'LY', 'RX', 'RY'.
-        height (int): Height of the screen in pixels.
-        width (int): Width of the screen in pixels.
-
+        Returns
+        -------
+        Dict[str, List[int]]
+            Ordered timestamps in ms for each key.
         """
-        for df in [self.samples,self.fixations,self.saccades]:            
-            columns = [cols for cols in df.columns if cols in ['LX', 'LY', 'RX', 'RY', 'X', 'Y','xStart', 'xEnd', 'yStart', 'yEnd','xAvg','yAvg']]
-            width_columns = [cols for cols in df.columns if cols in ['LX', 'RX', 'X','xStart', 'xEnd','xAvg']]
-            height_columns = [cols for cols in df.columns if cols in ['LY', 'RY', 'Y','yStart', 'yEnd','yAvg']]
+        df = self.user_messages
+        self._require_columns(df, ["timestamp", "message"], "get_timestamps_from_messages")
 
+        timestamps_dict: Dict[str, List[int]] = {}
+        flags = re.I if case_insensitive else 0
 
-            df['bad'] = (df[columns] < 0).any(axis=1)
+        # Prepare an optional matched_token column for traceability
+        if return_match_token and "matched_token" not in df.columns:
+            df = df.copy()
+            df["matched_token"] = pd.Series([None] * len(df), index=df.index)
 
-            # Add width filter to the filter list
-            df['bad'] = df['bad'] | (df[width_columns] > screen_width).any(axis=1)
-            
-            # Add height filter to the filter list
-            df['bad'] = df['bad'] | (df[height_columns] > screen_height).any(axis=1)
+        for key, tokens in messages_dict.items():
+            if not tokens:
+                raise ValueError(f"[{key}] Empty token list passed to get_timestamps_from_messages.")
+            parts = tokens if use_regex else [re.escape(t) for t in tokens]
+            pat = re.compile("|".join(parts), flags=flags)
 
+            hits = df[df["message"].str.contains(pat, regex=True, na=False)].copy()
+            hits.sort_values(by="timestamp", inplace=True)
 
+            if return_match_token and not hits.empty:
+                # record which token matched first for each hit
+                def _which(m: str) -> Optional[str]:
+                    for t in tokens:
+                        if (re.search(t, m, flags=flags) if use_regex else re.search(re.escape(t), m, flags=flags)):
+                            return t
+                    return None
 
-    def saccades_direction(self):
-        """
-        Classifies saccades into directional categories based on their start and end coordinates.
+                hits["matched_token"] = hits["message"].apply(_which)
+                # write back those rows (optional traceability)
+                df.loc[hits.index, "matched_token"] = hits["matched_token"]
 
-        This function processes a DataFrame containing saccade data, filling missing values,
-        converting coordinate columns to float, computing saccade amplitudes in the x and y
-        directions, mapping these to the complex plane, calculating the saccade angles in degrees,
-        and finally classifying the direction of each saccade as 'right', 'left', 'up', or 'down'.
+            stamps = hits["timestamp"].astype(int).tolist()
+            if len(stamps) == 0:
+                raise ValueError(
+                    f"[{key}] No timestamps found for messages {tokens} "
+                    f"in session: {self.session_path}"
+                )
+            timestamps_dict[key] = stamps
 
-        Parameters:
-        saccades (pd.DataFrame): DataFrame containing saccade data with the following columns:
-                                'xStart', 'xEnd', 'yStart', 'yEnd'.
-
-        """
-
-        # Saccades amplitude in x and y
-        x_dif = self.saccades['xEnd'] - self.saccades['xStart']
-        y_dif = self.saccades['yEnd'] - self.saccades['yStart']
-        
-        # Take to complex plane
-        z = x_dif + 1j * y_dif
-
-        # Saccades degrees
-        self.saccades['deg'] = np.angle(z, deg=True)
-
-        # Classify in right / left / up / down
-        self.saccades['dir'] = [''] * len(self.saccades)
-
-        self.saccades.loc[(-15 < self.saccades['deg']) & (self.saccades['deg'] < 15), 'dir'] = 'right'
-        self.saccades.loc[(75 < self.saccades['deg']) & (self.saccades['deg'] < 105), 'dir'] = 'down'
-        self.saccades.loc[(165 < self.saccades['deg']) | (self.saccades['deg'] < -165), 'dir'] = 'left'
-        self.saccades.loc[(-105 < self.saccades['deg']) & (self.saccades['deg'] < -75), 'dir'] = 'up'
-    
-    
-    def get_timestamps_from_messages(self, messages_dict: dict[list[str]]):
-        """
-        Get the timestamps for a list of messages from the user messages DataFrame.
-        The idea is to get the rows which have any of the messages in the list as a substring in the value of their 'message' column.
-
-        Parameters:
-        user_messages (pd.DataFrame): DataFrame containing user messages data with the following columns:
-                                        'timestamp', 'message'.
-        messages (dict[list[str]]): Dict of the name of the epochs as keys and value of list of strings to identify the messages.
-
-        Returns:
-        list[int]: List of timestamps for the messages.
-        """
-        timestamps_dict = {}
-        for key,messages in messages_dict.items():
-            # Get the timestamps for the messages and the samples rates
-            timestamps_and_rates = self.user_messages[self.user_messages['message'].str.contains('|'.join(messages))][['timestamp']].sort_values(by='timestamp')
-            timestamps = timestamps_and_rates['timestamp'].tolist()
-
-
-            # Raise exception if no timestamps are found
-            if len(timestamps) == 0:
-                raise ValueError("No timestamps found for the messages: {}, in the session path: {}".format(messages, self.session_path))
-            timestamps_dict[key] = timestamps
+        # Persist updated matched_token if requested
+        if return_match_token:
+            self.user_messages = df
 
         return timestamps_dict
-    
-    def split_into_trials(self, data:pd.DataFrame, start_times: dict[list[int]], end_times: dict[list[int]],trial_labels:dict[list[str]] = None):
-        data['phase'] = [''] * len(data)
-        #data['phase'] = [-1] * len(data)
-        data['trial_number'] = [-1] * len(data)
-        data['trial_label'] = [''] * len(data)
+
+    # ---------------------- Public API: Trial Segmentation -------------------- #
+
+    def split_all_into_trials(
+        self,
+        start_times: Dict[str, List[int]],
+        end_times: Dict[str, List[int]],
+        trial_labels: Optional[Dict[str, List[str]]] = None,
+        *,
+        allow_open_last: bool = True,
+        require_nonoverlap: bool = True,
+    ) -> None:
+        """Segment samples/fixations/saccades/blinks using explicit times."""
+        for df in (self.samples, self.fixations, self.saccades, self.blinks):
+            self._split_into_trials_df(
+                df, start_times, end_times, trial_labels,
+                allow_open_last=allow_open_last,
+                require_nonoverlap=require_nonoverlap,
+            )
+
+    def split_all_into_trials_by_msgs(
+        self,
+        start_msgs: Dict[str, List[str]],
+        end_msgs: Dict[str, List[str]],
+        trial_labels: Optional[Dict[str, List[str]]] = None,
+        **msg_kwargs,
+    ) -> None:
+        """Segment tables using start and end message patterns."""
+        starts = self.get_timestamps_from_messages(start_msgs, **msg_kwargs)
+        ends = self.get_timestamps_from_messages(end_msgs, **msg_kwargs)
+        self.split_all_into_trials(starts, ends, trial_labels)
+
+    def split_all_into_trials_by_durations(
+        self,
+        start_msgs: Dict[str, List[str]],
+        durations: Dict[str, List[int]],
+        trial_labels: Optional[Dict[str, List[str]]] = None,
+        **msg_kwargs,
+    ) -> None:
+        """Segment using start message patterns and per-trial durations (ms)."""
+        starts = self.get_timestamps_from_messages(start_msgs, **msg_kwargs)
+        end_times: Dict[str, List[int]] = {}
+        for key, durs in durations.items():
+            s = starts.get(key, [])
+            if len(durs) < len(s):
+                raise ValueError(
+                    f"[{key}] Provided {len(durs)} durations but found {len(s)} start times "
+                    f"in session: {self.session_path}"
+                )
+            end_times[key] = [st + du for st, du in zip(s, durs)]
+        self.split_all_into_trials(starts, end_times, trial_labels)
+
+    def _split_into_trials_df(
+        self,
+        data: pd.DataFrame,
+        start_times: Dict[str, List[int]],
+        end_times: Dict[str, List[int]],
+        trial_labels: Optional[Dict[str, List[str]]] = None,
+        *,
+        allow_open_last: bool = True,
+        require_nonoverlap: bool = True,
+    ) -> None:
+        """
+        Core segmentation for a single table. Works with 'tSample' OR ('tStart','tEnd').
+        Adds 'phase', 'trial_number', 'trial_label'.
+        """
+        if data is self.samples:
+            time_mode = "sample"
+            self._require_columns(data, ["tSample"], "split_into_trials(samples)")
+        else:
+            # events (fixations/saccades/blinks)
+            time_mode = "event"
+            self._require_columns(data, ["tStart", "tEnd"], "split_into_trials(events)")
+
+        df = data.copy()
+        # Initialize columns deterministically
+        df["phase"] = ""
+        df["trial_number"] = -1
+        df["trial_label"] = ""
+
         for key in start_times.keys():
-            start_times_list = start_times[key]
-            end_times_list = end_times[key]
-            trial_labels_list = trial_labels[key] if trial_labels and key in trial_labels else None
-            # It is somewhat common that the last trial is not closed, so we will discard starting times that are greater than the last ending time
-            start_times_list = [start_time for start_time in start_times_list if start_time < end_times_list[-1]]
+            start_list = list(start_times[key])
+            end_list = list(end_times[key])
 
-            # Check that both lists have the same length
-            if len(start_times_list) != len(end_times_list):
-                data.drop('trial_number', axis=1, inplace=True)
-                data.drop('phase', axis=1, inplace=True)
-                raise ValueError("start_times and end_times for {} must have the same length, but they have lengths {} and {} respectively in the session path {}.".format(key,len(start_times_list), len(end_times_list), self.session_path))
+            # Discard starts after last end (common partial last-trial artifact)
+            if allow_open_last and end_list:
+                last_end = end_list[-1]
+                start_list = [st for st in start_list if st < last_end]
 
-            # Check that the length of ordered_trials_ids is the same as the number of trials
-            if trial_labels_list and len(trial_labels_list) != len(start_times_list):
-                data.drop('trial_number', axis=1, inplace=True)
-                data.drop('phase', axis=1, inplace=True)
-                raise ValueError("The amount of computed trials is {} while the amount of ordered trial ids is {} for key {} in the session path {}.".format(len(start_times_list), len(trial_labels_list)), key, self.session_path)
+            # Sanity checks
+            if require_nonoverlap:
+                self._assert_nonoverlap(start_list, end_list, key, self.session_path)
+            elif len(start_list) != len(end_list):
+                raise ValueError(
+                    f"[{key}] start_times and end_times length mismatch: {len(start_list)} vs {len(end_list)} "
+                    f"in session: {self.session_path}"
+                )
 
+            labels = trial_labels.get(key) if (trial_labels and key in trial_labels) else None
+            if labels is not None and len(labels) != len(start_list):
+                raise ValueError(
+                    f"[{key}] Computed {len(start_list)} trials but got {len(labels)} trial labels "
+                    f"in session: {self.session_path}"
+                )
 
-            # Divide in trials according to start_times_list and end_times_list
-            if 'tSample' in data.columns:
-                for i in range(len(start_times_list)):
-                    data.loc[(data['tSample'] >= start_times_list[i]) & (data['tSample'] <= end_times_list[i]), 'trial_number'] = i
-                    data.loc[(data['tSample'] >= start_times_list[i]) & (data['tSample'] <= end_times_list[i]), 'phase'] = str(key)
-            elif 'tStart' in data.columns and 'tEnd' in data.columns:
-                for i in range(len(start_times_list)):
-                    data.loc[(data['tStart'] >= start_times_list[i]) & (data['tEnd'] <= end_times_list[i]), 'trial_number'] = i
-                    data.loc[(data['tStart'] >= start_times_list[i]) & (data['tEnd'] <= end_times_list[i]), 'phase'] = str(key)
+            # Apply segmentation
+            if time_mode == "sample":
+                t = df["tSample"].values
+                for i, (st, en) in enumerate(zip(start_list, end_list)):
+                    mask = (t >= st) & (t <= en)
+                    if not np.any(mask):
+                        continue
+                    df.loc[mask, "trial_number"] = i
+                    df.loc[mask, "phase"] = str(key)
+                    if labels is not None:
+                        df.loc[mask, "trial_label"] = labels[i]
             else:
-                data.drop('trial_number', axis=1, inplace=True)
-                data.drop('phase', axis=1, inplace=True)
-                raise ValueError("The DataFrame must contain either the 'tSample' column or the 'tStart' and 'tEnd' columns.")
+                t0 = df["tStart"].values
+                t1 = df["tEnd"].values
+                for i, (st, en) in enumerate(zip(start_list, end_list)):
+                    mask = (t0 >= st) & (t1 <= en)
+                    if not np.any(mask):
+                        continue
+                    df.loc[mask, "trial_number"] = i
+                    df.loc[mask, "phase"] = str(key)
+                    if labels is not None:
+                        df.loc[mask, "trial_label"] = labels[i]
 
-            if trial_labels_list:
-                #data['trial_label'] = [''] * len(data)
-                for i in range(len(start_times_list)):
-                    data.loc[data['trial_number'] == i, 'trial_label'] = trial_labels_list[i]
-                    
+        # Commit
+        if data is self.samples:
+            self.samples = df
+        elif data is self.fixations:
+            self.fixations = df
+        elif data is self.saccades:
+            self.saccades = df
+        elif data is self.blinks:
+            self.blinks = df
+
+    # ------------------------- Public API: QC / Flags ------------------------- #
+
+    def bad_samples(
+        self,
+        screen_height: Optional[int] = None,
+        screen_width: Optional[int] = None,
+        *,
+        mark_nan_as_bad: bool = True,
+        inclusive_bounds: bool = True,
+    ) -> None:
+        """
+        Mark rows as 'bad' if any available coordinate falls outside screen bounds.
+        Applies to samples, fixations, saccades. (Blinks unaffected.)
+
+        If width/height not provided, will use metadata.screen_* if available.
+        """
+        H = screen_height if screen_height is not None else self.metadata.screen_height
+        W = screen_width if screen_width is not None else self.metadata.screen_width
+        if H is None or W is None:
+            raise ValueError(
+                "bad_samples requires screen_height and screen_width (either passed "
+                "or set via set_metadata())."
+            )
+
+        def _mark(df: pd.DataFrame) -> pd.DataFrame:
+            d = df.copy()
+
+            # Gather candidate coordinate columns if present
+            coord_cols = self._ensure_columns_exist(
+                d,
+                [
+                    "LX", "LY", "RX", "RY", "X", "Y",
+                    "xStart", "xEnd", "yStart", "yEnd", "xAvg", "yAvg",
+                ],
+            )
+            if not coord_cols:
+                # If no coords present, default to 'not bad'
+                if "bad" not in d.columns:
+                    d["bad"] = False
+                return d
+
+            xcols = [c for c in coord_cols if c.lower().startswith("x")]
+            ycols = [c for c in coord_cols if c.lower().startswith("y")]
+
+            # Validity masks for each axis
+            if inclusive_bounds:
+                valid_w = np.logical_and.reduce([d[c].ge(0) & d[c].le(W) for c in xcols]) if xcols else True
+                valid_h = np.logical_and.reduce([d[c].ge(0) & d[c].le(H) for c in ycols]) if ycols else True
+            else:
+                valid_w = np.logical_and.reduce([d[c].gt(0) & d[c].lt(W) for c in xcols]) if xcols else True
+                valid_h = np.logical_and.reduce([d[c].gt(0) & d[c].lt(H) for c in ycols]) if ycols else True
+
+            bad = ~(valid_w & valid_h)
+            if mark_nan_as_bad:
+                bad |= d[coord_cols].isna().any(axis=1)
+
+            d["bad"] = bad.values
+            return d
+
+        self.samples = _mark(self.samples)
+        self.fixations = _mark(self.fixations)
+        self.saccades = _mark(self.saccades)
+
+    # ---------------------- Public API: Saccade Direction --------------------- #
+
+    def saccades_direction(self, tol_deg: float = 15.0) -> None:
+        """
+        Compute saccade angle (deg) and cardinal direction with tolerance bands.
+
+        Parameters
+        ----------
+        tol_deg : float
+            Half-width of the acceptance band around 0°, ±90°, and ±180°
+            for classifying right/left/up/down.
+        """
+        df = self.saccades.copy()
+        self._require_columns(
+            df, ["xStart", "xEnd", "yStart", "yEnd"], "saccades_direction"
+        )
+
+        x_dif = df["xEnd"].astype(float) - df["xStart"].astype(float)
+        y_dif = df["yEnd"].astype(float) - df["yStart"].astype(float)
+        deg = np.degrees(np.arctan2(y_dif.to_numpy(), x_dif.to_numpy()))
+        df["deg"] = deg.astype(float)
+
+        # Tolerant direction bins
+        right = (-tol_deg < df["deg"]) & (df["deg"] < tol_deg)
+        left = (df["deg"] > 180 - tol_deg) | (df["deg"] < -180 + tol_deg)
+        down = ((90 - tol_deg) < df["deg"]) & (df["deg"] < (90 + tol_deg))
+        up = ((-90 - tol_deg) < df["deg"]) & (df["deg"] < (-90 + tol_deg))
+
+        df["dir"] = ""
+        df.loc[right, "dir"] = "right"
+        df.loc[left, "dir"] = "left"
+        df.loc[down, "dir"] = "down"
+        df.loc[up, "dir"] = "up"
+
+        self.saccades = df
+
+    # -------------------------- Public API: Orchestrator ---------------------- #
+
+    def process(
+        self,
+        functions_and_params: Dict[str, Dict],
+        *,
+        log_recipe: bool = True,
+        recipe_filename: str = "preprocessing_recipe.json",
+        provenance_filename: str = "preprocessing_provenance.json",
+    ) -> None:
+        """
+        Run a declarative preprocessing recipe, e.g.:
+            pp.process({
+                "split_all_into_trials_by_msgs": {
+                    "start_msgs": {"trial": ["TRIAL_START"]},
+                    "end_msgs": {"trial": ["TRIAL_END"]},
+                },
+                "bad_samples": {"screen_height": 1080, "screen_width": 1920},
+                "saccades_direction": {"tol_deg": 15},
+            })
+
+        Unknown function names raise a helpful error.
+        """
+        # Optional: save the declared recipe for exact reproducibility
+        if log_recipe:
+            recipe_obj = {
+                "declared_recipe": functions_and_params,
+                "tool_version": self.VERSION,
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "session_path": str(self.session_path),
+            }
+            self._save_json_sidecar(recipe_obj, recipe_filename)
+
+        for func_name, params in functions_and_params.items():
+            if not hasattr(self, func_name):
+                raise AttributeError(
+                    f"Unknown preprocessing function '{func_name}'. "
+                    f"Available: {[m for m in dir(self) if not m.startswith('_')]}"
+                )
+            fn = getattr(self, func_name)
+            if not isinstance(params, dict):
+                raise TypeError(
+                    f"Parameters for '{func_name}' must be a dict, got {type(params)}"
+                )
+            fn(**params)
+
+        # Save lightweight provenance after successful run
+        if log_recipe:
+            prov = {
+                "completed_recipe": list(functions_and_params.keys()),
+                "tool_version": self.VERSION,
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "metadata": self.metadata.to_dict(),
+            }
+            self._save_json_sidecar(prov, provenance_filename)

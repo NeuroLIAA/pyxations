@@ -57,7 +57,7 @@ class TobiiParse(BidsParse):
         }
         
         dfFix, dfSacc = eye_movement_detector.run_eye_movement_from_samples(
-            dfSample, 60,
+            60,
             x_label='Gaze3d_Left.x', y_label='Gaze3d_Left.y', config=config, )
         
 
@@ -65,16 +65,52 @@ class TobiiParse(BidsParse):
         #placeholder
         dfMsg = dfBlink = pd.DataFrame(columns=dfSample.columns)
 
-        pre_processing = PreProcessing(dfSample, dfFix,dfSacc,dfBlink, dfMsg, self.session_folder_path)
-        preprocessing_parameters = inspect.signature(pre_processing.split_all_into_trials).parameters.keys()
-        if all([arg in kwargs for arg in preprocessing_parameters]):
-            pre_processing.process({
-                #'bad_samples': {arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(pre_processing.bad_samples).parameters.keys()},
-                'split_all_into_trials': {arg:kwargs[arg] for arg in kwargs if arg in preprocessing_parameters},
-                #'saccades_direction': {},
-            })
+        pre_processing = PreProcessing(dfSample, dfFix, dfSacc, dfBlink, dfMsg, self.session_folder_path)
+
+        # ---- Decide which trialing API to use ----
+        prefer_durations = kwargs.get("prefer_durations", False)
+
+        have_explicit_times = ("start_times" in kwargs) and ("end_times" in kwargs)
+        have_durations     = ("start_msgs" in kwargs) and ("durations" in kwargs)
+        have_message_times = ("start_msgs" in kwargs) and ("end_msgs" in kwargs)
+
+        if not (have_explicit_times or have_durations or have_message_times):
+            print(
+                "Skipping preprocessing: not enough parameters for trial segmentation "
+                "(need (start_times & end_times) or (start_msgs & durations) or (start_msgs & end_msgs))."
+            )
         else:
-            print('Skipping preprocessing: not enough parameters.')
+            if have_explicit_times:
+                seg_func_name = "split_all_into_trials"
+            elif have_durations and (prefer_durations or not have_message_times):
+                seg_func_name = "split_all_into_trials_by_durations"
+            else:
+                seg_func_name = "split_all_into_trials_by_msgs"
+
+            seg_func = getattr(pre_processing, seg_func_name)
+            seg_sig = inspect.signature(seg_func).parameters
+            allowed = set(seg_sig.keys())
+
+            # superset of possible keys across the three APIs
+            candidate_keys = {
+                # common
+                "trial_labels",
+                # explicit times
+                "start_times", "end_times", "allow_open_last", "require_nonoverlap",
+                # messages (both _by_msgs and _by_durations use start_msgs)
+                "start_msgs", "end_msgs",
+                # durations
+                "durations",
+                # message-matching extras
+                "case_insensitive", "use_regex", "return_match_token",
+            }
+
+            seg_params = {k: v for k, v in kwargs.items() if (k in candidate_keys and k in allowed)}
+
+            # Run via the declarative orchestrator (writes recipe/provenance JSONs)
+            pre_processing.process({
+                seg_func_name: seg_params
+            })
         
         
 
