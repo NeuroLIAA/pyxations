@@ -320,7 +320,6 @@ class EyelinkParse(BidsParse):
         }
         pre_processing.process(recipe)
 
-
         if not keep_ascii:
             ascii_file_path.unlink(missing_ok=True)
     
@@ -329,7 +328,7 @@ class EyelinkParse(BidsParse):
         if not dfMsg.empty:
             self.save_dataframe(dfMsg, self.session_folder_path, 'msg', key='msg')
         self.save_dataframe(dfCalib, self.session_folder_path, 'calib', key='calib')
-        self.save_dataframe(dfSamples, self.session_folder_path, 'samples', key='samples')
-        self.save_dataframe(dfBlink, (self.session_folder_path / f'{detection_algorithm}_events'), 'blink', key='blink')
-        self.save_dataframe(dfFix, (self.session_folder_path / f'{detection_algorithm}_events'), 'fix', key='fix')
-        self.save_dataframe(dfSacc, (self.session_folder_path / f'{detection_algorithm}_events'), 'sacc', key='sacc')
+        self.save_dataframe(pre_processing.samples, self.session_folder_path, 'samples', key='samples')
+        self.save_dataframe(pre_processing.blinks, (self.session_folder_path / f'{detection_algorithm}_events'), 'blink', key='blink')
+        self.save_dataframe(pre_processing.fixations, (self.session_folder_path / f'{detection_algorithm}_events'), 'fix', key='fix')
+        self.save_dataframe(pre_processing.saccades, (self.session_folder_path / f'{detection_algorithm}_events'), 'sacc', key='sacc')

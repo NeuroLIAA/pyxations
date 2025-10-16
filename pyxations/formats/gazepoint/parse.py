@@ -99,7 +99,10 @@ class GazePointParse(BidsParse):
             pre_processing.process({
                 seg_func_name: seg_params
             })
-        
+        dfSample = pre_processing.samples
+        dfBlink = pre_processing.blinks
+        dfFix = pre_processing.fixations
+        dfSacc = pre_processing.saccades
         
         self.store_dataframes(dfSample, dfBlink=dfBlink, dfFix=dfFix, dfSacc=dfSacc)
 

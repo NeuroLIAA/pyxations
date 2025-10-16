@@ -55,7 +55,7 @@ class TobiiParse(BidsParse):
             'pupil_data': dfSample['PupilDiam_Left'],
             'max_pso_dur': 0.3
         }
-        
+        self.detection_algorithm = detection_algorithm
         dfFix, dfSacc = eye_movement_detector.run_eye_movement_from_samples(
             60,
             x_label='Gaze3d_Left.x', y_label='Gaze3d_Left.y', config=config, )
@@ -112,10 +112,12 @@ class TobiiParse(BidsParse):
                 seg_func_name: seg_params
             })
         
-        
+        dfSample = pre_processing.samples
+        dfFix = pre_processing.fixations
+        dfSacc = pre_processing.saccades        
 
         
-        self.detection_algorithm = detection_algorithm
+        
         self.store_dataframes(dfSample, dfFix=dfFix, dfSacc=dfSacc)
 
         return df
