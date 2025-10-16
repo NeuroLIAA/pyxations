@@ -12,7 +12,7 @@ This page gives an overview of all public pyxations objects, functions and metho
 
 ## eye_movement_detection
 
-::: pyxations.eye_movement_detection
+::: pyxations.methods.eyemovement.eye_movement_detection
 
 ## visualization
 
