@@ -9,7 +9,9 @@ import numpy as np
 from pyxations.analysis.generic import Experiment, Subject, Session, Trial, _find_fixation_cutoff, STIMULI_FOLDER, ITEMS_FOLDER
 import multimatch_gaze as mm
 
-
+def _as(obj, typ):
+    if isinstance(obj, typ): return obj
+    return ast.literal_eval(obj)
 class VisualSearchExperiment(Experiment):
     def __init__(self, dataset_path: str,search_phase_name: str,memorization_phase_name: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
         self.dataset_path = Path(dataset_path)
@@ -884,7 +886,7 @@ class VisualSearchSession(Session):
         # Validate that all required columns are present
         missing_columns = set(self.BEH_COLUMNS) - set(self.behavior_data.columns)
         if missing_columns:
-            raise ValueError(f"Missing columns in behavior data: {missing_columns}")
+            raise ValueError(f"Missing columns in behavior data: {missing_columns} for session {self.session_id} of subject {self.subject.subject_id}")
 
     def _init_trials(self,samples,fix,sacc,blink,events_path):
         self._trials = {trial:
@@ -1028,14 +1030,14 @@ class VisualSearchTrial(Trial):
         self._target = trial_data.select("target").item()
         
         if self._target_present:
-            self._target_location = ast.literal_eval(trial_data.select("target_location").item())
+            self._target_location = _as(trial_data.select("target_location").item(), tuple)
 
         self._correct_response = trial_data.select("correct_response").item()
         self._stimulus = trial_data.select("stimulus").item()
-        self._stimulus_coords = ast.literal_eval(trial_data.select("stimulus_coords").item())
-        
-        self._memory_set = ast.literal_eval(trial_data.select("memory_set").item())
-        self._memory_set_locations = ast.literal_eval(trial_data.select("memory_set_locations").item())
+        self._stimulus_coords = _as(trial_data.select("stimulus_coords").item(), tuple)
+
+        self._memory_set = _as(trial_data.select("memory_set").item(), list)
+        self._memory_set_locations = _as(trial_data.select("memory_set_locations").item(), list)
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
         self._was_answered = trial_data.select("was_answered").item()
@@ -1088,65 +1090,41 @@ class VisualSearchTrial(Trial):
         filtered = self._samples.filter(pl.col("phase") != "")
 
         # Calculate RT as the difference between last and first tSample per phase
-        rts = (
+        self._rts = (
             filtered
             .group_by("phase")
-            .agg([
-                (pl.col("tSample").max() - pl.col("tSample").min()).alias("rt")
-            ])
+            .agg((pl.col("tSample").max() - pl.col("tSample").min()).alias("rt"))
             .with_columns([
-                pl.lit(self.trial_number).alias("trial_number")
+                pl.lit(self.trial_number).alias("trial_number"),
+                pl.lit(len(self._memory_set)).alias("memory_set_size"),
+                pl.lit(self._target_present).alias("target_present"),
+                pl.lit(self._correct_response).alias("correct_response"),
+                pl.lit(self._stimulus).alias("stimulus"),
+                pl.lit(self._target).alias("target"),
+                pl.lit(self._was_answered).alias("was_answered"),
             ])
         )
-        self._rts = rts
-        # add trial number to a new column
-        self._rts = self._rts.with_columns([
-            pl.lit(self.trial_number).alias("trial_number")])
-        self._rts = self._rts.with_columns([
-            pl.lit(len(self._memory_set)).alias("memory_set_size")])
-        self._rts = self._rts.with_columns([
-            pl.lit(self._target_present).alias("target_present")])
-        self._rts = self._rts.with_columns([
-            pl.lit(self._correct_response).alias("correct_response")])
-        self._rts = self._rts.with_columns([
-            pl.lit(self._stimulus).alias("stimulus")])
-        self._rts = self._rts.with_columns([
-            pl.lit(self._target).alias("target")])
-        self._rts = self._rts.with_columns([
-            pl.lit(self._was_answered).alias("was_answered")])
 
 
     def fixations(self):
-        fixations = super().fixations()
-        fixations = fixations.with_columns([
-            pl.lit(self._target_present).alias("target_present")])
-
-        fixations= fixations.with_columns([
-            pl.lit(self._correct_response).alias("correct_response")])
-        fixations = fixations.with_columns([
-            pl.lit(self._stimulus).alias("stimulus")])
-        fixations = fixations.with_columns([
-            pl.lit(self._target).alias("target")])
-        fixations = fixations.with_columns([
-            pl.lit(self._memory_set).alias("memory_set")])
-
+        fixations = super().fixations().with_columns([
+            pl.lit(self._target_present).alias("target_present"),
+            pl.lit(self._correct_response).alias("correct_response"),
+            pl.lit(self._stimulus).alias("stimulus"),
+            pl.lit(self._target).alias("target"),
+            pl.lit(self._memory_set).alias("memory_set"),
+        ])
         return fixations
-    
+
 
     def saccades(self):
-        saccades = super().saccades()
-
-        saccades = saccades.with_columns([
-            pl.lit(self._target_present).alias("target_present")])
-        saccades = saccades.with_columns([
-            pl.lit(self._correct_response).alias("correct_response")])
-        saccades = saccades.with_columns([
-            pl.lit(self._stimulus).alias("stimulus")])
-        saccades = saccades.with_columns([
-            pl.lit(self._target).alias("target")])
-        saccades = saccades.with_columns([
-            pl.lit(self._memory_set).alias("memory_set")])
-
+        saccades = super().saccades().with_columns([
+            pl.lit(self._target_present).alias("target_present"),
+            pl.lit(self._correct_response).alias("correct_response"),
+            pl.lit(self._stimulus).alias("stimulus"),
+            pl.lit(self._target).alias("target"),
+            pl.lit(self._memory_set).alias("memory_set"),
+        ])
         return saccades
 
     def compute_multimatch(self,other_trial: "VisualSearchTrial",screen_height,screen_width):
@@ -1166,19 +1144,19 @@ class VisualSearchTrial(Trial):
         return self.fixations().filter(pl.col("phase") == self._search_phase_name).sort(by="tStart")
     
     def memorization_fixations(self):
-        return self.fixations().filter(pl.col("phase") == self._search_phase_name).sort(by="tStart")
-    
+        return self.fixations().filter(pl.col("phase") == self._memorization_phase_name).sort(by="tStart")
+
     def search_saccades(self):
         return self.saccades().filter(pl.col("phase") == self._search_phase_name).sort(by="tStart")
     
     def memorization_saccades(self):
-        return self.saccades().filter(pl.col("phase") == self._search_phase_name).sort(by="tStart")
+        return self.saccades().filter(pl.col("phase") == self._memorization_phase_name).sort(by="tStart")
     
     def search_samples(self):
-        return self.samples().filter(pl.col("phase") == self._search_phase_name).sort(by="tStart")
+        return self.samples().filter(pl.col("phase") == self._search_phase_name).sort(by="tSample")
     
     def memorization_samples(self):
-        return self.samples().filter(pl.col("phase") == self._search_phase_name).sort(by="tStart")
+        return self.samples().filter(pl.col("phase") == self._memorization_phase_name).sort(by="tSample")
     
     def scanpath_by_stimuli(self):
         return {"fixations": self.search_fixations(), "stimulus": self._stimulus,"correct_response":self._correct_response,"target_present":self._target_present,"memory_set_size":len(self._memory_set)}
