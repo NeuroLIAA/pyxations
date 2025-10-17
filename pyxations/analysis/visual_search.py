@@ -57,8 +57,10 @@ class VisualSearchExperiment(Experiment):
         mem_set_sizes = correct_responses["memory_set_size"].unique()
         mem_set_sizes.sort()
 
+        width_size = max(0.25 * len(correct_responses["subject_id"].unique()),10)
+
         n_rows = len(mem_set_sizes)
-        fig, axs = plt.subplots(n_rows, 1, figsize=(10, 5 * n_rows),sharey=True)
+        fig, axs = plt.subplots(n_rows, 1, figsize=(width_size, 5 * n_rows),sharey=True)
 
         if n_rows == 1:
             axs = np.array([axs])
@@ -98,7 +100,9 @@ class VisualSearchExperiment(Experiment):
         mem_set_sizes = sorted(correct_responses["memory_set_size"].unique())
         n_rows = len(mem_set_sizes)
 
-        fig, axs = plt.subplots(n_rows, 1, figsize=(10, 5 * n_rows), sharey=True)
+        width_size = max(0.25 * len(correct_responses["stimulus"].unique()),10)
+
+        fig, axs = plt.subplots(n_rows, 1, figsize=(width_size, 5 * n_rows), sharey=True)
 
         if n_rows == 1:
             axs = np.array([axs])
