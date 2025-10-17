@@ -17,7 +17,7 @@ class RemodnavDetection(EyeMovementDetection):
     def detect_eye_movements(self, min_pursuit_dur:float=10., max_pso_dur:float=0.0, min_fix_dur:float=0.05,
                                  sac_max_vel:float=1000., fix_max_amp:float=1.5, sac_time_thresh:float=0.002,
                                  drop_fix_from_blink:bool=True, screen_size:float=38., screen_width:int=1920, screen_distance:float=60,
-                                 savgol_length=0.19):
+                                 savgol_length=0.195):
         
         """
         Detects fixations and saccades from eye-tracking data for both left and right eyes using REMoDNaV, a velocity based eye movement event detection algorithm 

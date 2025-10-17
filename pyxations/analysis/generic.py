@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib import colormaps
 import weakref
+import warnings
 
 STIMULI_FOLDER = "stimuli"
 ITEMS_FOLDER = "items"
@@ -299,16 +300,37 @@ class Experiment:
             .set_index("subject_id")
         )
         heatmap_data = heatmap_data[sorted(heatmap_data.columns, key=lambda x: int(x))]
-        # Step 5: Plot
-        plt.figure(figsize=(20, 24))
+        
+        # Step 5: Plot with adaptive sizing
+        n_subjects = heatmap_data.shape[0]
+        n_trials = heatmap_data.shape[1]
+
+        # Define a base size per cell, then scale it
+        cell_width = 0.5   # width per trial column
+        cell_height = 0.2  # height per subject row
+
+        # Limit extremes so it doesn’t explode with huge data
+        fig_width = max(10, min(cell_width * n_trials, 40))
+        fig_height = max(8, min(cell_height * n_subjects, 40))
+
+        plt.figure(figsize=(fig_width, fig_height))
         sns.heatmap(
             heatmap_data,
-            cmap=cmap, center=0.5, vmin=0,
-            linewidths=0.3, linecolor="grey", cbar_kws=dict(label="Avg. error (°)")
+            cmap=cmap,
+            center=0.5,
+            vmin=0,
+            linewidths=0.3,
+            linecolor="grey",
+            cbar_kws=dict(label="Avg. error (°)")
         )
-        plt.xlabel("Trial #")
-        plt.ylabel("Subject")
-        plt.title("Calibration Error per Subject and Trial")
+        plt.xlabel("Trial #", fontsize=14)
+        plt.ylabel("Subject", fontsize=14)
+        plt.title("Calibration Error per Subject and Trial", fontsize=16)
+
+        # Rotate labels
+        plt.xticks(rotation=45, ha="right", fontsize=10)
+        plt.yticks(rotation=0, ha="right", va="center", fontsize=10)  # horizontal y labels
+
         plt.tight_layout()
         plt.show()
         plt.close()
@@ -773,19 +795,39 @@ class Trial:
         short_fix = short_fix.rename({"tStart": "tStart_fix",
                                     "tEnd":   "tEnd_fix"})
 
-        short_fix = (short_fix
-                    .join_asof(prev_src,
-                                left_on="tStart_fix", right_on="t",
-                                by=["phase", "eye"],
-                                strategy="backward")
-                    .rename({"idx": "idx_prev"})
-                    .drop("t")
-                    .join_asof(next_src,
-                                left_on="tEnd_fix", right_on="t",
-                                by=["phase", "eye"],
-                                strategy="forward")
-                    .rename({"idx": "idx_next"})
-                    .drop("t"))
+
+
+        short_fix = short_fix.sort(["phase", "eye", "tStart_fix"])
+        prev_src  = prev_src.sort(["phase", "eye", "t"])
+        next_src  = next_src.sort(["phase", "eye", "t"])
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Sortedness of columns cannot be checked when 'by' groups provided",
+                category=UserWarning,
+            )
+
+            short_fix = (
+                short_fix
+                .join_asof(
+                    prev_src,
+                    left_on="tStart_fix",
+                    right_on="t",
+                    by=["phase", "eye"],
+                    strategy="backward"
+                )
+                .rename({"idx": "idx_prev"})
+                .drop("t")
+                .join_asof(
+                    next_src,
+                    left_on="tEnd_fix",
+                    right_on="t",
+                    by=["phase", "eye"],
+                    strategy="forward"
+                )
+                .rename({"idx": "idx_next"})
+                .drop("t")
+            )
 
         # only keep rows where we found BOTH neighbours
         short_fix_pairs = short_fix.select(["idx_prev", "idx_next"]).drop_nulls()
