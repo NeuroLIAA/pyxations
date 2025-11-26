@@ -32,4 +32,4 @@ jobs:
 
       - run: uv pip install --system pytest
 
-      - run: pytest -q
+      - run: pytest -vv -ra
