@@ -7,7 +7,7 @@
   </p>
 </div>
 
-
+[📘 Documentation](https://neuroliaa.github.io/pyxations/)  
 ## Features
 
 - **BIDS Conversion**: Convert your dataset to BIDS format, automatically organizing files according to BIDS standards.
@@ -55,20 +55,36 @@ Or directly with `pip`:
 ```bash
 pip install pyxations
 ```
+
+## Documentation
+
+### Full documentation and API reference are available at https://neuroliaa.github.io/pyxations
+
 ## Usage
 ### Minimal example
 ```python
 import pyxations as pyx
 
+# 1) Convert raw files to BIDS
 pyx.dataset_to_bids(
     target_folder_path=" Path/to/the/folder/where/the/BIDS/dataset/will/be/created", 
     files_folder_path="Path/to/the/folder/containing/the/EDF/files",  
     dataset_name="dataset_name",
 )
 
+# 2) Compute derivatives using REMoDNaV
+msg_keywords = ["begin", "end", "press"]
+start_msgs   = {"search": ["beginning_of_stimuli"]}
+end_msgs     = {"search": ["end_of_stimuli"]}
+
 pyx.compute_derivatives_for_dataset(
-    bids_dataset_folder="Path/to/dataset_name",
-    msg_keywords=["start_msg", "end_msg"], # multiple msg keywords are allowed
+    bids_path,
+    dataset_format="eyelink",
+    detection_algorithm="remodnav",
+    msg_keywords=msg_keywords,
+    start_msgs=start_msgs,
+    end_msgs=end_msgs,
+    overwrite=True,
 )
 ```
 
