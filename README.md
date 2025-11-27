@@ -58,7 +58,7 @@ pip install pyxations
 
 ## Documentation
 
-### Full documentation and API reference are available at https://neuroliaa.github.io/pyxations
+#### Full documentation and API reference are available at https://neuroliaa.github.io/pyxations
 
 ## Usage
 ### Minimal example
