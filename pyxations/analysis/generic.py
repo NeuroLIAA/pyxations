@@ -111,7 +111,7 @@ class Experiment:
         self.dataset_path = Path(dataset_path)
         self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
         self.metadata = pl.read_csv(self.dataset_path / "participants.tsv", separator="\t", 
-                                    dtypes={"subject_id": pl.Utf8, "old_subject_id": pl.Utf8})
+                                    schema_overrides={"subject_id": pl.Utf8, "old_subject_id": pl.Utf8})
         self.subjects = { subject_id:
             Subject(subject_id, old_subject_id, self, 
                      excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}),export_format)
