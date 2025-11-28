@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyxations"
-version = "0.2.0"
-description = "A Python package for handling eyetracking data"
+version = "0.2.7"
+description = "Pyxations: a Python-based toolbox to organize, parse, and analyse eye-movement data"
 authors = [{name = "NeuroLIAA"}]
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,9 +23,9 @@ dependencies = [
     "msgpack==1.1.0",
     "multimatch-gaze==0.1.3",
     "numexpr==2.10.2",
-    "numpy==1.24.4",
     "packaging==24.2",
-    "pandas==2.3.3",
+    "numpy>=1.24,<2.0",
+    "pandas>=1.5,<2.2",
     "polars==1.26.0",
     "patsy==1.0.1",
     "pillow==11.1.0",

@@ -1,7 +1,14 @@
 # Pyxations
 
 <div>
-  <img src="docs/images/pyxations_improved_logo.png" alt="pyxations logo" style="width: 200px; float: left; margin-right: 20px;"/>
+  <table>
+    <tr>
+       <td>
+          <img src="https://raw.githubusercontent.com/NeuroLIAA/pyxations/main/docs/images/pyxations_improved_logo.png" alt="pyxations logo" width="180">
+       </td>
+    </tr>
+</table>
+ 
   <p>
     <strong>Pyxations</strong> is a Python library designed to analyze eye-tracking data, whether you are working with raw eye-tracking data or processed datasets. It helps researchers and developers extract useful insights from complex eye movements using Python's robust ecosystem.
   </p>

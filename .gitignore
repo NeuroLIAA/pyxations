@@ -16,6 +16,7 @@ env/
 *pyxations.egg-info
 */build
 *.ipynb_checkpoints
+dist/
 
 # Ignore vscode
 /.vscode 
