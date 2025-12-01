@@ -5,7 +5,7 @@ import matplotlib.colors as mplcolors
 import polars as pl
 from pyxations.bids_formatting import EYE_MOVEMENT_DETECTION_DICT
 from pathlib import Path
-
+from collections import OrderedDict
 
 class Visualization():
     def __init__(self, derivatives_folder_path,events_detection_algorithm):
@@ -80,15 +80,36 @@ class Visualization():
             ax_main.set_ylim(screen_height, 0)
             return fig, ax_main, ax_gaze
 
-        def _maybe_cache_img(path: str):
-            if path not in _img_cache:
-                _img_cache[path] = mpimg.imread(path)
-            return _img_cache[path]
+        def _maybe_cache_img(path):
+            """Load image from disk with a small LRU cache."""
+
+            # Cache hit: move to the end (most recently used)
+            if path in _img_cache:
+                img = _img_cache.pop(path)
+                _img_cache[path] = img
+                return img
+
+            # Cache miss: load image
+            img = mpimg.imread(path)
+
+            # Optional: reduce memory if image is float64 in [0, 1]
+            if isinstance(img, np.ndarray) and img.dtype == np.float64:
+                img = (img * 255).clip(0, 255).astype(np.uint8)
+
+            # Insert into cache
+            _img_cache[path] = img
+
+            # If cache too big, drop least recently used item
+            if len(_img_cache) > _MAX_CACHE_ITEMS:
+                _img_cache.popitem(last=False)  # pops the oldest inserted item
+
+            return img
 
         # ---------------------------------------------------------------------------
         plot_saccades = saccades is not None
         plot_samples = samples is not None
-        _img_cache: dict[str, np.ndarray] = {}
+        _img_cache = OrderedDict()
+        _MAX_CACHE_ITEMS = 8  # or 5, 10, etc. Tune as you like.
 
         trial_idx = fixations["trial_number"][0]
 
