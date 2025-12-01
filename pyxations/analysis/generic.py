@@ -10,6 +10,7 @@ import seaborn as sns
 from matplotlib import colormaps
 import weakref
 import warnings
+import multimatch_gaze as mm
 
 STIMULI_FOLDER = "stimuli"
 ITEMS_FOLDER = "items"
@@ -1093,3 +1094,16 @@ class Trial:
         if rt_row.is_empty():
             return False  # Or True if no data should be considered long
         return rt_row.select("rt").item() > seconds * 1000.0
+
+    def compute_multimatch(self,other_trial: "Trial",screen_height,screen_width):
+        trial_scanpath = self.search_fixations().to_pandas()
+        trial_to_compare_scanpath = other_trial.search_fixations().to_pandas()
+        # Turn trial scanpath into list of tuples
+        trial_scanpath = [tuple(row) for row in trial_scanpath[["xAvg", "yAvg", "duration"]].values]
+        trial_to_compare_scanpath = [tuple(row) for row in trial_to_compare_scanpath[["xAvg", "yAvg", "duration"]].values]
+
+        # Convert the list of tuples into a numpy array with the format needed for the multimatch function
+        trial_scanpath = np.array(trial_scanpath, dtype=[('start_x', '<f8'), ('start_y', '<f8'), ('duration', '<f8')])
+        trial_to_compare_scanpath = np.array(trial_to_compare_scanpath, dtype=[('start_x', '<f8'), ('start_y', '<f8'), ('duration', '<f8')])
+
+        return mm.docomparison(trial_scanpath, trial_to_compare_scanpath, (screen_width, screen_height))
