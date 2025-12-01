@@ -178,7 +178,7 @@ class Experiment:
             print(f"Removed {amount_trials_total - self.rts().shape[0]} trials longer than {seconds} seconds.")
     
     def plot_scanpaths(self,screen_height,screen_width,display: bool = False):
-        with ProcessPoolExecutor() as executor:
+        with ProcessPoolExecutor(8) as executor:
             futures = [executor.submit(subject.plot_scanpaths,screen_height,screen_width,display) for subject in self.subjects.values()]
             for future in as_completed(futures):
                 future.result()
