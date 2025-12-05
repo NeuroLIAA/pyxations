@@ -1179,3 +1179,63 @@ class VisualSearchTrial(Trial):
             phase_data[self._search_phase_name]["bbox"] = self._target_location
         vis.scanpath(fixations=self._fix,phase_data=phase_data, saccades=self._sacc, samples=self._samples, screen_height=screen_height, screen_width=screen_width, 
                       folder_path=self.events_path / "plots", **kwargs)
+
+    def plot_animation(self, screen_height, screen_width, video_path=None, background_image_path=None, **kwargs):
+        """
+        Create an animated visualization of eye-tracking data for this trial.
+
+        When a video is provided, the animation syncs gaze samples with video frames.
+        When no video is provided, gaze points are animated on a grey background,
+        or a provided background image (e.g., the stimulus image), using the sample 
+        timestamps for timing.
+
+        Parameters
+        ----------
+        screen_height, screen_width
+            Stimulus resolution in pixels.
+        video_path
+            Path to a video file. If provided, gaze is overlaid on video frames.
+        background_image_path
+            Path to a background image. Only used when video_path is None.
+            If None and no video, uses the search stimulus as background if available,
+            otherwise uses a grey background.
+        **kwargs
+            Additional arguments passed to Visualization.plot_animation():
+            - folder_path: Directory to save the animation
+            - tmin, tmax: Time window in ms
+            - seconds_to_show: Limit animation to first N seconds
+            - scale_factor: Resolution scaling (default 0.5)
+            - gaze_radius: Gaze point radius in pixels
+            - gaze_color: RGB tuple for gaze color
+            - fps: Animation frames per second
+            - output_format: "html" (default), "mp4", "gif", or "matplotlib"
+            - display: If True, return HTML for notebook display
+
+        Returns
+        -------
+        IPython.display.HTML or None
+            Returns HTML animation if display=True and output_format="html".
+            For output_format="matplotlib", displays in a GUI window and returns None.
+        """
+        vis = Visualization(self.events_path, self.detection_algorithm)
+        (self.events_path / "plots").mkdir(parents=True, exist_ok=True)
+
+        # Set default folder_path if not provided
+        if 'folder_path' not in kwargs:
+            kwargs['folder_path'] = self.events_path / "plots"
+
+        # If no background image provided and no video, try to use the stimulus
+        if video_path is None and background_image_path is None:
+            dataset_parent_folder = self.events_path.parent.parent.parent.parent
+            stimulus_path = dataset_parent_folder / STIMULI_FOLDER / self._stimulus
+            if stimulus_path.exists():
+                background_image_path = stimulus_path
+
+        return vis.plot_animation(
+            samples=self._samples,
+            screen_height=screen_height,
+            screen_width=screen_width,
+            video_path=video_path,
+            background_image_path=background_image_path,
+            **kwargs
+        )

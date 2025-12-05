@@ -410,3 +410,337 @@ class Visualization():
             if display:
                 plt.show()
             plt.close()
+    
+    def plot_animation(
+        self,
+        samples: pl.DataFrame,
+        screen_height: int,
+        screen_width: int,
+        video_path: str | Path | None = None,
+        background_image_path: str | Path | None = None,
+        folder_path: str | Path | None = None,
+        tmin: int | None = None,
+        tmax: int | None = None,
+        seconds_to_show: float | None = None,
+        scale_factor: float = 0.5,
+        gaze_radius: int = 10,
+        gaze_color: tuple = (255, 0, 0),
+        fps: float | None = None,
+        output_format: str = "matplotlib",
+        display: bool = True,
+    ):
+        """
+        Create an animated visualization of eye-tracking data.
+
+        When a video is provided, the animation syncs gaze samples with video frames.
+        When no video is provided, gaze points are animated on a grey background or
+        a provided background image, using the sample timestamps for timing.
+
+        Parameters
+        ----------
+        samples
+            Polars DataFrame with gaze samples. Must contain 'tSample' and gaze
+            position columns ('X', 'Y' or 'LX', 'LY', 'RX', 'RY').
+        screen_height, screen_width
+            Stimulus resolution in pixels.
+        video_path
+            Path to a video file. If provided, gaze is overlaid on video frames.
+        background_image_path
+            Path to a background image. Only used when video_path is None.
+            If both are None, a grey background is used.
+        folder_path
+            Directory where the animation will be saved. If None, nothing is saved.
+            The file format depends on `output_format`.
+        tmin, tmax
+            Time window in **ms**. If both None, the whole trial is plotted.
+        seconds_to_show
+            Limit the animation to the first N seconds. If None, shows all available data.
+        scale_factor
+            Resolution scaling factor (1.0 = original, 0.5 = half resolution).
+        gaze_radius
+            Radius of the gaze point circle in pixels (before scaling).
+        gaze_color
+            RGB tuple for gaze point color.
+        fps
+            Frames per second for the animation. If None:
+            - With video: uses the video's native FPS
+            - Without video: defaults to 60 FPS
+        output_format
+            Output format for saved animations:
+            - "html": Interactive HTML file (default, works in browsers)
+            - "mp4": Video file (requires ffmpeg)
+            - "gif": Animated GIF file (requires pillow)
+            - "matplotlib": Show in matplotlib GUI window (blocking)
+        display
+            If True and output_format is "html", returns an HTML object for notebooks.
+            If output_format is "matplotlib", this is ignored (always shows window).
+            If False, only saves to file (if folder_path is provided).
+
+        Returns
+        -------
+        IPython.display.HTML or None
+            Returns HTML animation if display=True and output_format="html", otherwise None.
+        """
+        try:
+            import cv2
+            from matplotlib.animation import FuncAnimation
+            import matplotlib as mpl
+            mpl.rcParams['animation.embed_limit'] = 100
+        except ImportError as e:
+            raise ImportError(
+                f"Missing required dependency for animation: {e}. "
+                "Please install cv2 (opencv-python)."
+            )
+
+        # Validate output_format
+        valid_formats = ["html", "mp4", "gif", "matplotlib"]
+        if output_format not in valid_formats:
+            raise ValueError(f"output_format must be one of {valid_formats}, got '{output_format}'")
+
+        # ---- Determine gaze columns ----
+        if "X" in samples.columns and "Y" in samples.columns:
+            x_col, y_col = "X", "Y"
+        elif "LX" in samples.columns and "LY" in samples.columns:
+            x_col, y_col = "LX", "LY"
+        elif "RX" in samples.columns and "RY" in samples.columns:
+            x_col, y_col = "RX", "RY"
+        else:
+            raise ValueError("Samples DataFrame must contain gaze columns (X, Y) or (LX, LY) or (RX, RY)")
+
+        # ---- Time filter ----
+        if tmin is not None and tmax is not None:
+            samples = samples.filter(pl.col("tSample").is_between(tmin, tmax))
+
+        if samples.is_empty():
+            raise ValueError("No samples available after time filtering")
+
+        # ---- Drop NaN gaze values ----
+        samples = samples.filter(pl.col(x_col).is_not_null() & pl.col(y_col).is_not_null())
+
+        # ---- Calculate scaled dimensions ----
+        scaled_width = int(screen_width * scale_factor)
+        scaled_height = int(screen_height * scale_factor)
+
+        trial_idx = samples["trial_number"][0] if "trial_number" in samples.columns else 0
+
+        # ================= WITH VIDEO =================
+        if video_path is not None:
+            video_path = Path(video_path)
+            if not video_path.exists():
+                raise FileNotFoundError(f"Video file not found: {video_path}")
+
+            cap = cv2.VideoCapture(str(video_path))
+            video_fps = cap.get(cv2.CAP_PROP_FPS)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            video_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+            if fps is None:
+                fps = video_fps
+
+            # Calculate time to frame mapping
+            t_start = samples["tSample"].min()
+            t_end = samples["tSample"].max()
+            trial_duration = t_end - t_start
+
+            # Create frame-to-time mapping
+            frame_edges = np.linspace(t_start, t_end, total_frames + 1)
+            frame_times = ((frame_edges[:-1] + frame_edges[1:]) / 2).astype(int)
+
+            # Build a lookup: frame_index -> list of gaze points
+            samples_np = samples.select([x_col, y_col, "tSample"]).to_numpy()
+            gaze_by_frame = {i: [] for i in range(total_frames)}
+
+            for x, y, t in samples_np:
+                # Find the closest frame
+                frame_idx = np.searchsorted(frame_times, t, side='right') - 1
+                frame_idx = max(0, min(frame_idx, total_frames - 1))
+                gaze_by_frame[frame_idx].append((x, y))
+
+            # Limit frames if seconds_to_show is set
+            frames_to_show = total_frames
+            if seconds_to_show is not None:
+                frames_to_show = min(int(fps * seconds_to_show), total_frames)
+
+            # Reset video
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+            # Create figure
+            fig, ax = plt.subplots(figsize=(10 * scale_factor, 6 * scale_factor))
+            ax.axis('off')
+
+            # Initialize with first frame
+            ret, frame = cap.read()
+            if not ret:
+                cap.release()
+                raise RuntimeError("Could not read first frame from video")
+
+            frame_resized = cv2.resize(frame, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
+            frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+            im = ax.imshow(frame_rgb)
+
+            def update_frame_video(frame_idx):
+                ret, frame = cap.read()
+                if not ret:
+                    return [im]
+
+                frame_resized = cv2.resize(frame, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
+                frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+
+                # Draw gaze points for this frame
+                for gx, gy in gaze_by_frame.get(frame_idx, []):
+                    scaled_x = int(gx * scale_factor)
+                    scaled_y = int(gy * scale_factor)
+                    if 0 <= scaled_x < scaled_width and 0 <= scaled_y < scaled_height:
+                        radius = max(3, int(gaze_radius * scale_factor))
+                        cv2.circle(frame_rgb, (scaled_x, scaled_y), radius=radius, color=gaze_color, thickness=-1)
+
+                im.set_array(frame_rgb)
+                return [im]
+
+            anim = FuncAnimation(fig, update_frame_video, frames=frames_to_show,
+                                 interval=1000/fps, blit=True, repeat=True)
+
+        # ================= WITHOUT VIDEO =================
+        else:
+            if fps is None:
+                fps = 60  # Default FPS for sample-based animation
+
+            # Prepare background
+            if background_image_path is not None:
+                bg_path = Path(background_image_path)
+                if not bg_path.exists():
+                    raise FileNotFoundError(f"Background image not found: {bg_path}")
+                bg_img = mpimg.imread(str(bg_path))
+                if bg_img.dtype == np.float64:
+                    bg_img = (bg_img * 255).clip(0, 255).astype(np.uint8)
+                # Resize background to match screen dimensions then scale
+                bg_img = cv2.resize(bg_img, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
+            else:
+                # Grey background
+                bg_img = np.ones((scaled_height, scaled_width, 3), dtype=np.uint8) * 128
+
+            # Get time range
+            t_start = samples["tSample"].min()
+            t_end = samples["tSample"].max()
+            trial_duration = t_end - t_start
+
+            # Limit duration if seconds_to_show is set
+            if seconds_to_show is not None:
+                t_end = min(t_end, t_start + int(seconds_to_show * 1000))
+                samples = samples.filter(pl.col("tSample") <= t_end)
+                trial_duration = t_end - t_start
+
+            # Calculate total frames based on duration and fps
+            total_frames = int((trial_duration / 1000) * fps)
+            if total_frames < 1:
+                total_frames = 1
+
+            # Create time bins for each animation frame
+            frame_times = np.linspace(t_start, t_end, total_frames + 1)
+
+            # Build gaze lookup by frame
+            samples_np = samples.select([x_col, y_col, "tSample"]).to_numpy()
+            gaze_by_frame = {i: [] for i in range(total_frames)}
+
+            for x, y, t in samples_np:
+                frame_idx = np.searchsorted(frame_times, t, side='right') - 1
+                frame_idx = max(0, min(frame_idx, total_frames - 1))
+                gaze_by_frame[frame_idx].append((x, y))
+
+            # Create figure
+            fig, ax = plt.subplots(figsize=(10 * scale_factor, 6 * scale_factor))
+            ax.axis('off')
+
+            # Initialize with background
+            im = ax.imshow(bg_img.copy())
+
+            def update_frame_no_video(frame_idx):
+                # Start with fresh background copy
+                frame_rgb = bg_img.copy()
+
+                # Draw gaze points for this frame
+                for gx, gy in gaze_by_frame.get(frame_idx, []):
+                    scaled_x = int(gx * scale_factor)
+                    scaled_y = int(gy * scale_factor)
+                    if 0 <= scaled_x < scaled_width and 0 <= scaled_y < scaled_height:
+                        radius = max(3, int(gaze_radius * scale_factor))
+                        cv2.circle(frame_rgb, (scaled_x, scaled_y), radius=radius, color=gaze_color, thickness=-1)
+
+                im.set_array(frame_rgb)
+                return [im]
+
+            anim = FuncAnimation(fig, update_frame_no_video, frames=total_frames,
+                                 interval=1000/fps, blit=True, repeat=True)
+
+        # ================= SAVE / DISPLAY =================
+        result = None
+        trial_idx_val = trial_idx
+        
+        # Build output filename
+        anim_name = f"animation_{trial_idx_val}"
+        if tmin is not None and tmax is not None:
+            anim_name += f"_{tmin}_{tmax}"
+
+        # Handle different output formats
+        if output_format == "matplotlib":
+            # Show in matplotlib GUI window (blocking)
+            plt.show()
+            # Cleanup video capture if used
+            if video_path is not None:
+                cap.release()
+            return None
+
+        elif output_format == "mp4":
+            if folder_path:
+                folder_path = Path(folder_path)
+                folder_path.mkdir(parents=True, exist_ok=True)
+                out_path = folder_path / f"{anim_name}.mp4"
+                try:
+                    anim.save(str(out_path), writer='ffmpeg', fps=fps)
+                    print(f"Animation saved to: {out_path}")
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to save MP4. Make sure ffmpeg is installed. Error: {e}"
+                    )
+            plt.close(fig)
+
+        elif output_format == "gif":
+            if folder_path:
+                folder_path = Path(folder_path)
+                folder_path.mkdir(parents=True, exist_ok=True)
+                out_path = folder_path / f"{anim_name}.gif"
+                try:
+                    anim.save(str(out_path), writer='pillow', fps=fps)
+                    print(f"Animation saved to: {out_path}")
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to save GIF. Make sure pillow is installed. Error: {e}"
+                    )
+            plt.close(fig)
+
+        else:  # html (default)
+            if folder_path:
+                folder_path = Path(folder_path)
+                folder_path.mkdir(parents=True, exist_ok=True)
+                out_path = folder_path / f"{anim_name}.html"
+                with open(out_path, 'w') as f:
+                    f.write(anim.to_jshtml())
+                print(f"Animation saved to: {out_path}")
+
+            if display:
+                try:
+                    from IPython.display import HTML
+                    plt.close(fig)
+                    result = HTML(anim.to_jshtml())
+                except ImportError:
+                    print("IPython not available. Use output_format='matplotlib' for GUI display.")
+                    plt.close(fig)
+            else:
+                plt.close(fig)
+
+        # Cleanup video capture if used
+        if video_path is not None:
+            cap.release()
+
+        return result
