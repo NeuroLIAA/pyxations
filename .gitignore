@@ -8,6 +8,7 @@ example_dataset/
 .idea/
 
 # Ignore virtual environment folder
+.venv/
 vend/
 env/
 .pytest_cache/
