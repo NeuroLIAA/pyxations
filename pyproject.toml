@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyxations"
-version = "0.2.7"
+version = "0.2.9"
 description = "Pyxations: a Python-based toolbox to organize, parse, and analyse eye-movement data"
 authors = [{name = "NeuroLIAA"}]
 readme = "README.md"
