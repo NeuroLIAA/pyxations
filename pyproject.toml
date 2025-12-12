@@ -43,7 +43,8 @@ dependencies = [
     "statsmodels==0.14.4",
     "tables",
     "tqdm==4.67.1",
-    "tzdata==2024.2"
+    "tzdata==2024.2",
+    "opencv-python==4.9.0.80",
 ]
 
 dev = [
