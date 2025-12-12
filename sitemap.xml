@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://neuroliaa.github.io/pyxations/</loc>
+         <lastmod>2025-12-12</lastmod>
+    </url>
+    <url>
+         <loc>https://neuroliaa.github.io/pyxations/api_reference/</loc>
+         <lastmod>2025-12-12</lastmod>
+    </url>
+    <url>
+         <loc>https://neuroliaa.github.io/pyxations/contributing/</loc>
+         <lastmod>2025-12-12</lastmod>
+    </url>
+    <url>
+         <loc>https://neuroliaa.github.io/pyxations/installation/</loc>
+         <lastmod>2025-12-12</lastmod>
+    </url>
+    <url>
+         <loc>https://neuroliaa.github.io/pyxations/license/</loc>
+         <lastmod>2025-12-12</lastmod>
+    </url>
+    <url>
+         <loc>https://neuroliaa.github.io/pyxations/requirements/</loc>
+         <lastmod>2025-12-12</lastmod>
+    </url>
+    <url>
+         <loc>https://neuroliaa.github.io/pyxations/usage/</loc>
+         <lastmod>2025-12-12</lastmod>
+    </url>
+</urlset>
