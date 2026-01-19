@@ -7,9 +7,9 @@ authors:
   - name: "Gustavo Juantorena"
     affiliation: 1
   - name: "Joaquín González"
-    affiliation: [1, 3]
+    affiliation: "1, 3"
   - name: "Juan Esteban Kamienkowski"
-    affiliation: [1, 2]
+    affiliation: "1, 2"
 
 affiliations:
   - name: "Laboratorio de Inteligencia Artificial Aplicada, Instituto de Ciencias de la Computación, Facultad de Ciencias Exactas y Naturales, Universidad de Buenos Aires - CONICET, Argentina"
