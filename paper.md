@@ -39,7 +39,7 @@ Pyxations is designed as a reproducible and extensible framework that unifies th
 
 **Scalability and performance.** Built on the Polars data engine [@vink2022], Pyxations executes parallelized operations on large eye-tracking datasets, significantly outperforming traditional pandas-based workflows [@mckinney2020]. This makes it suitable for multi-subject, multi-session analyses typical in modern cognitive experiments.
 
-**Visualization, statistics, and inspection tools.** In addition to standard gaze plots, Pyxations includes dynamic scanpath visualizations, hierarchical data analysis (experiment, subject, session, trial), per-trial calibration visualization, and task-specific visualization utilities tailored to paradigms such as visual search. Multimatch metrics [@jarodzka2010] are also embedded at the trial level to compare similarity between scanpaths.
+**Visualization, statistics, and inspection tools.** In addition to standard gaze plots, Pyxations includes dynamic scanpath visualizations, hierarchical data analysis (experiment, subject, session, trial), per-trial calibration visualization, and task-specific visualization utilities tailored to paradigms such as visual search. Multimatch metrics [@dewhurst2012] are also embedded at the trial level to compare similarity between scanpaths.
 
 **Integration and interoperability.** Pyxations can interface with existing libraries such as PyMovements for event detection [@krakowczyk2023pymovements] or PyTrack for visualization within its standardized processing pipeline [@ghose2020pytrack]. It thus functions not as a replacement but as an orchestration layer that harmonizes and scales the use of existing tools.
 
