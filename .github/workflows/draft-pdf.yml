@@ -3,7 +3,6 @@ on:
   push:
     paths:
       - .github/workflows/draft-pdf.yml
-
 jobs:
   paper:
     runs-on: ubuntu-latest
