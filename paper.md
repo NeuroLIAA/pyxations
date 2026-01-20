@@ -7,9 +7,9 @@ authors:
   - name: "Gustavo Juantorena"
     affiliation: 1
   - name: "Joaquín González"
-    affiliation: [1, 3]
+    affiliation: "1, 3"
   - name: "Juan Esteban Kamienkowski"
-    affiliation: [1, 2]
+    affiliation: "1, 2"
 
 affiliations:
   - name: "Laboratorio de Inteligencia Artificial Aplicada, Instituto de Ciencias de la Computación, Facultad de Ciencias Exactas y Naturales, Universidad de Buenos Aires - CONICET, Argentina"
@@ -25,6 +25,16 @@ bibliography: paper.bib
 
 # Summary
 
+Pyxations is a Python-based toolbox designed to unify the organization, parsing, and analysis of eye-movement data. It supports multiple common recording formats and detection algorithms, and offers integrated tools for preprocessing, visualization, and downstream analysis. By standardizing these steps and including a BIDS-inspired data structure, Pyxations facilitates reproducibility and makes it easier to compare results across tasks, devices, and studies.
+
+# Research Impact Statement
+
+Pyxations has already been deployed to standardize workflows in active research environments. It was utilized to process and analyze eye-tracking data for a study on hybrid search strategies, which combined Bayesian and neural network models [@ruarte2025integrating].
+
+The library's versatility has been further validated through the successful harmonization of diverse datasets. It has been used to process data from GazePoint 3 trackers, in-house web-based eye-trackers, and driving simulation experiments (courtesy of collaborators mentioned in the acknowledgements), demonstrating its capacity to handle real-world heterogeneity beyond standard laboratory tasks. Furthermore, we are currently collaborating with three additional research groups to integrate Pyxations into their data analysis pipelines, establishing it as a growing standard for reproducible eye-tracking research.
+
+# Software Design
+
 Pyxations is designed as a reproducible and extensible framework that unifies the complementary strengths of previous developments while addressing their limitations. Its core contributions can be summarized (Fig. 1) as follows:
 
 **Standardized dataset organization.** Pyxations enforces a BIDS-inspired hierarchy (subjects, sessions, derivatives) [@gorgolewski2016bids], automatically harmonizing file naming and structure across vendors. This facilitates transparent sharing, version control, and collaborative reuse.
@@ -39,7 +49,7 @@ Pyxations is designed as a reproducible and extensible framework that unifies th
 
 **Scalability and performance.** Built on the Polars data engine [@vink2022], Pyxations executes parallelized operations on large eye-tracking datasets, significantly outperforming traditional pandas-based workflows [@mckinney2020]. This makes it suitable for multi-subject, multi-session analyses typical in modern cognitive experiments.
 
-**Visualization, statistics, and inspection tools.** In addition to standard gaze plots, Pyxations includes dynamic scanpath visualizations, hierarchical data analysis (experiment, subject, session, trial), per-trial calibration visualization, and task-specific visualization utilities tailored to paradigms such as visual search. Multimatch metrics [@jarodzka2010] are also embedded at the trial level to compare similarity between scanpaths.
+**Visualization, statistics, and inspection tools.** In addition to standard gaze plots, Pyxations includes dynamic scanpath visualizations, hierarchical data analysis (experiment, subject, session, trial), per-trial calibration visualization, and task-specific visualization utilities tailored to paradigms such as visual search. Multimatch metrics [@dewhurst2012] are also embedded at the trial level to compare similarity between scanpaths.
 
 **Integration and interoperability.** Pyxations can interface with existing libraries such as PyMovements for event detection [@krakowczyk2023pymovements] or PyTrack for visualization within its standardized processing pipeline [@ghose2020pytrack]. It thus functions not as a replacement but as an orchestration layer that harmonizes and scales the use of existing tools.
 
@@ -48,9 +58,7 @@ Pyxations is designed as a reproducible and extensible framework that unifies th
 ![Preprocessing and analysis workflow showing parsing, event detection, preprocessing, and analysis stages.](figure1.png)
 
 
-In summary, Pyxations extends current open-source eye-tracking software by offering a scalable, provenance-aware, and calibration-informed framework that unifies parsing, preprocessing, and analysis within a standardized data structure.
-
-
+In summary, Pyxations extends current open-source eye-tracking software by offering a scalable, provenance-aware, and calibration-informed framework that unifies parsing, preprocessing, and analysis within a standardized data structure. We want to keep building upon this framework which is why we decided to use design patterns for code scalability.
 
 # Statement of Need
 
@@ -68,9 +76,12 @@ SPEED (LabSoC Standardized Processing and Extraction of Eye-tracking Data) also 
 
 Therefore, Pyxations was designed as a reproducible and extensible framework that unifies these complementary strengths while addressing their limitations. It is a Python-based toolbox designed to unify the organization, parsing, and analysis of eye-movement data. It supports multiple common recording formats and detection algorithms, and offers integrated tools for preprocessing, visualization, and downstream analysis. By standardizing these steps and including a BIDS-inspired data structure, Pyxations facilitates reproducibility and makes it easier to compare results across tasks, devices, and studies.
 
+# AI Usage Disclosure
+
+We utilized generative AI tools (primarily ChatGPT-4o and Gemini 2.5 Flash) to a limited extent, specifically for generating individual methods based on established architectural decisions, creating unit tests, and drafting documentation strings. We did not employ autonomous AI agents or large-scale automated coding pipelines. Regarding the manuscript, these tools were used solely for linguistic refinement, such as typo spotting, grammar correction, and minor stylistic improvements. The core scientific content, figures, and bibliography were not generated by AI.
 
 # Acknowledgements
 
-OPTIONAL TEXT
+This project was supported by CONICET and UBA. We thank Pablo Laciana for his contribution to the code and Damián Care, Fermín Travi and Bruno Bianchi for their expert insights and constructive discussions during the preparation of this work. We thank Stephanie Muller and Enzo Tagliazucchi for sharing the GazePoint 3 data. Finally, We express our gratitude to Matias Ison for sharing the Driving data. 
 
 # References
