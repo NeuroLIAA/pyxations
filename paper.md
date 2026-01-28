@@ -60,7 +60,7 @@ Pyxations is designed as a reproducible and extensible framework that unifies th
 
 In summary, Pyxations extends current open-source eye-tracking software by offering a scalable, provenance-aware, and calibration-informed framework that unifies parsing, preprocessing, and analysis within a standardized data structure. We want to keep building upon this framework which is why we decided to use design patterns for code scalability.
 
-# Statement of Need
+# State of the Field
 
 Looking at someone’s eyes, searching for your keys or reading, are all active processes in which eye movements take a crucial role [@rayner1998; @wade2005; @land2009looking; @holmqvist2011eye]. These movements include the saccades and fixations, focusing on the most relevant regions of the scene, but also smooth pursuit, microsaccades, or vergence. They are usually measured by optical eye-trackers, which consist of a camera collecting images from the eyes that ultimately provide the position and pupil size of both eyes on the scene. The cameras range from high-speed cameras (up to 2 kHz) to low-cost commercial webcams, and they also differ on the zoom applied and the inclusion of an IR source/filter. Finally, to go from the recording of the eyes’ position to actual eye movements, it is necessary to detect such eye movements, for which there are many algorithms available, such as EyeLink [@srresearch2021eyelink], Engbert and Mergenthaler [@engbert2006microsaccades], REMoDNaV [@dar2021remodnav], among others.
 
