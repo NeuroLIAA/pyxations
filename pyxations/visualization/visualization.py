@@ -10,7 +10,7 @@ from collections import OrderedDict
 class Visualization():
     def __init__(self, derivatives_folder_path,events_detection_algorithm):
         self.derivatives_folder_path = Path(derivatives_folder_path)
-        if events_detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and events_detection_algorithm != 'eyelink':
+        if events_detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and events_detection_algorithm not in ('eyelink', 'neon'):
             raise ValueError(f"Detection algorithm {events_detection_algorithm} not found.")
         self.events_detection_folder = Path(events_detection_algorithm+'_events')
 
@@ -71,7 +71,7 @@ class Visualization():
         def _make_axes(plot_samples: bool):
             if plot_samples:
                 fig, (ax_main, ax_gaze) = plt.subplots(
-                    2, 1, height_ratios=(4, 1), figsize=(10, 6), sharex=False
+                    2, 1, gridspec_kw={"height_ratios": (4, 1)}, figsize=(10, 6), sharex=False
                 )
             else:
                 fig, ax_main = plt.subplots(figsize=(10, 6))
@@ -157,6 +157,7 @@ class Visualization():
             n_fix = fx.size
             fix_idx = np.arange(1, n_fix + 1)
 
+            cmap = plt.cm.get_cmap("rainbow", n_fix + 1)
             norm = mplcolors.BoundaryNorm(np.arange(1, n_fix + 2), cmap.N)
 
             # saccades

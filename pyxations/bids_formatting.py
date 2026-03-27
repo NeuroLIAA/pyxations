@@ -11,6 +11,8 @@ import pyxations.formats.eyelink.parse as eyelink_parser
 import pyxations.formats.webgazer.parse as webgazer_parser
 import pyxations.formats.tobii.parse as tobii_parser
 import pyxations.formats.gazepoint.parse as gaze_parser
+import pyxations.formats.neon.parse as neon_parser
+from pyxations.formats.neon.bids import NeonBidsConverter
 from pyxations.formats.tobii.bids import TobiiBidsConverter
 from pyxations.formats.gazepoint.bids import GazepointBidsConverter
 from pyxations.export import FEATHER_EXPORT
@@ -71,6 +73,8 @@ def get_converter(format_name):
         return TobiiBidsConverter()
     elif format_name == 'gaze':
         return GazepointBidsConverter()
+    elif format_name == 'neon':
+        return NeonBidsConverter()
     return None
 
 
@@ -149,6 +153,8 @@ def process_session(eye_tracking_data_path, dataset_format, detection_algorithm,
         tobii_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, exp_format, **kwargs)
     elif dataset_format == 'gaze':
         gaze_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
+    elif dataset_format == 'neon':
+        neon_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
     else:
         raise ValueError(f"Dataset format {dataset_format} not found.")
 

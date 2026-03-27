@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyxations"
-version = "0.2.9"
+version = "0.2.10"
 description = "Pyxations: a Python-based toolbox to organize, parse, and analyse eye-movement data"
 authors = [{name = "NeuroLIAA"}]
 readme = "README.md"
@@ -45,6 +45,7 @@ dependencies = [
     "tqdm==4.67.1",
     "tzdata==2024.2",
     "opencv-python==4.9.0.80",
+    "pupil-labs-neon-recording",
 ]
 
 dev = [
