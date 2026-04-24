@@ -118,14 +118,8 @@ class WebGazerParse(BidsParse):
     
 
         if behavioral_columns:
-            behavioral_dir = file_path.parent.parent / "behavioral"
-            behavioral_files = sorted(behavioral_dir.glob("*.csv")) if behavioral_dir.exists() else []
-            if behavioral_files:
-                df_behavioral = pd.read_csv(behavioral_files[0])
-                pre_processing.add_trial_metadata(df_behavioral, behavioral_columns)
-                self._save_events_tsv(df_behavioral, behavioral_columns)
-            else:
-                print(f"[behavioral_columns] No CSV found in {behavioral_dir}. Skipping metadata propagation.")
+            pre_processing.add_trial_metadata(df, behavioral_columns)
+            self._save_events_tsv(df, behavioral_columns)
 
         self.detection_algorithm = detection_algorithm
 
