@@ -516,3 +516,54 @@ class PreProcessing:
                 "metadata": self.metadata.to_dict(),
             }
             self._save_json_sidecar(prov, provenance_filename)
+
+    # -------------------- Public API: Behavioral Metadata -------------------- #
+
+    def add_trial_metadata(
+        self,
+        metadata_df: pd.DataFrame,
+        columns: List[str],
+    ) -> None:
+        """
+        Propagate experiment-specific columns from behavioral data to gaze samples.
+
+        Joins by ``trial_index`` (one row per trial in *metadata_df*, many rows
+        per trial in *samples*).  After this call ``self.samples`` will contain
+        the requested columns, so downstream analysis never needs to re-read
+        the original behavioral file.
+
+        Parameters
+        ----------
+        metadata_df : pd.DataFrame
+            Behavioral data table with one row per trial.
+            Must contain a ``trial_index`` column.
+        columns : list of str
+            Column names from *metadata_df* to propagate to samples.
+
+        Raises
+        ------
+        ValueError
+            If ``trial_index`` is missing from *metadata_df* or *self.samples*.
+        """
+        if "trial_index" not in metadata_df.columns:
+            raise ValueError(
+                "[add_trial_metadata] metadata_df must contain a 'trial_index' column."
+            )
+        if "trial_index" not in self.samples.columns:
+            raise ValueError(
+                "[add_trial_metadata] samples must contain a 'trial_index' column. "
+                "Make sure the parser preserves it."
+            )
+
+        available = [c for c in columns if c in metadata_df.columns]
+        skipped = [c for c in columns if c not in metadata_df.columns]
+        if skipped:
+            print(f"[add_trial_metadata] Columns not found in metadata_df, skipping: {skipped}")
+        if not available:
+            return
+
+        trial_meta = (
+            metadata_df[["trial_index"] + available]
+            .drop_duplicates("trial_index")
+        )
+        self.samples = self.samples.merge(trial_meta, on="trial_index", how="left")

@@ -149,5 +149,41 @@ class TestComputeDerivatives(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas", "samples.feather")))
 
 
+    def test_compute_derivatives_webgazer_behavioral_columns(self):
+        data_folder = os.path.join(current_path.parent, 'data')
+        bids_dataset_folder = os.path.join(data_folder, "antisacadas_dataset")
+        derivatives_path = os.path.join(data_folder, "antisacadas_dataset_derivatives")
+
+        if os.path.exists(derivatives_path):
+            shutil.rmtree(derivatives_path)
+
+        session_path = os.path.join(
+            derivatives_path, "sub-0001", "ses-antisacadas"
+        )
+
+        compute_derivatives_for_dataset(
+            bids_dataset_folder, 'webgazer', 'remodnav',
+            overwrite=True, exp_format=FEATHER_EXPORT,
+            screen_height=768, screen_width=1024,
+            behavioral_columns=['typeOfSaccade', 'cueShownAtLeft', 'rt'],
+        )
+
+        import pandas as pd
+
+        samples_path = os.path.join(session_path, "samples.feather")
+        self.assertTrue(os.path.exists(samples_path), "samples.feather not found")
+
+        df = pd.read_feather(samples_path)
+        self.assertIn("typeOfSaccade", df.columns, "typeOfSaccade not propagated to samples")
+        self.assertIn("cueShownAtLeft", df.columns, "cueShownAtLeft not propagated to samples")
+
+        events_path = os.path.join(session_path, "events.tsv")
+        self.assertTrue(os.path.exists(events_path), "events.tsv not created")
+
+        df_events = pd.read_csv(events_path, sep="\t")
+        self.assertIn("onset", df_events.columns)
+        self.assertIn("typeOfSaccade", df_events.columns)
+
+
 if __name__ == "__main__":
     unittest.main()
