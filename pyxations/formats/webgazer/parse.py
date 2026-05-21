@@ -17,7 +17,7 @@ def process_session(eye_tracking_data_path, detection_algorithm, session_folder_
         return
     edf_file_path = csv_files[0]
     (session_folder_path / 'events').mkdir(parents=True, exist_ok=True)
-    
+
     WebGazerParse(session_folder_path, exp_format).parse(edf_file_path, detection_algorithm,
                          overwrite, **kwargs)
 
@@ -25,8 +25,8 @@ def process_session(eye_tracking_data_path, detection_algorithm, session_folder_
 class WebGazerParse(BidsParse):
 
     def parse(self, file_path, detection_algorithm, overwrite, **kwargs):
-        # Convert EDF to ASCII (only if necessary)
-        # ascii_file_path = convert_edf_to_ascii(edf_file_path, session_folder_path)
+        behavioral_columns = kwargs.pop("behavioral_columns", None)
+
         from pyxations.bids_formatting import find_besteye, EYE_MOVEMENT_DETECTION_DICT, keep_eye
         df = pd.read_csv(file_path)
         
@@ -117,10 +117,28 @@ class WebGazerParse(BidsParse):
 
     
 
+        if behavioral_columns:
+            pre_processing.add_trial_metadata(df, behavioral_columns)
+            self._save_events_tsv(df, behavioral_columns)
+
         self.detection_algorithm = detection_algorithm
 
         pp = pre_processing
         self.store_dataframes(pp.samples, dfCalib, pp.fixations, pp.saccades, pp.blinks, pp.user_messages)
+
+    def _save_events_tsv(self, df_behavioral: pd.DataFrame, columns: list) -> None:
+        """Save a BIDS-compatible events.tsv with one row per trial."""
+        df_events = df_behavioral[df_behavioral["time_elapsed"].notna()].copy()
+        if df_events.empty:
+            return
+        t0 = df_events["time_elapsed"].min()
+        df_events["onset"] = ((df_events["time_elapsed"] - t0) / 1000).round(4)
+        df_events["duration"] = (df_events["rt"] / 1000).round(4) if "rt" in df_events.columns else float("nan")
+        available = [c for c in columns if c in df_events.columns]
+        out_cols = ["onset", "duration", "trial_index"] + available
+        df_events[out_cols].reset_index(drop=True).to_csv(
+            self.session_folder_path / "events.tsv", sep="\t", index=False
+        )
             
 
 

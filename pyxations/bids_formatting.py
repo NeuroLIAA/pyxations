@@ -154,7 +154,8 @@ def process_session(eye_tracking_data_path, dataset_format, detection_algorithm,
 
 
 def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detection_algorithm='remodnav', num_processes=4,
-                                    force_best_eye=True, keep_ascii=True, overwrite=False, exp_format=FEATHER_EXPORT, **kwargs):
+                                    force_best_eye=True, keep_ascii=True, overwrite=False, exp_format=FEATHER_EXPORT,
+                                    behavioral_columns=None, **kwargs):
     derivatives_folder = Path(str(bids_dataset_folder) + "_derivatives")
     bids_dataset_folder = Path(bids_dataset_folder)
     derivatives_folder.mkdir(exist_ok=True)
@@ -162,6 +163,9 @@ def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detecti
     # Extract and remove start_times and end_times from kwargs if present
     start_times = kwargs.pop("start_times", None)
     end_times = kwargs.pop("end_times", None)
+
+    if behavioral_columns is not None:
+        kwargs["behavioral_columns"] = behavioral_columns
 
     bids_folders = [
         folder for folder in bids_dataset_folder.iterdir()
