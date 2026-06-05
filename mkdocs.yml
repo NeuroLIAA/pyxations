@@ -30,7 +30,9 @@ nav:
   - Home: index.md
   - Requirements: requirements.md
   - Installation: installation.md
+  - Quickstart: quickstart.md
   - Usage: usage.md
+  - Concepts: concepts.md
   - API reference: api_reference.md
   - Contributing: contributing.md
   - License: license.md

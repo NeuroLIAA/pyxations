@@ -47,6 +47,7 @@ dependencies = [
     "opencv-python==4.9.0.80",
 ]
 
+[project.optional-dependencies]
 dev = [
     "pytest",
     "pytest-cov",
@@ -54,8 +55,6 @@ dev = [
     "ruff",
     "pre-commit"
 ]
-
-[project.optional-dependencies]
 docs = [
     "mkdocs",
     "mkdocs-material",
