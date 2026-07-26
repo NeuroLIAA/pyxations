@@ -1,19 +1,16 @@
 from pathlib import Path
-import shutil
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
 from pyxations.methods.eyemovement.REMoDNaV import RemodnavDetection
 from pyxations.methods.eyemovement.engbert import EngbertDetection
 
-from pyxations.formats.webgazer.bids import WebGazerBidsConverter
-from pyxations.formats.eyelink.bids import EyeLinkBidsConverter
 import pyxations.formats.eyelink.parse as eyelink_parser 
 import pyxations.formats.webgazer.parse as webgazer_parser
 import pyxations.formats.tobii.parse as tobii_parser
 import pyxations.formats.gazepoint.parse as gaze_parser
-from pyxations.formats.tobii.bids import TobiiBidsConverter
-from pyxations.formats.gazepoint.bids import GazepointBidsConverter
-from pyxations.export import FEATHER_EXPORT
+from pyxations.export import BIDS_EXPORT
+from pyxations.bids import write_bids_dataset
+from pyxations.export.bids import initialize_bids_derivative
 
 EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection, 'engbert': EngbertDetection}
 
@@ -56,89 +53,70 @@ def keep_eye(eye, df_samples, df_fix, df_blink, df_sacc):
         df_blink = df_blink[df_blink['eye'] == 'L'].reset_index(drop=True)
         df_sacc = df_sacc[df_sacc['eye'] == 'L'].reset_index(drop=True)
         df_samples.rename(columns={'LX': 'X', 'LY': 'Y', 'LPupil': 'Pupil'}, inplace=True)
+    df_samples["eye"] = eye
     df_blink.dropna(inplace=True)
     df_fix.dropna(inplace=True)
     df_sacc.dropna(inplace=True)
     return df_samples, df_fix, df_blink, df_sacc
 
 
-def get_converter(format_name):
-    if format_name == 'webgazer':
-        return WebGazerBidsConverter()
-    elif format_name == 'eyelink':
-        return EyeLinkBidsConverter()
-    elif format_name == 'tobii':
-        return TobiiBidsConverter()
-    elif format_name == 'gaze':
-        return GazepointBidsConverter()
-    return None
-
-
-def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session_substrings=1, format_name='eyelink'):
+def dataset_to_bids(
+    target_folder_path,
+    files_folder_path,
+    dataset_name,
+    session_substrings=1,
+    format_name='eyelink',
+    *,
+    task_name='eyetracking',
+    authors=None,
+    overwrite=False,
+):
     """
-    Convert a dataset to BIDS format.
+    Convert eye-tracking recordings to BIDS and retain originals in sourcedata.
 
     Args:
         target_folder_path (str): Path to the folder where the BIDS dataset will be created.
-        files_folder_path (str): Path to the folder containing the EDF files.
-        The EDF files are assumed to have the ID of the subject at the beginning of the file name, separated by an underscore.
+        files_folder_path (str): Path to the folder containing vendor files.
+            Filenames must begin with the subject identifier followed by an
+            underscore.
         dataset_name (str): Name of the BIDS dataset.
-        session_substrings (int): Number of substrings to use for the session ID. Default is 1.
+        session_substrings (int): Number of filename tokens used for the session.
+        format_name (str): One of ``eyelink``, ``tobii``, ``gaze``/``gazepoint``,
+            or ``webgazer``.
+        task_name (str): Fallback BIDS task label when it is absent from a filename.
+        authors (sequence of str, optional): Dataset authors.
+        overwrite (bool): Replace an existing output dataset when True.
 
     Returns:
-        None
+        pathlib.Path
+            Root of the written BIDS dataset.
     """
-    converter = get_converter(format_name)
-    
-    # Create a metadata tsv file
-    metadata = pd.DataFrame(columns=['subject_id', 'old_subject_id'])
-    files_folder_path = Path(files_folder_path)
-    # List all file paths in the folder
-    file_paths = []
-    for file_path in files_folder_path.rglob('*'):  # Recursively go through all files
-        if file_path.is_file():
-            file_paths.append(file_path)
-    
-    file_paths = [file for file in file_paths if file.suffix.lower() in converter.relevant_extensions()]
-
-    bids_folder_path = Path(target_folder_path) / dataset_name
-    bids_folder_path.mkdir(parents=True, exist_ok=True)
-
-    subj_ids = converter.get_subject_ids(file_paths)
-
-    # If all of the subjects have numerical IDs, sort them numerically, else sort them alphabetically
-    if all(subject_id.isdigit() for subject_id in subj_ids):
-        subj_ids.sort(key=int)
-    else:
-        subj_ids.sort()
-    new_subj_ids = [str(subject_index).zfill(4) for subject_index in range(1, len(subj_ids) + 1)]
-
-    # Create subfolders for each session for each subject
-    for subject_id in new_subj_ids:
-        old_subject_id = subj_ids[int(subject_id) - 1]
-        for file in file_paths:
-            file_name = Path(file).name
-            session_id = "_".join("".join(file_name.split(".")[:-1]).split("_")[1:session_substrings + 1])
-            converter.move_file_to_bids_folder(file, bids_folder_path, subject_id, old_subject_id, session_id)
-
-        metadata.loc[len(metadata.index)] = [subject_id, old_subject_id]
-    # Save metadata to tsv file
-    metadata.to_csv(bids_folder_path / "participants.tsv", sep="\t", index=False)
-    return bids_folder_path
-
-
-def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id, tag):
-    session_folder_path = bids_folder_path / ("sub-" + subject_id) / ("ses-" + session_id) / tag
-    session_folder_path.mkdir(parents=True, exist_ok=True)
-    new_file_path = session_folder_path / file_path.name
-    if not new_file_path.exists():
-        shutil.copy(file_path, session_folder_path)
-
-
+    return write_bids_dataset(
+        target_folder_path,
+        files_folder_path,
+        dataset_name,
+        session_substrings=session_substrings,
+        format_name=format_name,
+        task_name=task_name,
+        authors=authors,
+        overwrite=overwrite,
+    )
 def process_session(eye_tracking_data_path, dataset_format, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs):
-    # If session folder path has files and overwrite is False, return
-    if not overwrite and session_folder_path.exists() and any(session_folder_path.iterdir()):
-        return
+    # For BIDS, algorithm-specific recording labels let multiple detector
+    # outputs coexist in one derivative session.
+    if not overwrite and session_folder_path.exists():
+        if exp_format == BIDS_EXPORT:
+            label = ''.join(
+                character for character in detection_algorithm.lower()
+                if character.isalnum()
+            ) or "pyxations"
+            existing = (
+                session_folder_path / "beh"
+            ).glob(f"*_recording-eye1{label}_physio.tsv.gz")
+            if next(existing, None) is not None:
+                return
+        elif any(session_folder_path.iterdir()):
+            return
     
     if dataset_format == 'eyelink':
         eyelink_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
@@ -154,11 +132,28 @@ def process_session(eye_tracking_data_path, dataset_format, detection_algorithm,
 
 
 def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detection_algorithm='remodnav', num_processes=4,
-                                    force_best_eye=True, keep_ascii=True, overwrite=False, exp_format=FEATHER_EXPORT,
+                                    force_best_eye=True, keep_ascii=True, overwrite=False, exp_format=BIDS_EXPORT,
                                     behavioral_columns=None, **kwargs):
+    """Compute eye-tracking derivatives for every BIDS subject/session.
+
+    BIDS TSV.GZ/JSON is the canonical output. The sibling derivatives dataset
+    receives its own ``dataset_description.json`` and mirrors the source
+    subject/session hierarchy. Feather and HDF5 remain explicit compatibility
+    exports through ``exp_format``.
+
+    Returns
+    -------
+    pathlib.Path
+        Root of the written derivatives dataset.
+    """
     derivatives_folder = Path(str(bids_dataset_folder) + "_derivatives")
     bids_dataset_folder = Path(bids_dataset_folder)
     derivatives_folder.mkdir(exist_ok=True)
+
+    # ``export_format`` appeared in early examples; retain it as an alias.
+    exp_format = kwargs.pop("export_format", exp_format)
+    if exp_format == BIDS_EXPORT:
+        initialize_bids_derivative(bids_dataset_folder, derivatives_folder)
 
     # Extract and remove start_times and end_times from kwargs if present
     start_times = kwargs.pop("start_times", None)
@@ -173,7 +168,11 @@ def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detecti
     ]
 
     participants_file = bids_dataset_folder / "participants.tsv"
-    participants_tsv = pd.read_csv(participants_file, sep="\t",dtype={'subject_id': str, 'old_subject_id': str})
+    participants_tsv = pd.read_csv(
+        participants_file,
+        sep="\t",
+        dtype={'subject_id': str, 'old_subject_id': str},
+    )
 
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
         futures = []
@@ -197,10 +196,19 @@ def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detecti
                     if end_times and subject_name in end_times and session_name in end_times[subject_name]:
                         session_kwargs["end_times"] = end_times[subject_name][session_name]
 
+                    source_session = (
+                        bids_dataset_folder
+                        / "sourcedata"
+                        / subject.name
+                        / session.name
+                    )
+                    if not source_session.exists():
+                        source_session = session
+
                     futures.append(
                         executor.submit(
                             process_session,
-                            session / "ET", dataset_format, detection_algorithm,
+                            source_session / "ET", dataset_format, detection_algorithm,
                             derivatives_folder / subject.name / session.name,
                             force_best_eye, keep_ascii, overwrite, exp_format,
                             **session_kwargs

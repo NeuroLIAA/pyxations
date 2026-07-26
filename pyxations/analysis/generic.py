@@ -1,8 +1,8 @@
 from pathlib import Path
 import polars as pl
 from pyxations.visualization.visualization import Visualization
-from concurrent.futures import ProcessPoolExecutor,ThreadPoolExecutor, as_completed
-from pyxations.export import FEATHER_EXPORT, get_exporter
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from pyxations.export import BIDS_EXPORT, FEATHER_EXPORT, get_exporter
 from math import hypot
 import numpy as np
 import matplotlib.pyplot as plt
@@ -108,7 +108,7 @@ def _parse_validations(df: pl.DataFrame) -> pl.DataFrame:
     return parsed
 class Experiment:
 
-    def __init__(self, dataset_path: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
+    def __init__(self, dataset_path: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = BIDS_EXPORT):
         self.dataset_path = Path(dataset_path)
         self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
         self.metadata = pl.read_csv(self.dataset_path / "participants.tsv", separator="\t", 
@@ -146,7 +146,12 @@ class Experiment:
         fixations = pl.concat([subject.fixations() for subject in self.subjects.values()])
         saccades = pl.concat([subject.saccades() for subject in self.subjects.values()])
 
-        vis = Visualization(self.derivatives_path, self.detection_algorithm)
+        visualization_root = (
+            self.derivatives_path / "docs" / "figures"
+            if self.export_format == BIDS_EXPORT
+            else self.derivatives_path
+        )
+        vis = Visualization(visualization_root, self.detection_algorithm)
         vis.plot_multipanel(fixations, saccades, display)
 
     def filter_fixations(self, min_fix_dur=50, print_flag=True):
@@ -339,7 +344,7 @@ class Experiment:
 class Subject:
 
     def __init__(self, subject_id: str, old_subject_id: str, experiment: Experiment,
-                 excluded_sessions: list = [], excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
+                 excluded_sessions: list = [], excluded_trials: dict = {}, export_format = BIDS_EXPORT):
         self.subject_id = subject_id
         self.old_subject_id = old_subject_id
         self.experiment = weakref.ref(experiment)
@@ -491,11 +496,21 @@ class Subject:
 
 class Session():
     
-    def __init__(self, session_id: str, subject: Subject, excluded_trials: list = [],export_format = FEATHER_EXPORT):
+    def __init__(self, session_id: str, subject: Subject, excluded_trials: list = [],export_format = BIDS_EXPORT):
         self.session_id = session_id
         self.subject = weakref.ref(subject)
         self.excluded_trials = excluded_trials
         self.session_dataset_path = self.subject().subject_dataset_path / f"ses-{self.session_id}"
+        bids_root = self.subject().experiment().dataset_path
+        sourcedata_path = (
+            bids_root
+            / "sourcedata"
+            / f"sub-{self.subject().subject_id}"
+            / f"ses-{self.session_id}"
+        )
+        self.session_source_path = (
+            sourcedata_path if sourcedata_path.exists() else self.session_dataset_path
+        )
         self.session_derivatives_path = self.subject().subject_derivatives_path / f"ses-{self.session_id}"
         self._trials = None  # Lazy load trials
         self.export_format = export_format
@@ -602,20 +617,78 @@ class Session():
 
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
-        events_path = self.session_derivatives_path / f"{self.detection_algorithm}_events"
-        
-        
         exporter = get_exporter(self.export_format)
-        file_extension = exporter.extension()
-        
-        
-        # Check paths and load files efficiently
-        
-        samples = exporter.read(self.session_derivatives_path, 'samples')
-        fix = exporter.read(events_path, 'fix')
-        sacc = exporter.read(events_path, 'sacc')
-        blink = exporter.read(events_path, "blink") if (events_path / ("blink" + file_extension)).exists() else None
-        self._calib_data = _parse_validations(exporter.read(self.session_derivatives_path, "calib")) if (self.session_derivatives_path / ("calib" + file_extension)).exists() else None
+        if self.export_format == BIDS_EXPORT:
+            try:
+                bundle = exporter.read_derivatives(
+                    self.session_derivatives_path, detection_algorithm
+                )
+                samples = bundle["samples"]
+                fix = bundle["fix"]
+                sacc = bundle["sacc"]
+                blink = bundle["blink"]
+                calibration = bundle["calib"]
+                self._calib_data = (
+                    _parse_validations(calibration)
+                    if calibration is not None and not calibration.is_empty()
+                    else None
+                )
+                events_path = (
+                    self.session_derivatives_path.parents[1]
+                    / "docs"
+                    / "figures"
+                    / self.session_derivatives_path.parent.name
+                    / self.session_derivatives_path.name
+                    / f"{self.detection_algorithm}_events"
+                )
+            except FileNotFoundError:
+                # Read derivative folders created by Pyxations <= 0.3.
+                exporter = get_exporter(FEATHER_EXPORT)
+                events_path = (
+                    self.session_derivatives_path
+                    / f"{self.detection_algorithm}_events"
+                )
+                samples = exporter.read(self.session_derivatives_path, "samples")
+                fix = exporter.read(events_path, "fix")
+                sacc = exporter.read(events_path, "sacc")
+                blink_path = events_path / "blink.feather"
+                blink = (
+                    exporter.read(events_path, "blink")
+                    if blink_path.exists()
+                    else None
+                )
+                calibration_path = self.session_derivatives_path / "calib.feather"
+                self._calib_data = (
+                    _parse_validations(
+                        exporter.read(self.session_derivatives_path, "calib")
+                    )
+                    if calibration_path.exists()
+                    else None
+                )
+        else:
+            events_path = (
+                self.session_derivatives_path
+                / f"{self.detection_algorithm}_events"
+            )
+            file_extension = exporter.extension()
+            samples = exporter.read(self.session_derivatives_path, "samples")
+            fix = exporter.read(events_path, "fix")
+            sacc = exporter.read(events_path, "sacc")
+            blink = (
+                exporter.read(events_path, "blink")
+                if (events_path / ("blink" + file_extension)).exists()
+                else None
+            )
+            calibration_path = (
+                self.session_derivatives_path / ("calib" + file_extension)
+            )
+            self._calib_data = (
+                _parse_validations(
+                    exporter.read(self.session_derivatives_path, "calib")
+                )
+                if calibration_path.exists()
+                else None
+            )
    
         # Initialize trials
         self._init_trials(samples,fix,sacc,blink,events_path)

@@ -20,8 +20,21 @@ class BidsParse(object):
 
     def store_dataframes(self, dfSamples, dfCalib=pd.DataFrame(), dfFix=pd.DataFrame(), dfSacc=pd.DataFrame(), 
                          dfHeader=pd.DataFrame(),dfBlink=pd.DataFrame(), dfMsg=pd.DataFrame()):
-                # Save DataFrames to disk in one go to minimize memory usage during processing
+        # Save DataFrames to disk in one go to minimize memory usage during processing
         detection_algorithm = self.detection_algorithm
+        if getattr(self.export_method, "is_bids", False):
+            self.export_method.save_derivatives(
+                session_path=self.session_folder_path,
+                samples=dfSamples,
+                calibration=dfCalib,
+                fixations=dfFix,
+                saccades=dfSacc,
+                header=dfHeader,
+                blinks=dfBlink,
+                messages=dfMsg,
+                detection_algorithm=detection_algorithm,
+            )
+            return
 
         self.save_dataframe(dfSamples, self.session_folder_path, 'samples', key='samples')
         

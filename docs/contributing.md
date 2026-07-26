@@ -24,6 +24,18 @@ uv run pytest
 
 The test suite covers BIDS conversion, derivative computation, scanpath visualization and multipanel plots. Test fixtures live under `tests/data/`.
 
+BIDS raw and derivative writer tests use the official validator. Install
+[Deno](https://docs.deno.com/runtime/getting_started/installation/) and run:
+
+```bash
+deno install -ERWN -g -n bids-validator jsr:@bids/validator@3.0.1
+uv run pytest tests/test_0001_dataset_to_bids.py
+```
+
+Without Deno or an installed `bids-validator` command, structural writer tests
+still run but official validation tests are skipped. CI always installs and
+runs the pinned validator.
+
 For coverage:
 
 ```bash
@@ -47,7 +59,7 @@ mkdocs serve
     - `methods/eyemovement/`: REMoDNaV, Engbert–Kliegl detectors.
     - `analysis/`: `Experiment` and paradigm-specific helpers.
     - `visualization/`: plotting utilities.
-    - `export/`: Feather and HDF5 writers.
+    - `export/`: canonical BIDS derivative writer and legacy Feather/HDF5 writers.
 - `tests/`: pytest suite.
 - `docs/`: MkDocs sources for this site.
 - `notebooks/`: runnable end-to-end examples.

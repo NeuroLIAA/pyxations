@@ -11,7 +11,12 @@ git clone https://github.com/NeuroLIAA/pyxations.git
 cd pyxations
 ```
 
-The example dataset is already BIDS-formatted: four subjects (`sub-0001` … `sub-0004`), each with one session containing EyeLink recordings under `ET/` and behavioral logs under `behavioral/`. You can skip the conversion step.
+The bundled example uses Pyxations' legacy pre-BIDS layout: four subjects
+(`sub-0001` … `sub-0004`), each with one session containing EyeLink recordings
+under `ET/` and behavioral logs under `behavioral/`. It remains available for
+reproducing the existing analysis tutorial. New datasets created with
+`dataset_to_bids` use standardized BIDS `physio` files and retain the original
+vendor layout under `sourcedata/`.
 
 ## 1. Compute derivatives
 
@@ -29,9 +34,13 @@ pyx.compute_derivatives_for_dataset(
 )
 ```
 
-This creates a sibling folder `example_dataset_derivatives/` containing parsed events, samples and per-trial tables for each subject/session.
+This creates a BIDS-valid sibling dataset, `example_dataset_derivatives/`.
+Processed samples use `physio.tsv.gz`/JSON and eye-movement annotations use
+`physioevents.tsv.gz`/JSON.
 
-A pre-computed copy of the same derivatives ships in the repo (`example_dataset_derivatives/`), so you can also skip this step and jump straight to loading.
+A pre-computed legacy Feather copy of the derivatives ships in the repo
+(`example_dataset_derivatives/`), so you can also skip this step and jump
+straight to loading. `Experiment` detects that older layout automatically.
 
 ## 2. Load and inspect
 

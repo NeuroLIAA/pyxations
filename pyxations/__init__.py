@@ -9,6 +9,9 @@ from pyxations.visualization.samples import SampleVisualization
 from .utils import get_ordered_trials_from_psycopy_logs
 from .analysis.generic import Experiment
 from .analysis.visual_search import VisualSearchExperiment
+from .bids import BIDSValidationError, validate_bids_dataset
+from .export import BIDS_EXPORT, FEATHER_EXPORT, HDF5_EXPORT
 
 __all__ = ["dataset_to_bids", "compute_derivatives_for_dataset", "RemodnavDetection", "EngbertDetection", "Visualization", "SampleVisualization", "PreProcessing", "get_ordered_trials_from_psycopy_logs",
-"Experiment","VisualSearchExperiment"]
+"Experiment","VisualSearchExperiment", "validate_bids_dataset", "BIDSValidationError",
+"BIDS_EXPORT", "FEATHER_EXPORT", "HDF5_EXPORT"]

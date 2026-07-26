@@ -124,7 +124,14 @@ class WebGazerParse(BidsParse):
         self.detection_algorithm = detection_algorithm
 
         pp = pre_processing
-        self.store_dataframes(pp.samples, dfCalib, pp.fixations, pp.saccades, pp.blinks, pp.user_messages)
+        self.store_dataframes(
+            pp.samples,
+            dfCalib=dfCalib,
+            dfFix=pp.fixations,
+            dfSacc=pp.saccades,
+            dfBlink=pp.blinks,
+            dfMsg=pp.user_messages,
+        )
 
     def _save_events_tsv(self, df_behavioral: pd.DataFrame, columns: list) -> None:
         """Save a BIDS-compatible events.tsv with one row per trial."""

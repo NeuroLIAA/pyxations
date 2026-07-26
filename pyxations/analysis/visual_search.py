@@ -1,7 +1,7 @@
 from pathlib import Path
 import polars as pl
 from pyxations.visualization.visualization import Visualization
-from pyxations.export import FEATHER_EXPORT
+from pyxations.export import BIDS_EXPORT, FEATHER_EXPORT
 import ast
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -12,7 +12,7 @@ def _as(obj, typ):
     if isinstance(obj, typ): return obj
     return ast.literal_eval(obj)
 class VisualSearchExperiment(Experiment):
-    def __init__(self, dataset_path: str,search_phase_name: str,memorization_phase_name: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
+    def __init__(self, dataset_path: str,search_phase_name: str,memorization_phase_name: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = BIDS_EXPORT):
         self.dataset_path = Path(dataset_path)
         self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
         self.metadata = pl.read_csv(self.dataset_path / "participants.tsv", separator="\t", 
@@ -690,7 +690,7 @@ class VisualSearchExperiment(Experiment):
 
 class VisualSearchSubject(Subject):
     def __init__(self, subject_id: str, old_subject_id: str, experiment: VisualSearchExperiment, search_phase_name, memorization_phase_name,
-                 excluded_sessions: list = [], excluded_trials: dict = {}, export_format = FEATHER_EXPORT):
+                 excluded_sessions: list = [], excluded_trials: dict = {}, export_format = BIDS_EXPORT):
         super().__init__(subject_id, old_subject_id, experiment, excluded_sessions, excluded_trials, export_format)
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
@@ -850,7 +850,7 @@ class VisualSearchSession(Session):
         search_phase_name: str,
         memorization_phase_name: str,
         excluded_trials: list = None,
-        export_format = FEATHER_EXPORT
+        export_format = BIDS_EXPORT
     ):
         excluded_trials = [] if excluded_trials is None else excluded_trials
         super().__init__(session_id, subject, excluded_trials, export_format)
@@ -862,7 +862,7 @@ class VisualSearchSession(Session):
 
     def load_behavior_data(self):
         # Get the name of the only csv file in the behavior path
-        behavior_path = self.session_dataset_path / "behavioral"
+        behavior_path = self.session_source_path / "behavioral"
 
         behavior_files = list(behavior_path.glob("*.csv"))
         

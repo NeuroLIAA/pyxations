@@ -17,6 +17,9 @@ from pyxations import (
     SampleVisualization,
     Experiment,
     VisualSearchExperiment,
+    BIDS_EXPORT,
+    FEATHER_EXPORT,
+    HDF5_EXPORT,
     get_ordered_trials_from_psycopy_logs,
 )
 ```
@@ -81,7 +84,9 @@ Vendor-specific input readers. Selected via the `dataset_format` argument of `co
 
 ## export
 
-Writers for persisting derivatives in different on-disk formats.
+Writers for persisting derivatives in different on-disk formats. BIDS
+TSV.GZ/JSON (`BIDS_EXPORT`) is the canonical default; Feather and HDF5 are
+legacy opt-in formats.
 
 ::: pyxations.export
 

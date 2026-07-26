@@ -1,45 +1,342 @@
-import unittest
-#from pyxations import pyx.dataset_to_bids
-import os
-
-import pyxations as pyx
+import json
+import sys
 from pathlib import Path
 
-current_path = Path(__file__).resolve()
-data_folder = os.path.join(current_path.parent, 'data')
+import pandas as pd
+import pytest
 
-class TestDatasetToBids(unittest.TestCase):
-    def test_dataset_to_bids(self):
-        files_folder_path = os.path.join(data_folder,"example_files")
-        bids_dataset_folder = pyx.dataset_to_bids(data_folder,files_folder_path,"example_dataset")
-        #bids_dataset_folder = pyx.dataset_to_bids(current_folder,files_folder_path,"antisacadas_dataset", format_name='eyelink')
-        self.assertTrue(os.path.exists(bids_dataset_folder))
-        self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001")))
-        self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001", "ses-second")))
-
-
-    def test_webgazer_dataset_to_bids(self):
-        files_folder_path = os.path.join(data_folder,"antisacadas_files")
-        bids_dataset_folder = pyx.dataset_to_bids(data_folder, files_folder_path,"antisacadas_dataset", format_name='webgazer')
-        self.assertTrue(os.path.exists(bids_dataset_folder))
-        self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001")))
-        #self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001", "ses-second")))
+import pyxations.bids_formatting as bids_formatting
+from pyxations import Experiment, compute_derivatives_for_dataset, dataset_to_bids
+from pyxations.bids import (
+    BIDSValidationError,
+    validate_bids_dataset,
+    validator_command,
+)
+from pyxations.export.bids import (
+    BIDSDerivativeExport,
+    initialize_bids_derivative,
+)
 
 
-    def test_tobii_dataset_to_bids(self):
-        files_folder_path = os.path.join(data_folder,"tobii_files")
-        bids_dataset_folder = pyx.dataset_to_bids(data_folder,files_folder_path,"tobii_dataset", format_name='tobii')
-        self.assertTrue(os.path.exists(bids_dataset_folder))
-        self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001")))
-        #self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001", "ses-second")))
+def _write_eyelink(folder: Path) -> None:
+    (folder / "s01_A_task-look.asc").write_text(
+        "\n".join(
+            [
+                "** VERSION: EYELINK II 1",
+                "SAMPLES GAZE LEFT RIGHT RATE 1000.00 TRACKING CR FILTER 2",
+                "!MODE RECORD CR 1000 2 1 LR",
+                "1000 100.0 200.0 500.0 110.0 210.0 510.0",
+                "1001 101.0 201.0 501.0 111.0 211.0 511.0",
+                "1002 102.0 202.0 502.0 112.0 212.0 512.0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
-    def test_gaze_dataset_to_bids(self):
-        files_folder_path = os.path.join(data_folder,"gazepoint_files")
-        bids_dataset_folder = pyx.dataset_to_bids(data_folder,files_folder_path,"gazepoint_dataset", format_name='gaze')
-        self.assertTrue(os.path.exists(bids_dataset_folder))
-        self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001")))
-        #self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001", "ses-second")))
+
+def _write_gazepoint(folder: Path) -> None:
+    pd.DataFrame(
+        {
+            "TIME": [0.0, 1 / 60, 2 / 60],
+            "LPOGX": [0.2, 0.21, 0.22],
+            "LPOGY": [0.3, 0.31, 0.32],
+            "LPD": [3.1, 3.2, 3.3],
+            "RPOGX": [0.25, 0.26, 0.27],
+            "RPOGY": [0.35, 0.36, 0.37],
+            "RPD": [3.0, 3.1, 3.2],
+        }
+    ).to_csv(folder / "s01_A_task-look.csv", index=False)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def _write_tobii(folder: Path) -> None:
+    pd.DataFrame(
+        {
+            "Eyetracker timestamp": [1_000_000, 1_016_667, 1_033_334],
+            "Gaze2d_Left.x": [100.0, 101.0, 102.0],
+            "Gaze2d_Left.y": [200.0, 201.0, 202.0],
+            "PupilDiam_Left": [3.1, 3.2, 3.3],
+            "Gaze2d_Right.x": [110.0, 111.0, 112.0],
+            "Gaze2d_Right.y": [210.0, 211.0, 212.0],
+            "PupilDiam_Right": [3.0, 3.1, 3.2],
+        }
+    ).to_csv(folder / "s01_A_task-look.txt", sep="\t", index=False)
+
+
+def _write_webgazer(folder: Path) -> None:
+    samples = [
+        {"x": 100, "y": 200, "t": 0},
+        {"x": 101, "y": 201, "t": 17},
+        {"x": 102, "y": 202, "t": 34},
+    ]
+    pd.DataFrame(
+        {
+            "trial_index": [0],
+            "time_elapsed": [1_000],
+            "webgazer_data": [json.dumps(samples)],
+        }
+    ).to_csv(folder / "s01_A_task-look.csv", index=False)
+
+
+WRITERS = {
+    "eyelink": _write_eyelink,
+    "gaze": _write_gazepoint,
+    "tobii": _write_tobii,
+    "webgazer": _write_webgazer,
+}
+
+
+def _make_dataset(
+    tmp_path: Path, format_name: str, *, include_behavior: bool = False
+) -> Path:
+    source = tmp_path / f"{format_name}-source"
+    source.mkdir()
+    WRITERS[format_name](source)
+    if include_behavior:
+        pd.DataFrame(
+            {
+                "participant": ["s01"],
+                "trial_type": ["target"],
+                "response_time": [0.42],
+            }
+        ).to_csv(source / "s01_A_task-look_behavior.csv", index=False)
+    return dataset_to_bids(
+        tmp_path,
+        source,
+        f"{format_name}-dataset",
+        format_name=format_name,
+        authors=["Pyxations test suite"],
+    )
+
+
+@pytest.mark.parametrize(
+    ("format_name", "eye_count"),
+    [("eyelink", 2), ("gaze", 2), ("tobii", 2), ("webgazer", 1)],
+)
+def test_dataset_to_bids_writes_standardized_recordings(
+    tmp_path, format_name, eye_count
+):
+    dataset = _make_dataset(tmp_path, format_name)
+
+    assert (dataset / "dataset_description.json").is_file()
+    assert (dataset / "participants.tsv").is_file()
+    assert (
+        dataset / "sourcedata" / "sub-0001" / "ses-A" / "ET"
+    ).is_dir()
+    if format_name == "webgazer":
+        assert (
+            dataset
+            / "sourcedata"
+            / "sub-0001"
+            / "ses-A"
+            / "behavioral"
+        ).is_dir()
+    physio = list(
+        (dataset / "sub-0001" / "ses-A" / "beh").glob("*_physio.tsv.gz")
+    )
+    sidecars = list(
+        (dataset / "sub-0001" / "ses-A" / "beh").glob("*_physio.json")
+    )
+    assert len(physio) == eye_count
+    assert len(sidecars) == eye_count
+
+    participants = pd.read_csv(dataset / "participants.tsv", sep="\t")
+    assert participants.loc[0, "participant_id"] == "sub-0001"
+    for sidecar in sidecars:
+        metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert metadata["PhysioType"] == "eyetrack"
+        assert metadata["StartTime"] == 0.0
+        assert metadata["RecordedEye"] in {"left", "right", "cyclopean"}
+        assert metadata["SampleCoordinateSystem"] == "custom"
+        assert metadata["SampleCoordinateSystemDescription"]
+        assert metadata["SamplingFrequency"] > 0
+        assert metadata["Columns"][:3] == [
+            "timestamp",
+            "x_coordinate",
+            "y_coordinate",
+        ]
+        assert metadata["x_coordinate"]["Units"]
+        assert metadata["y_coordinate"]["Units"]
+
+
+@pytest.mark.parametrize("format_name", ["gaze", "webgazer"])
+def test_dataset_to_bids_separates_behavioral_only_csv(tmp_path, format_name):
+    dataset = _make_dataset(tmp_path, format_name, include_behavior=True)
+
+    behavioral = (
+        dataset
+        / "sourcedata"
+        / "sub-0001"
+        / "ses-A"
+        / "behavioral"
+        / "s01_A_task-look_behavior.csv"
+    )
+    et = dataset / "sourcedata" / "sub-0001" / "ses-A" / "ET"
+    assert behavioral.is_file()
+    assert not (et / behavioral.name).exists()
+
+
+def test_derivatives_are_computed_from_raw_bids_sourcedata(tmp_path, monkeypatch):
+    dataset = _make_dataset(tmp_path, "gaze", include_behavior=True)
+    calls = []
+
+    def capture_process_session(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    class ImmediateFuture:
+        def result(self):
+            return None
+
+    class ImmediateExecutor:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def submit(self, function, *args, **kwargs):
+            function(*args, **kwargs)
+            return ImmediateFuture()
+
+    monkeypatch.setattr(bids_formatting, "process_session", capture_process_session)
+    monkeypatch.setattr(
+        bids_formatting, "ProcessPoolExecutor", ImmediateExecutor
+    )
+
+    derivatives = compute_derivatives_for_dataset(
+        dataset,
+        "gaze",
+        num_processes=1,
+    )
+
+    assert derivatives == dataset.with_name(f"{dataset.name}_derivatives")
+    assert len(calls) == 1
+    assert calls[0][0][0] == (
+        dataset / "sourcedata" / "sub-0001" / "ses-A" / "ET"
+    )
+
+
+def _make_derivative_dataset(tmp_path: Path, format_name: str) -> Path:
+    raw = _make_dataset(tmp_path, format_name)
+    derivatives = raw.with_name(f"{raw.name}_derivatives")
+    initialize_bids_derivative(raw, derivatives)
+    session = derivatives / "sub-0001" / "ses-A"
+
+    samples = pd.DataFrame(
+        {
+            "tSample": [1_000.0, 1_017.0, 1_034.0],
+            "X": [100.0, 101.0, 102.0],
+            "Y": [200.0, 201.0, 202.0],
+            "Pupil": [3.0, 3.1, 3.2],
+            "trial_number": [0, 0, 0],
+            "phase": ["look", "look", "look"],
+            "Calib_index": [1, 1, 1],
+        }
+    )
+    fixations = pd.DataFrame(
+        {
+            "tStart": [1_000.0],
+            "tEnd": [1_017.0],
+            "duration": [17.0],
+            "xAvg": [100.5],
+            "yAvg": [200.5],
+            "trial_number": [0],
+            "phase": ["look"],
+        }
+    )
+    saccades = pd.DataFrame(
+        {
+            "tStart": [1_017.0],
+            "tEnd": [1_034.0],
+            "duration": [17.0],
+            "xStart": [101.0],
+            "yStart": [201.0],
+            "xEnd": [102.0],
+            "yEnd": [202.0],
+            "trial_number": [0],
+            "phase": ["look"],
+        }
+    )
+    blinks = pd.DataFrame(
+        columns=["tStart", "tEnd", "duration", "trial_number", "phase"]
+    )
+    exporter = BIDSDerivativeExport()
+    exporter.save_derivatives(
+        session_path=session,
+        samples=samples,
+        fixations=fixations,
+        saccades=saccades,
+        blinks=blinks,
+        detection_algorithm="remodnav",
+    )
+    return derivatives
+
+
+def test_bids_derivatives_are_canonical_and_reversible(tmp_path):
+    derivatives = _make_derivative_dataset(tmp_path, "gaze")
+    session = derivatives / "sub-0001" / "ses-A"
+    description = json.loads(
+        (derivatives / "dataset_description.json").read_text(encoding="utf-8")
+    )
+    assert description["DatasetType"] == "derivative"
+    assert description["GeneratedBy"][0]["Name"] == "Pyxations"
+    assert not list(derivatives.rglob("*.feather"))
+    assert not list(derivatives.rglob("*.hdf5"))
+
+    physio = list((session / "beh").glob("*_physio.tsv.gz"))
+    events = list((session / "beh").glob("*_physioevents.tsv.gz"))
+    assert len(physio) == 1
+    assert len(events) == 1
+
+    bundle = BIDSDerivativeExport().read_derivatives(session, "remodnav")
+    assert bundle["samples"].columns == [
+        "tSample",
+        "X",
+        "Y",
+        "Pupil",
+        "trial_number",
+        "phase",
+        "Calib_index",
+    ]
+    assert bundle["fix"]["trial_number"].to_list() == [0]
+    assert bundle["sacc"]["xEnd"].to_list() == [102.0]
+    assert bundle["blink"].is_empty()
+
+    experiment = Experiment(derivatives.with_name("gaze-dataset"))
+    experiment.load_data("remodnav")
+    trial = experiment["0001"]["A"][0]
+    assert trial.samples()["phase"].to_list() == ["look", "look", "look"]
+    assert trial.fixations()["xAvg"].to_list() == [100.5]
+
+
+@pytest.mark.parametrize("format_name", list(WRITERS))
+def test_bids_derivatives_pass_official_validator(tmp_path, format_name):
+    command = validator_command()
+    if command is None:
+        pytest.skip("Official BIDS Validator or Deno is not installed")
+    derivatives = _make_derivative_dataset(tmp_path, format_name)
+    validate_bids_dataset(derivatives, command=command)
+
+
+@pytest.mark.parametrize("format_name", list(WRITERS))
+def test_dataset_to_bids_passes_official_validator(tmp_path, format_name):
+    command = validator_command()
+    if command is None:
+        pytest.skip("Official BIDS Validator or Deno is not installed")
+    dataset = _make_dataset(tmp_path, format_name)
+    validate_bids_dataset(dataset, command=command)
+
+
+def test_validate_bids_dataset_reports_validator_failure(tmp_path):
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    command = [
+        sys.executable,
+        "-c",
+        "import sys; print('validator details'); sys.exit(1)",
+    ]
+    with pytest.raises(BIDSValidationError, match="validator details"):
+        validate_bids_dataset(dataset, command=command)

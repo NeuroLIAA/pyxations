@@ -15,10 +15,12 @@ The pipeline has three stages:
 ```python
 import pyxations as pyx
 
-pyx.dataset_to_bids(
+bids_path = pyx.dataset_to_bids(
     target_folder_path="path/to/output",        # where the BIDS dataset will be created
-    files_folder_path="path/to/raw/edf/files",  # folder containing raw recordings
+    files_folder_path="path/to/raw/files",      # folder containing raw recordings
     dataset_name="my_experiment",
+    format_name="eyelink",                      # eyelink | tobii | gaze | webgazer
+    task_name="visualsearch",                   # fallback when task- is not in filenames
 )
 ```
 
@@ -26,22 +28,54 @@ The resulting layout looks like:
 
 ```
 path/to/output/my_experiment/
-├── participants.tsv          # maps new sub-XXXX IDs to your original IDs
+├── dataset_description.json
+├── participants.tsv
 ├── sub-0001/
 │   └── ses-<session>/
-│       └── ET/
-│           └── <original_filename>.edf
-├── sub-0002/
-│   └── ses-<session>/
-│       └── ET/
+│       └── beh/
+│           ├── sub-0001_ses-<session>_task-<task>_recording-eye1_physio.tsv.gz
+│           └── sub-0001_ses-<session>_task-<task>_recording-eye1_physio.json
+└── sourcedata/
+    └── sub-0001/
+        └── ses-<session>/
+            ├── ET/            # original vendor recording
+            └── behavioral/    # original behavioral files, when present
 └── ...
 ```
 
-Subject IDs are inferred from the source filenames (everything before the first `_`) and re-numbered as zero-padded `sub-0001`, `sub-0002`, … The mapping to your original IDs is preserved in `participants.tsv`. The session label comes from the next part of the filename: use `session_substrings=N` to take more underscore-separated tokens.
+Subject IDs are inferred from the source filenames (everything before the first
+`_`) and re-numbered as zero-padded `sub-0001`, `sub-0002`, … The mapping to
+your original IDs is preserved in `participants.tsv`. The session label comes
+from the next part of the filename: use `session_substrings=N` to take more
+underscore-separated tokens.
+
+Pyxations writes one headerless `physio.tsv.gz` recording per eye and a JSON
+sidecar containing the sample columns, eye, sampling frequency, coordinate
+description, and pupil units. The original files are retained under
+`sourcedata/` for derivative processing and provenance.
+
+To validate an output dataset locally, install the official BIDS Validator or
+Deno and run:
+
+```python
+pyx.validate_bids_dataset(bids_path)
+```
+
+The continuous-integration suite performs this validation for synthetic
+EyeLink, Tobii, GazePoint, and WebGazer datasets.
 
 ## 2. Compute derivatives
 
-Derivatives are the parsed, processed outputs of the pipeline: messages, samples, detected fixations and saccades, split into trials. They are stored in a sibling `*_derivatives/` folder next to the BIDS dataset, preserving the same subject layout.
+Derivatives are the parsed, processed outputs of the pipeline: samples,
+messages, detected fixations, saccades and blinks, split into trials. They are
+stored in a sibling `*_derivatives/` folder next to the raw BIDS dataset,
+preserving its subject/session layout. Both folders are checked with the
+official BIDS Validator.
+
+BIDS `physio.tsv.gz`/JSON and `physioevents.tsv.gz`/JSON files are the canonical
+default. The sidecars preserve preprocessing provenance and reversible mappings
+to the Pyxations tables, so the analysis API continues to expose Polars
+DataFrames rather than tying downstream code to TSV files.
 
 ```python
 pyx.compute_derivatives_for_dataset(
@@ -54,6 +88,11 @@ pyx.compute_derivatives_for_dataset(
     overwrite=True,
 )
 ```
+
+The returned derivatives path contains a `dataset_description.json` with
+`DatasetType` set to `derivative`, `GeneratedBy` metadata for Pyxations, and a
+link to the source dataset. Feather and HDF5 exports are retained only for
+backward compatibility and can be selected explicitly with `exp_format`.
 
 ### Trial segmentation parameters
 

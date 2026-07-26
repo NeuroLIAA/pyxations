@@ -19,7 +19,7 @@ For EDF inputs you also need EyeLink's `edf2asc` tool on your `PATH`. See [Requi
 ```python
 import pyxations as pyx
 
-# 1) Organize raw recordings into a BIDS-formatted dataset
+# 1) Convert raw recordings into a BIDS dataset
 pyx.dataset_to_bids(
     target_folder_path="path/to/output",
     files_folder_path="path/to/raw/edf/files",
@@ -42,7 +42,9 @@ See [Usage](usage.md) for an end-to-end walkthrough.
 
 ## Features
 
-- **BIDS conversion**: organize recordings into a BIDS-compliant layout.
+- **Validated BIDS conversion**: write per-eye physiological recordings from
+  EyeLink, Tobii, GazePoint, and WebGazer data and retain vendor originals in
+  `sourcedata/`.
 - **EDF parsing**: extract headers, messages, calibration, events and raw samples from EyeLink EDF files (via `edf2asc`).
 - **Multi-vendor support**: input formats for EyeLink, Tobii, Gazepoint and WebGazer.
 - **Trial segmentation**: split continuous recordings using start/end messages, fixed durations or explicit timestamps.

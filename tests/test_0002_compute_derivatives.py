@@ -53,7 +53,21 @@ class TestComputeDerivatives(unittest.TestCase):
         self.assertTrue(os.path.exists(derivatives_path))
         self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001")))
         self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001", "ses-second")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001", "ses-second", "samples.feather")))
+        derivative_beh = Path(
+            data_folder,
+            "example_dataset_derivatives",
+            "sub-0001",
+            "ses-second",
+            "beh",
+        )
+        self.assertEqual(
+            len(list(derivative_beh.glob("*_physio.tsv.gz"))),
+            1,
+        )
+        self.assertEqual(
+            len(list(derivative_beh.glob("*_physioevents.tsv.gz"))),
+            1,
+        )
 
 
     def test_compute_derivatives_webgazer(self):

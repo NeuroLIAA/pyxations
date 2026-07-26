@@ -323,12 +323,12 @@ class EyelinkParse(BidsParse):
         if not keep_ascii:
             ascii_file_path.unlink(missing_ok=True)
     
-        # Save DataFrames to disk in one go to minimize memory usage during processing
-        self.save_dataframe(dfHeader, self.session_folder_path, 'header', key='header')
-        if not dfMsg.empty:
-            self.save_dataframe(dfMsg, self.session_folder_path, 'msg', key='msg')
-        self.save_dataframe(dfCalib, self.session_folder_path, 'calib', key='calib')
-        self.save_dataframe(pre_processing.samples, self.session_folder_path, 'samples', key='samples')
-        self.save_dataframe(pre_processing.blinks, (self.session_folder_path / f'{detection_algorithm}_events'), 'blink', key='blink')
-        self.save_dataframe(pre_processing.fixations, (self.session_folder_path / f'{detection_algorithm}_events'), 'fix', key='fix')
-        self.save_dataframe(pre_processing.saccades, (self.session_folder_path / f'{detection_algorithm}_events'), 'sacc', key='sacc')
+        self.store_dataframes(
+            pre_processing.samples,
+            dfCalib=dfCalib,
+            dfFix=pre_processing.fixations,
+            dfSacc=pre_processing.saccades,
+            dfHeader=dfHeader,
+            dfBlink=pre_processing.blinks,
+            dfMsg=dfMsg,
+        )
