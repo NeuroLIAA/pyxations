@@ -70,8 +70,8 @@ class SampleVisualization():
             x = df['X'] * self.screen_width
             y = df['Y'] * self.screen_height
         
-        scat = ax.scatter(x[0], y[0], c="b", s=5, label='a')
-        line2 = ax.plot(x[0], y[0], label=f'b')[0]
+        scat = ax.scatter(x[0], y[0], c="b", s=5, label='Gaze Samples')
+        line2 = ax.plot(x[0], y[0], label='Scanpath')[0]
         #ax.set(xlim=[0, 3], ylim=[-4, 10], xlabel='Time [s]', ylabel='Z [m]')
         ax.legend()
         
