@@ -12,28 +12,29 @@ from .analysis.generic import Experiment
 from .analysis.visual_search import VisualSearchExperiment
 from .bids import BIDSValidationError, validate_bids_dataset
 from .bids_formatting import compute_derivatives_for_dataset, dataset_to_bids
-from .export import BIDS_EXPORT, FEATHER_EXPORT
+from .export import BIDSDerivativeExport
 from .methods.eyemovement.engbert import EngbertDetection
 from .pre_processing import PreProcessing
+from .tables import SessionTables
 from .utils import get_ordered_trials_from_psycopy_logs
 from .visualization.samples import SampleVisualization
 from .visualization.visualization import Visualization
 
 __all__ = [
-    "dataset_to_bids",
-    "compute_derivatives_for_dataset",
-    "RemodnavDetection",
-    "EngbertDetection",
-    "Visualization",
-    "SampleVisualization",
-    "PreProcessing",
-    "get_ordered_trials_from_psycopy_logs",
-    "Experiment",
-    "VisualSearchExperiment",
-    "validate_bids_dataset",
+    "BIDSDerivativeExport",
     "BIDSValidationError",
-    "BIDS_EXPORT",
-    "FEATHER_EXPORT",
+    "EngbertDetection",
+    "Experiment",
+    "PreProcessing",
+    "RemodnavDetection",
+    "SampleVisualization",
+    "SessionTables",
+    "VisualSearchExperiment",
+    "Visualization",
+    "compute_derivatives_for_dataset",
+    "dataset_to_bids",
+    "get_ordered_trials_from_psycopy_logs",
+    "validate_bids_dataset",
 ]
 
 

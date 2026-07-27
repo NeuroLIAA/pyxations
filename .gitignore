@@ -11,6 +11,8 @@
 vend/
 env/
 .pytest_cache/
+.ruff_cache/
+site/
 .migration-*/
 .bids-first-*/
 

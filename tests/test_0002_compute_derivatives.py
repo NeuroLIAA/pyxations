@@ -34,19 +34,20 @@ def test_examples_generate_canonical_bids_derivatives(
     assert len(list((session / "beh").glob("*_physio.tsv.gz"))) == 1
     assert len(list((session / "beh").glob("*_physioevents.tsv.gz"))) == 1
 
-    bundle = BIDSDerivativeExport().read_derivatives(
+    bundle = BIDSDerivativeExport().read_session(
         session, case["algorithm"]
     )
-    assert not bundle["samples"].is_empty()
-    assert set(bundle) == {
+    assert not bundle.samples.is_empty()
+    assert {
         "samples",
-        "fix",
-        "sacc",
-        "blink",
-        "msg",
-        "calib",
+        "fixations",
+        "saccades",
+        "blinks",
+        "messages",
+        "calibration",
         "header",
-    }
+        "behavioral_events",
+    } <= set(bundle.__dataclass_fields__)
 
 
 @pytest.mark.parametrize("format_name", ["eyelink", "webgazer", "tobii", "gaze"])

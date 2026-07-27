@@ -1867,8 +1867,6 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pandas", version = "3.0.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "polars" },
 ]
 
@@ -1918,7 +1916,6 @@ requires-dist = [
     { name = "opencv-python", marker = "extra == 'all'", specifier = ">=4.9.0.80" },
     { name = "opencv-python", marker = "extra == 'dev'", specifier = ">=4.9.0.80" },
     { name = "opencv-python", marker = "extra == 'video'", specifier = ">=4.9.0.80" },
-    { name = "pandas", specifier = ">=1.5" },
     { name = "polars", specifier = ">=1.26.0" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },

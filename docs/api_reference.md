@@ -17,8 +17,8 @@ from pyxations import (
     SampleVisualization,
     Experiment,
     VisualSearchExperiment,
-    BIDS_EXPORT,
-    FEATHER_EXPORT,
+    BIDSDerivativeExport,
+    SessionTables,
     get_ordered_trials_from_psycopy_logs,
 )
 ```
@@ -75,17 +75,9 @@ Plotting utilities for scanpaths, fixations, saccades and raw samples.
 
 ::: pyxations.visualization.samples
 
-## formats
-
-Vendor-specific input readers. Selected via the `dataset_format` argument of `compute_derivatives_for_dataset`.
-
-::: pyxations.formats.generic
-
 ## export
 
-Writers for persisting derivatives in different on-disk formats. BIDS
-TSV.GZ/JSON (`BIDS_EXPORT`) is the canonical default; Feather is retained as a
-legacy opt-in format.
+The canonical BIDS TSV.GZ/JSON derivative reader and writer.
 
 ::: pyxations.export
 

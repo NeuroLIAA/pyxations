@@ -2,7 +2,7 @@ from pathlib import Path
 import polars as pl
 from pyxations.visualization.visualization import Visualization
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from pyxations.export import BIDS_EXPORT, FEATHER_EXPORT, get_exporter
+from pyxations.export.bids import BIDSDerivativeExport
 from math import hypot
 import numpy as np
 import matplotlib.pyplot as plt
@@ -157,7 +157,6 @@ class Experiment:
         excluded_subjects: list | None = None,
         excluded_sessions: dict | None = None,
         excluded_trials: dict | None = None,
-        export_format=BIDS_EXPORT,
     ):
         excluded_subjects = excluded_subjects or []
         excluded_sessions = excluded_sessions or {}
@@ -168,12 +167,11 @@ class Experiment:
                                     schema_overrides={"subject_id": pl.Utf8, "old_subject_id": pl.Utf8})
         self.subjects = { subject_id:
             Subject(subject_id, old_subject_id, self, 
-                     excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}),export_format)
+                     excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}))
             for subject_id, old_subject_id in zip(self.metadata.select("subject_id").to_series(),
                                                   self.metadata.select("old_subject_id").to_series())
             if subject_id not in excluded_subjects and old_subject_id not in excluded_subjects
         }
-        self.export_format = export_format
 
     def __iter__(self):
         return iter(self.subjects)
@@ -199,11 +197,7 @@ class Experiment:
         fixations = pl.concat([subject.fixations() for subject in self.subjects.values()])
         saccades = pl.concat([subject.saccades() for subject in self.subjects.values()])
 
-        visualization_root = (
-            self.derivatives_path / "figures" / "group"
-            if self.export_format == BIDS_EXPORT
-            else self.derivatives_path
-        )
+        visualization_root = self.derivatives_path / "figures" / "group"
         vis = Visualization(visualization_root, self.detection_algorithm)
         vis.plot_multipanel(fixations, saccades, display)
 
@@ -424,8 +418,7 @@ class Subject:
 
     def __init__(self, subject_id: str, old_subject_id: str, experiment: Experiment,
                  excluded_sessions: list | None = None,
-                 excluded_trials: dict | None = None,
-                 export_format=BIDS_EXPORT):
+                 excluded_trials: dict | None = None):
         excluded_sessions = excluded_sessions or []
         excluded_trials = excluded_trials or {}
         self.subject_id = subject_id
@@ -436,7 +429,6 @@ class Subject:
         self.excluded_trials = excluded_trials
         self.subject_dataset_path = self.experiment().dataset_path / f"sub-{self.subject_id}"
         self.subject_derivatives_path = self.experiment().derivatives_path / f"sub-{self.subject_id}"
-        self.export_format = export_format
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -456,7 +448,7 @@ class Subject:
         if self._sessions is None:
             self._sessions = { session_folder.name.split("-")[-1] :
                 Session(session_folder.name.split("-")[-1], self,
-                        self.excluded_trials.get(session_folder.name.split("-")[-1], {}),self.export_format) 
+                        self.excluded_trials.get(session_folder.name.split("-")[-1], {}))
                 for session_folder in self.subject_derivatives_path.glob("ses-*") 
                 if session_folder.name.split("-")[-1] not in self.excluded_sessions
             }
@@ -596,7 +588,6 @@ class Session():
         session_id: str,
         subject: Subject,
         excluded_trials: list | None = None,
-        export_format=BIDS_EXPORT,
     ):
         excluded_trials = excluded_trials or []
         self.session_id = session_id
@@ -605,7 +596,6 @@ class Session():
         self.session_dataset_path = self.subject().subject_dataset_path / f"ses-{self.session_id}"
         self.session_derivatives_path = self.subject().subject_derivatives_path / f"ses-{self.session_id}"
         self._trials = None  # Lazy load trials
-        self.export_format = export_format
 
         if not self.session_derivatives_path.exists():
             raise FileNotFoundError(f"Session path not found: {self.session_derivatives_path}")
@@ -709,81 +699,30 @@ class Session():
 
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
-        exporter = get_exporter(self.export_format)
-        if self.export_format == BIDS_EXPORT:
-            try:
-                bundle = exporter.read_derivatives(
-                    self.session_derivatives_path, detection_algorithm
-                )
-                samples = bundle["samples"]
-                fix = bundle["fix"]
-                sacc = bundle["sacc"]
-                blink = bundle["blink"]
-                calibration = bundle["calib"]
-                self._calib_data = (
-                    _parse_validations(calibration)
-                    if (
-                        calibration is not None
-                        and not calibration.is_empty()
-                        and "line" in calibration.columns
-                        and "Calib_index" in calibration.columns
-                    )
-                    else None
-                )
-                events_path = (
-                    self.session_derivatives_path.parents[1]
-                    / "figures"
-                    / self.session_derivatives_path.parent.name
-                    / self.session_derivatives_path.name
-                    / self.detection_algorithm
-                )
-            except FileNotFoundError:
-                exporter = get_exporter(FEATHER_EXPORT)
-                events_path = (
-                    self.session_derivatives_path
-                    / f"{self.detection_algorithm}_events"
-                )
-                samples = exporter.read(self.session_derivatives_path, "samples")
-                fix = exporter.read(events_path, "fix")
-                sacc = exporter.read(events_path, "sacc")
-                blink_path = events_path / "blink.feather"
-                blink = (
-                    exporter.read(events_path, "blink")
-                    if blink_path.exists()
-                    else None
-                )
-                calibration_path = self.session_derivatives_path / "calib.feather"
-                self._calib_data = (
-                    _parse_validations(
-                        exporter.read(self.session_derivatives_path, "calib")
-                    )
-                    if calibration_path.exists()
-                    else None
-                )
-        else:
-            events_path = (
-                self.session_derivatives_path
-                / f"{self.detection_algorithm}_events"
+        bundle = BIDSDerivativeExport().read_session(
+            self.session_derivatives_path, detection_algorithm
+        )
+        samples = bundle.samples
+        fix = bundle.fixations
+        sacc = bundle.saccades
+        blink = bundle.blinks
+        calibration = bundle.calibration
+        self._calib_data = (
+            _parse_validations(calibration)
+            if (
+                not calibration.is_empty()
+                and "line" in calibration.columns
+                and "Calib_index" in calibration.columns
             )
-            file_extension = exporter.extension()
-            samples = exporter.read(self.session_derivatives_path, "samples")
-            fix = exporter.read(events_path, "fix")
-            sacc = exporter.read(events_path, "sacc")
-            blink = (
-                exporter.read(events_path, "blink")
-                if (events_path / ("blink" + file_extension)).exists()
-                else None
-            )
-            calibration_path = (
-                self.session_derivatives_path / ("calib" + file_extension)
-            )
-            self._calib_data = (
-                _parse_validations(
-                    exporter.read(self.session_derivatives_path, "calib")
-                )
-                if calibration_path.exists()
-                else None
-            )
+            else None
+        )
+        events_path = (
+            self.session_derivatives_path.parents[1]
+            / "figures"
+            / self.session_derivatives_path.parent.name
+            / self.session_derivatives_path.name
+            / self.detection_algorithm
+        )
 
         self._init_trials(samples, fix, sacc, blink, events_path)
 

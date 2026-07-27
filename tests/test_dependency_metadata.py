@@ -39,7 +39,6 @@ def test_base_runtime_dependencies_are_minimal():
     assert {_package_name(item) for item in dependencies} == {
         "matplotlib",
         "numpy",
-        "pandas",
         "polars",
     }
 

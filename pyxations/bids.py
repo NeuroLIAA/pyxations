@@ -8,20 +8,26 @@ are written to the raw BIDS dataset.
 from __future__ import annotations
 
 import json
-import gzip
-import io
 import math
 import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
+from pyxations.tables import (
+    SessionTables,
+    empty_frame,
+    frame_payload,
+    payload_frame,
+    read_tsv,
+    write_tsv,
+)
 
 BIDS_VERSION = "1.11.1"
 BIDS_VALIDATOR_VERSION = "3.0.1"
@@ -35,7 +41,7 @@ class BIDSValidationError(RuntimeError):
 class EyeRecording:
     """Canonical sample-level recording for one eye."""
 
-    samples: pd.DataFrame
+    samples: pl.DataFrame
     recorded_eye: str
     sampling_frequency: float
     timestamp_unit: str
@@ -45,7 +51,7 @@ class EyeRecording:
     pupil_description: str | None = None
     manufacturer: str | None = None
 
-    def normalized(self) -> "EyeRecording":
+    def normalized(self) -> EyeRecording:
         required = ["timestamp", "x_coordinate", "y_coordinate"]
         missing = [column for column in required if column not in self.samples]
         if missing:
@@ -59,19 +65,29 @@ class EyeRecording:
         columns += [
             column for column in self.samples.columns if column not in columns
         ]
-        samples = self.samples.loc[:, columns].copy()
-        for column in required + (
-            ["pupil_size"] if "pupil_size" in samples.columns else []
-        ):
-            samples[column] = pd.to_numeric(samples[column], errors="coerce")
-        samples.replace([np.inf, -np.inf], np.nan, inplace=True)
+        numeric = required + (
+            ["pupil_size"] if "pupil_size" in self.samples.columns else []
+        )
+        samples = self.samples.select(columns).with_columns(
+            pl.col(column)
+            .cast(pl.Float64, strict=False)
+            .replace([float("inf"), float("-inf")], None)
+            .alias(column)
+            for column in numeric
+        )
         if "pupil_size" in samples:
-            samples.loc[samples["pupil_size"] <= 0, "pupil_size"] = np.nan
-        samples.dropna(subset=["timestamp"], inplace=True)
-        samples.sort_values("timestamp", inplace=True, kind="stable")
-        samples.drop_duplicates("timestamp", keep="first", inplace=True)
-        samples.reset_index(drop=True, inplace=True)
-        if samples.empty:
+            samples = samples.with_columns(
+                pl.when(pl.col("pupil_size") > 0)
+                .then(pl.col("pupil_size"))
+                .otherwise(None)
+                .alias("pupil_size")
+            )
+        samples = (
+            samples.filter(pl.col("timestamp").is_not_null())
+            .sort("timestamp", maintain_order=True)
+            .unique(subset=["timestamp"], keep="first", maintain_order=True)
+        )
+        if samples.is_empty():
             raise ValueError(f"No samples were found for the {self.recorded_eye} eye")
 
         frequency = float(self.sampling_frequency)
@@ -97,9 +113,9 @@ class SourceRecordingBundle:
     """Normalized raw-BIDS content extracted from one vendor recording."""
 
     recordings: list[EyeRecording]
-    events: pd.DataFrame = field(default_factory=pd.DataFrame)
-    calibration: pd.DataFrame = field(default_factory=pd.DataFrame)
-    header: pd.DataFrame = field(default_factory=pd.DataFrame)
+    events: pl.DataFrame = field(default_factory=empty_frame)
+    calibration: pl.DataFrame = field(default_factory=empty_frame)
+    header: pl.DataFrame = field(default_factory=empty_frame)
     metadata: dict = field(default_factory=dict)
 
 
@@ -123,18 +139,17 @@ def _session_from_filename(path: Path, session_substrings: int) -> str:
 
 
 def _sampling_frequency(
-    timestamps: pd.Series | Sequence[float], *, units_per_second: float
+    timestamps: pl.Series | Sequence[float], *, units_per_second: float
 ) -> float:
-    numeric = pd.to_numeric(pd.Series(timestamps), errors="coerce").dropna()
-    differences = numeric.sort_values().diff()
-    differences = differences[differences > 0]
-    if differences.empty:
+    numeric = pl.Series(timestamps).cast(pl.Float64, strict=False).drop_nulls()
+    differences = numeric.sort().diff().filter(numeric.sort().diff() > 0)
+    if differences.is_empty():
         raise ValueError("At least two distinct timestamps are needed")
-    return float(units_per_second / differences.median())
+    return float(units_per_second / float(differences.median()))
 
 
 def _recording(
-    data: pd.DataFrame,
+    data: pl.DataFrame,
     *,
     eye: str,
     timestamp: str,
@@ -157,7 +172,7 @@ def _recording(
     }
     if pupil and pupil in data:
         columns[pupil] = "pupil_size"
-    samples = data.loc[:, list(columns)].rename(columns=columns)
+    samples = data.select(list(columns)).rename(columns)
     frequency = sampling_frequency or _sampling_frequency(
         samples["timestamp"], units_per_second=units_per_second
     )
@@ -175,9 +190,9 @@ def _recording(
 
 
 def _read_gazepoint(
-    path: Path, *, data: pd.DataFrame | None = None
+    path: Path, *, data: pl.DataFrame | None = None
 ) -> list[EyeRecording]:
-    data = pd.read_csv(path) if data is None else data
+    data = pl.read_csv(path, infer_schema_length=None) if data is None else data
     timestamp = "TIME" if "TIME" in data else "time"
     definitions = [
         ("left", "LPOGX", "LPOGY", "LPD"),
@@ -209,9 +224,13 @@ def _read_gazepoint(
 
 
 def _read_tobii(
-    path: Path, *, data: pd.DataFrame | None = None
+    path: Path, *, data: pl.DataFrame | None = None
 ) -> list[EyeRecording]:
-    data = pd.read_csv(path, sep="\t") if data is None else data
+    data = (
+        pl.read_csv(path, separator="\t", infer_schema_length=None)
+        if data is None
+        else data
+    )
     timestamp = (
         "Eyetracker timestamp"
         if "Eyetracker timestamp" in data
@@ -247,21 +266,26 @@ def _read_tobii(
 
 
 def _read_webgazer(
-    path: Path, *, source: pd.DataFrame | None = None
+    path: Path, *, source: pl.DataFrame | None = None
 ) -> list[EyeRecording]:
-    source = pd.read_csv(path) if source is None else source
+    source = (
+        pl.read_csv(path, infer_schema_length=None) if source is None else source
+    )
     if "webgazer_data" not in source:
         raise ValueError(f"{path} does not contain a webgazer_data column")
 
     samples: list[dict[str, float]] = []
-    for row in source.loc[source["webgazer_data"].notna()].itertuples(index=False):
-        payload = getattr(row, "webgazer_data")
+    for row in source.filter(
+        pl.col("webgazer_data").is_not_null()
+        & (pl.col("webgazer_data").cast(pl.String).str.strip_chars() != "")
+    ).iter_rows(named=True):
+        payload = row["webgazer_data"]
         try:
             gaze_samples = json.loads(payload)
         except (TypeError, json.JSONDecodeError) as error:
             raise ValueError(f"Invalid WebGazer JSON in {path}") from error
-        base_time = float(getattr(row, "time_elapsed", 0.0))
-        trial_number = getattr(row, "trial_index", np.nan)
+        base_time = float(row.get("time_elapsed") or 0.0)
+        trial_number = row.get("trial_index")
         for sample in gaze_samples:
             if not {"t", "x", "y"}.issubset(sample):
                 continue
@@ -273,8 +297,8 @@ def _read_webgazer(
                     "trial_number": trial_number,
                 }
             )
-    frame = pd.DataFrame(samples)
-    if frame.empty:
+    frame = pl.DataFrame(samples, strict=False)
+    if frame.is_empty():
         raise ValueError(f"No WebGazer samples found in {path}")
     return [
         EyeRecording(
@@ -441,9 +465,10 @@ def _read_eyelink_bundle(path: Path) -> SourceRecordingBundle:
                     continue
                 if not re.fullmatch(r"-?\d+(?:\.\d+)?", fields[0]):
                     continue
-                numeric = pd.to_numeric(
-                    pd.Series(fields[:7]), errors="coerce"
-                ).tolist()
+                numeric = [
+                    float(value) if re.fullmatch(r"-?\d+(?:\.\d+)?", value) else None
+                    for value in fields[:7]
+                ]
                 eye_mode = recorded
                 if not eye_mode:
                     eye_mode = "LR" if len(numeric) >= 7 else "L"
@@ -495,7 +520,7 @@ def _read_eyelink_bundle(path: Path) -> SourceRecordingBundle:
     for eye, rows in (("left", left), ("right", right)):
         if not rows:
             continue
-        frame = pd.DataFrame(rows)
+        frame = pl.DataFrame(rows, strict=False)
         frequency = declared_frequency or _sampling_frequency(
             frame["timestamp"], units_per_second=1_000.0
         )
@@ -529,9 +554,13 @@ def _read_eyelink_bundle(path: Path) -> SourceRecordingBundle:
         )
     return SourceRecordingBundle(
         recordings=recordings,
-        events=pd.DataFrame(events),
-        calibration=pd.DataFrame(calibration),
-        header=pd.DataFrame(header),
+        events=pl.DataFrame(events, strict=False) if events else empty_frame(),
+        calibration=(
+            pl.DataFrame(calibration, strict=False)
+            if calibration
+            else empty_frame()
+        ),
+        header=pl.DataFrame(header, strict=False) if header else empty_frame(),
         metadata={
             "ScreenWidth": screen_width,
             "ScreenHeight": screen_height,
@@ -558,44 +587,39 @@ def _read_source_bundle(path: Path, format_name: str) -> SourceRecordingBundle:
     if format_name == "eyelink":
         return _read_eyelink_bundle(path)
     if format_name in {"gaze", "gazepoint"}:
-        data = pd.read_csv(path)
-        events = pd.DataFrame()
+        data = pl.read_csv(path, infer_schema_length=None)
+        events = empty_frame()
         if {"TIME", "BKDUR"}.issubset(data.columns):
-            blink = data.loc[
-                pd.to_numeric(data["BKDUR"], errors="coerce").fillna(0) > 0
-            ]
-            if not blink.empty:
-                duration = pd.to_numeric(
-                    blink["BKDUR"], errors="coerce"
-                )
-                end = pd.to_numeric(blink["TIME"], errors="coerce")
-                events = pd.DataFrame(
-                    {
-                        "onset": end - duration,
-                        "duration": duration,
-                        "trial_type": "blink",
-                        "message": "n/a",
-                        "eye": "cyclopean",
-                        "end_timestamp": end,
-                    }
+            blink = data.with_columns(
+                pl.col("BKDUR").cast(pl.Float64, strict=False).fill_null(0),
+                pl.col("TIME").cast(pl.Float64, strict=False),
+            ).filter(pl.col("BKDUR") > 0)
+            if not blink.is_empty():
+                events = blink.select(
+                    (pl.col("TIME") - pl.col("BKDUR")).alias("onset"),
+                    pl.col("BKDUR").alias("duration"),
+                    pl.lit("blink").alias("trial_type"),
+                    pl.lit("n/a").alias("message"),
+                    pl.lit("cyclopean").alias("eye"),
+                    pl.col("TIME").alias("end_timestamp"),
                 )
         return SourceRecordingBundle(
             recordings=_read_gazepoint(path, data=data),
             events=events,
         )
     if format_name == "tobii":
-        data = pd.read_csv(path, sep="\t")
+        data = pl.read_csv(path, separator="\t", infer_schema_length=None)
         return SourceRecordingBundle(
             recordings=_read_tobii(path, data=data)
         )
     if format_name == "webgazer":
-        data = pd.read_csv(path)
+        data = pl.read_csv(path, infer_schema_length=None)
         calibration = (
-            data.loc[data["rastoc-type"] == "calibration-stimulus"].copy()
+            data.filter(pl.col("rastoc-type") == "calibration-stimulus")
             if "rastoc-type" in data
-            else pd.DataFrame()
+            else empty_frame()
         )
-        if not calibration.empty:
+        if not calibration.is_empty():
             compact_columns = [
                 column
                 for column in (
@@ -609,7 +633,7 @@ def _read_source_bundle(path: Path, format_name: str) -> SourceRecordingBundle:
                 )
                 if column in calibration
             ]
-            calibration = calibration.loc[:, compact_columns]
+            calibration = calibration.select(compact_columns)
         return SourceRecordingBundle(
             recordings=_read_webgazer(path, source=data),
             calibration=calibration,
@@ -635,13 +659,13 @@ def _is_primary_recording(path: Path, format_name: str) -> bool:
 
     try:
         columns = set(
-            pd.read_csv(
+            pl.scan_csv(
                 path,
-                sep="\t" if format_name == "tobii" else ",",
-                nrows=0,
-            ).columns
+                separator="\t" if format_name == "tobii" else ",",
+                infer_schema_length=0,
+            ).collect_schema().names()
         )
-    except (OSError, UnicodeDecodeError, pd.errors.ParserError):
+    except (OSError, UnicodeDecodeError, pl.exceptions.PolarsError):
         return False
 
     if format_name in {"gaze", "gazepoint"}:
@@ -673,16 +697,6 @@ def _write_json(path: Path, value: dict) -> None:
         stream.write("\n")
 
 
-def _frame_payload(frame: pd.DataFrame) -> dict | None:
-    if frame is None or frame.empty:
-        return None
-    safe = frame.astype(object).where(pd.notna(frame), None)
-    return {
-        "columns": [str(column) for column in safe.columns],
-        "data": json.loads(safe.to_json(orient="values")),
-    }
-
-
 def _write_recording(
     recording: EyeRecording,
     *,
@@ -696,20 +710,12 @@ def _write_recording(
     tsv_path = destination / f"{prefix}_physio.tsv.gz"
     json_path = destination / f"{prefix}_physio.json"
     destination.mkdir(parents=True, exist_ok=True)
-    with tsv_path.open("wb") as binary_stream:
-        with gzip.GzipFile(
-            filename="", fileobj=binary_stream, mode="wb", mtime=0
-        ) as gzip_stream:
-            with io.TextIOWrapper(
-                gzip_stream, encoding="utf-8", newline=""
-            ) as text_stream:
-                recording.samples.to_csv(
-                    text_stream,
-                    sep="\t",
-                    header=False,
-                    index=False,
-                    na_rep="n/a",
-                )
+    write_tsv(
+        tsv_path,
+        recording.samples,
+        include_header=False,
+        compressed=True,
+    )
 
     metadata: dict = {
         "SamplingFrequency": recording.sampling_frequency,
@@ -763,39 +769,26 @@ def _write_recording(
 
 
 def _write_physio_events(
-    events: pd.DataFrame,
+    events: pl.DataFrame,
     *,
     destination: Path,
     prefix: str,
 ) -> tuple[Path, Path] | None:
-    if events is None or events.empty:
+    if events is None or events.is_empty():
         return None
-    frame = events.copy()
+    frame = events.clone()
     required = ["onset", "duration", "trial_type"]
     for column in required:
         if column not in frame:
-            frame[column] = "n/a"
+            frame = frame.with_columns(pl.lit("n/a").alias(column))
     columns = required + [
         column for column in frame.columns if column not in required
     ]
-    frame = frame.loc[:, columns]
+    frame = frame.select(columns)
     path = destination / f"{prefix}_physioevents.tsv.gz"
     json_path = destination / f"{prefix}_physioevents.json"
     destination.mkdir(parents=True, exist_ok=True)
-    with path.open("wb") as binary_stream:
-        with gzip.GzipFile(
-            filename="", fileobj=binary_stream, mode="wb", mtime=0
-        ) as gzip_stream:
-            with io.TextIOWrapper(
-                gzip_stream, encoding="utf-8", newline=""
-            ) as text_stream:
-                frame.to_csv(
-                    text_stream,
-                    sep="\t",
-                    header=False,
-                    index=False,
-                    na_rep="n/a",
-                )
+    write_tsv(path, frame, include_header=False, compressed=True)
     metadata = {
         "Columns": columns,
         "Description": (
@@ -816,16 +809,15 @@ def _write_physio_events(
 
 
 def _events_for_recording(
-    events: pd.DataFrame,
+    events: pl.DataFrame,
     *,
     recorded_eye: str,
     available_eyes: Sequence[str],
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """Select events associated with one per-eye physiological recording."""
 
-    if events is None or events.empty or "eye" not in events:
+    if events is None or events.is_empty() or "eye" not in events:
         return events
-    normalized = events["eye"].fillna("n/a").astype(str).str.lower()
     eye_values = {
         "left": {"l", "left"},
         "right": {"r", "right"},
@@ -837,18 +829,24 @@ def _events_for_recording(
         # exposing separate left/right sample streams. Retain that shared
         # stream alongside each corresponding recording.
         shared_values.update({"c", "cyclopean", "both", "binocular"})
-    return events.loc[
-        normalized.isin(eye_values | shared_values)
-    ].reset_index(drop=True)
+    return events.filter(
+        pl.col("eye")
+        .fill_null("n/a")
+        .cast(pl.String)
+        .str.to_lowercase()
+        .is_in(eye_values | shared_values)
+    )
 
 
-def _read_behavioral_table(path: Path) -> pd.DataFrame | None:
+def _read_behavioral_table(path: Path) -> pl.DataFrame | None:
     try:
         if path.suffix.lower() == ".csv":
-            return pd.read_csv(path)
+            return pl.read_csv(path, infer_schema_length=None)
         if path.suffix.lower() == ".tsv":
-            return pd.read_csv(path, sep="\t")
-    except (OSError, UnicodeDecodeError, pd.errors.ParserError):
+            return pl.read_csv(
+                path, separator="\t", infer_schema_length=None
+            )
+    except (OSError, UnicodeDecodeError, pl.exceptions.PolarsError):
         return None
     return None
 
@@ -859,7 +857,7 @@ def _prepare_task_events(
     source_root: Path,
     primary_source: Path,
     format_name: str,
-) -> pd.DataFrame | None:
+) -> pl.DataFrame | None:
     tables = []
     candidates = list(files)
     if format_name == "webgazer":
@@ -873,13 +871,13 @@ def _prepare_task_events(
         if path.resolve() == primary_source.resolve() and format_name != "webgazer":
             continue
         table = _read_behavioral_table(path)
-        if table is None or table.empty:
+        if table is None or table.is_empty():
             continue
         if _is_primary_recording(path, format_name) and format_name != "webgazer":
             continue
         if format_name == "webgazer" and "webgazer_data" in table:
             table = table.drop(
-                columns=[
+                [
                     column
                     for column in (
                         "webgazer_data",
@@ -891,67 +889,87 @@ def _prepare_task_events(
                 ]
             )
             if "trial_index" in table:
-                table = table.drop_duplicates("trial_index", keep="last")
-        table = table.copy()
+                table = table.unique(
+                    subset=["trial_index"], keep="last", maintain_order=True
+                )
+        table = table.clone()
         try:
             source_file = path.relative_to(source_root).as_posix()
         except ValueError:
             source_file = path.name
-        table["source_file"] = source_file
+        table = table.with_columns(pl.lit(source_file).alias("source_file"))
         tables.append(table)
     if not tables:
         return None
-    events = pd.concat(tables, ignore_index=True, sort=False)
+    events = pl.concat(tables, how="diagonal_relaxed")
     if "trial_number" not in events and "trial_index" in events:
-        events["trial_number"] = events["trial_index"]
+        events = events.with_columns(
+            pl.col("trial_index").alias("trial_number")
+        )
     if "onset" not in events:
         if "time_elapsed" in events:
-            elapsed = pd.to_numeric(events["time_elapsed"], errors="coerce")
-            events["onset"] = (elapsed - elapsed.min()) / 1_000.0
-        else:
-            events["onset"] = np.nan
-    if "duration" not in events:
-        if "rt" in events:
-            events["duration"] = (
-                pd.to_numeric(events["rt"], errors="coerce") / 1_000.0
+            events = events.with_columns(
+                (
+                    pl.col("time_elapsed").cast(pl.Float64, strict=False)
+                    - pl.col("time_elapsed")
+                    .cast(pl.Float64, strict=False)
+                    .min()
+                ).truediv(1_000.0).alias("onset")
             )
         else:
-            events["duration"] = np.nan
+            events = events.with_columns(
+                pl.lit(None, dtype=pl.Float64).alias("onset")
+            )
+    if "duration" not in events:
+        if "rt" in events:
+            events = events.with_columns(
+                pl.col("rt")
+                .cast(pl.Float64, strict=False)
+                .truediv(1_000.0)
+                .alias("duration")
+            )
+        else:
+            events = events.with_columns(
+                pl.lit(None, dtype=pl.Float64).alias("duration")
+            )
     # BIDS tabular files do not support embedded tabs or newlines. Browser
     # experiments commonly store multiline HTML and pretty-printed JSON in
     # behavioral columns, so retain their content in a single-line form.
-    object_columns = events.select_dtypes(include=["object", "string"]).columns
-    for column in object_columns:
-        events[column] = events[column].map(
-            lambda value: re.sub(r"[\t\r\n]+", " ", value).strip()
-            if isinstance(value, str)
-            else value
+    string_columns = [
+        column
+        for column, dtype in events.schema.items()
+        if dtype == pl.String
+    ]
+    if string_columns:
+        events = events.with_columns(
+            pl.col(column)
+            .str.replace_all(r"[\t\r\n]+", " ")
+            .str.strip_chars()
+            .alias(column)
+            for column in string_columns
         )
-    events = events.sort_values("onset", na_position="last").reset_index(
-        drop=True
-    )
-    return events
+    return events.sort("onset", nulls_last=True, maintain_order=True)
 
 
 def _write_task_events(
-    events: pd.DataFrame | None,
+    events: pl.DataFrame | None,
     *,
     destination: Path,
     prefix: str,
 ) -> tuple[Path, Path] | None:
-    if events is None or events.empty:
+    if events is None or events.is_empty():
         return None
-    frame = events.copy()
+    frame = events.clone()
     columns = ["onset", "duration"] + [
         column
         for column in frame.columns
         if column not in {"onset", "duration"}
     ]
-    frame = frame.loc[:, columns]
+    frame = frame.select(columns)
     path = destination / f"{prefix}_events.tsv"
     json_path = destination / f"{prefix}_events.json"
     destination.mkdir(parents=True, exist_ok=True)
-    frame.to_csv(path, sep="\t", index=False, na_rep="n/a")
+    write_tsv(path, frame, include_header=True, compressed=False)
     metadata = {
         column: {
             "Description": (
@@ -1060,8 +1078,11 @@ def write_bids_dataset(
             ],
         },
     )
-    pd.DataFrame(participant_rows).to_csv(
-        dataset_root / "participants.tsv", sep="\t", index=False, na_rep="n/a"
+    write_tsv(
+        dataset_root / "participants.tsv",
+        pl.DataFrame(participant_rows),
+        include_header=True,
+        compressed=False,
     )
     _write_json(
         dataset_root / "participants.json",
@@ -1123,11 +1144,15 @@ def write_bids_dataset(
                         prefix=prefix,
                         extra_metadata=(
                             {
-                                "PyxationsCalibration": _frame_payload(
-                                    bundle.calibration
+                                "PyxationsCalibration": frame_payload(
+                                    bundle.calibration,
+                                    columns_key="columns",
+                                    records_key="data",
                                 ),
-                                "PyxationsHeader": _frame_payload(
-                                    bundle.header
+                                "PyxationsHeader": frame_payload(
+                                    bundle.header,
+                                    columns_key="columns",
+                                    records_key="data",
                                 ),
                                 **bundle.metadata,
                             }
@@ -1158,37 +1183,11 @@ def write_bids_dataset(
     return dataset_root
 
 
-@dataclass
-class RawBIDSSession:
-    """Raw BIDS tables needed for derivative computation."""
-
-    samples: pd.DataFrame
-    fixations: pd.DataFrame
-    saccades: pd.DataFrame
-    blinks: pd.DataFrame
-    messages: pd.DataFrame
-    calibration: pd.DataFrame
-    header: pd.DataFrame
-    behavioral_events: pd.DataFrame
-    sampling_frequency: float
-    screen_width: int | None = None
-    screen_height: int | None = None
-
-
-def _payload_frame(payload) -> pd.DataFrame:
-    if not payload:
-        return pd.DataFrame()
-    return pd.DataFrame(payload.get("data", []), columns=payload.get("columns", []))
-
-
-def _read_bids_table(path: Path, metadata: dict) -> pd.DataFrame:
-    return pd.read_csv(
+def _read_bids_table(path: Path, metadata: dict) -> pl.DataFrame:
+    return read_tsv(
         path,
-        sep="\t",
-        header=None,
-        names=list(metadata["Columns"]),
-        na_values=["n/a"],
-        keep_default_na=True,
+        columns=list(metadata["Columns"]),
+        has_header=False,
     )
 
 
@@ -1209,28 +1208,20 @@ def _milliseconds_per_unit(unit: str | None) -> float:
     }.get(normalized, 1.0)
 
 
-def read_bids_task_events(session_path: str | Path) -> pd.DataFrame:
+def read_bids_task_events(session_path: str | Path) -> pl.DataFrame:
     """Read and combine BIDS task-event tables for one raw session."""
 
     behavior = Path(session_path) / "beh"
     tables = []
     for path in sorted(behavior.glob("*_events.tsv")):
-        table = pd.read_csv(
-            path,
-            sep="\t",
-            na_values=["n/a"],
-            keep_default_na=True,
+        table = read_tsv(path, has_header=True).with_columns(
+            pl.lit(path.name).alias("bids_events_file")
         )
-        table["bids_events_file"] = path.name
         tables.append(table)
-    return (
-        pd.concat(tables, ignore_index=True, sort=False)
-        if tables
-        else pd.DataFrame()
-    )
+    return pl.concat(tables, how="diagonal_relaxed") if tables else empty_frame()
 
 
-def read_raw_bids_session(session_path: str | Path) -> RawBIDSSession:
+def read_raw_bids_session(session_path: str | Path) -> SessionTables:
     """Load normalized samples and source events from a raw BIDS session."""
 
     session = Path(session_path)
@@ -1256,37 +1247,43 @@ def read_raw_bids_session(session_path: str | Path) -> RawBIDSSession:
         time_scale = _milliseconds_per_unit(
             metadata.get("timestamp", {}).get("Units")
         )
-        stream = pd.DataFrame(
-            {
-                "tSample": pd.to_numeric(
-                    frame["timestamp"], errors="coerce"
-                )
-                * time_scale
-            }
+        stream = frame.select(
+            pl.col("timestamp")
+            .cast(pl.Float64, strict=False)
+            .mul(time_scale)
+            .alias("tSample")
         )
         eye = metadata.get("RecordedEye", "cyclopean")
         prefix = {"left": "L", "right": "R"}.get(eye)
         if prefix:
-            stream[f"{prefix}X"] = pd.to_numeric(
-                frame["x_coordinate"], errors="coerce"
-            )
-            stream[f"{prefix}Y"] = pd.to_numeric(
-                frame["y_coordinate"], errors="coerce"
+            stream = stream.with_columns(
+                frame.get_column("x_coordinate")
+                .cast(pl.Float64, strict=False)
+                .alias(f"{prefix}X"),
+                frame.get_column("y_coordinate")
+                .cast(pl.Float64, strict=False)
+                .alias(f"{prefix}Y"),
             )
             if "pupil_size" in frame:
-                stream[f"{prefix}Pupil"] = pd.to_numeric(
-                    frame["pupil_size"], errors="coerce"
+                stream = stream.with_columns(
+                    frame.get_column("pupil_size")
+                    .cast(pl.Float64, strict=False)
+                    .alias(f"{prefix}Pupil")
                 )
         else:
-            stream["X"] = pd.to_numeric(
-                frame["x_coordinate"], errors="coerce"
-            )
-            stream["Y"] = pd.to_numeric(
-                frame["y_coordinate"], errors="coerce"
+            stream = stream.with_columns(
+                frame.get_column("x_coordinate")
+                .cast(pl.Float64, strict=False)
+                .alias("X"),
+                frame.get_column("y_coordinate")
+                .cast(pl.Float64, strict=False)
+                .alias("Y"),
             )
             if "pupil_size" in frame:
-                stream["Pupil"] = pd.to_numeric(
-                    frame["pupil_size"], errors="coerce"
+                stream = stream.with_columns(
+                    frame.get_column("pupil_size")
+                    .cast(pl.Float64, strict=False)
+                    .alias("Pupil")
                 )
         auxiliary = {
             "calibration_index": "Calib_index",
@@ -1295,8 +1292,10 @@ def read_raw_bids_session(session_path: str | Path) -> RawBIDSSession:
         }
         for source_column, target_column in auxiliary.items():
             if source_column in frame and target_column not in stream:
-                stream[target_column] = pd.to_numeric(
-                    frame[source_column], errors="coerce"
+                stream = stream.with_columns(
+                    frame.get_column(source_column)
+                    .cast(pl.Float64, strict=False)
+                    .alias(target_column)
                 )
         sample_streams.append(stream)
 
@@ -1307,24 +1306,29 @@ def read_raw_bids_session(session_path: str | Path) -> RawBIDSSession:
             for column in ("Calib_index", "Line_number", "trial_number")
             if column in stream and column in samples
         ]
-        stream = stream.drop(columns=duplicate_auxiliary)
-        samples = samples.merge(stream, on="tSample", how="outer", sort=True)
-    samples.sort_values("tSample", inplace=True, kind="stable")
-    samples.reset_index(drop=True, inplace=True)
+        stream = stream.drop(duplicate_auxiliary)
+        samples = samples.join(
+            stream, on="tSample", how="full", coalesce=True
+        )
+    samples = samples.sort("tSample", maintain_order=True)
     sampling_frequency = float(np.nanmedian(frequencies))
-    samples["Rate_recorded"] = sampling_frequency
+    additions = [pl.lit(sampling_frequency).alias("Rate_recorded")]
     if "Calib_index" not in samples:
-        samples["Calib_index"] = 1
+        additions.append(pl.lit(1).alias("Calib_index"))
     if "Line_number" not in samples:
-        samples["Line_number"] = np.arange(len(samples))
+        additions.append(
+            pl.int_range(0, samples.height, eager=True).alias("Line_number")
+        )
     if {"LX", "RX"}.intersection(samples.columns):
-        samples["Eyes_recorded"] = (
+        eyes_recorded = (
             "LR"
             if {"LX", "RX"}.issubset(samples.columns)
             else "L"
             if "LX" in samples
             else "R"
         )
+        additions.append(pl.lit(eyes_recorded).alias("Eyes_recorded"))
+    samples = samples.with_columns(additions)
 
     event_frames = []
     for path in sorted(behavior.glob("*_physioevents.tsv.gz")):
@@ -1333,43 +1337,54 @@ def read_raw_bids_session(session_path: str | Path) -> RawBIDSSession:
         )
         event_frames.append(_read_bids_table(path, metadata))
     events = (
-        pd.concat(event_frames, ignore_index=True, sort=False)
+        pl.concat(event_frames, how="diagonal_relaxed")
         if event_frames
-        else pd.DataFrame()
+        else empty_frame()
     )
-    if not events.empty:
+    if not events.is_empty():
         # Device-wide messages may be associated with every per-eye
         # physiological recording. Reconstruct them only once in memory.
-        events = events.drop_duplicates(ignore_index=True)
+        events = events.unique(maintain_order=True)
     time_scale = _milliseconds_per_unit(
         first_metadata.get("timestamp", {}).get("Units")
     )
-    if not events.empty:
-        events["tStart"] = (
-            pd.to_numeric(events["onset"], errors="coerce") * time_scale
+    if not events.is_empty():
+        events = events.with_columns(
+            pl.col("onset")
+            .cast(pl.Float64, strict=False)
+            .mul(time_scale)
+            .alias("tStart")
         )
         if "end_timestamp" in events:
-            events["tEnd"] = (
-                pd.to_numeric(events["end_timestamp"], errors="coerce")
-                * time_scale
+            events = events.with_columns(
+                pl.col("end_timestamp")
+                .cast(pl.Float64, strict=False)
+                .mul(time_scale)
+                .alias("tEnd")
             )
         else:
-            events["tEnd"] = events["tStart"] + (
-                pd.to_numeric(events.get("duration"), errors="coerce")
-                * 1_000.0
+            duration = (
+                pl.col("duration").cast(pl.Float64, strict=False)
+                if "duration" in events
+                else pl.lit(None, dtype=pl.Float64)
             )
-        events["duration_ms"] = events["tEnd"] - events["tStart"]
+            events = events.with_columns(
+                (pl.col("tStart") + duration * 1_000.0).alias("tEnd")
+            )
+        events = events.with_columns(
+            (pl.col("tEnd") - pl.col("tStart")).alias("duration_ms")
+        )
 
-    def selected(event_type: str, mapping: dict[str, str]) -> pd.DataFrame:
-        if events.empty or "trial_type" not in events:
-            return pd.DataFrame(columns=list(mapping.values()))
-        result = events.loc[events["trial_type"] == event_type].copy()
+    def selected(event_type: str, mapping: dict[str, str]) -> pl.DataFrame:
+        if events.is_empty() or "trial_type" not in events:
+            return pl.DataFrame({column: [] for column in mapping.values()})
+        result = events.filter(pl.col("trial_type") == event_type)
         available = {
             source: target
             for source, target in mapping.items()
             if source in result
         }
-        return result.loc[:, list(available)].rename(columns=available)
+        return result.select(list(available)).rename(available)
 
     common = {
         "eye": "eye",
@@ -1411,20 +1426,31 @@ def read_raw_bids_session(session_path: str | Path) -> RawBIDSSession:
         },
     )
     if "Eyes_recorded" in samples:
+        session_eye = samples.get_column("Eyes_recorded").item(0)
         for table in (fixations, saccades, blinks, messages):
-            table["Eyes_recorded"] = samples["Eyes_recorded"].iloc[0]
-            table["Rate_recorded"] = sampling_frequency
+            table = table.with_columns(
+                pl.lit(session_eye).alias("Eyes_recorded"),
+                pl.lit(sampling_frequency).alias("Rate_recorded"),
+            )
+            if table is fixations:
+                fixations = table
+            elif table is saccades:
+                saccades = table
+            elif table is blinks:
+                blinks = table
+            else:
+                messages = table
 
-    return RawBIDSSession(
+    return SessionTables(
         samples=samples,
         fixations=fixations,
         saccades=saccades,
         blinks=blinks,
         messages=messages,
-        calibration=_payload_frame(
+        calibration=payload_frame(
             first_metadata.get("PyxationsCalibration")
         ),
-        header=_payload_frame(first_metadata.get("PyxationsHeader")),
+        header=payload_frame(first_metadata.get("PyxationsHeader")),
         behavioral_events=read_bids_task_events(session),
         sampling_frequency=sampling_frequency,
         screen_width=first_metadata.get("ScreenWidth"),

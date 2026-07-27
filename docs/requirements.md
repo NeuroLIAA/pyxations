@@ -5,7 +5,7 @@
 Python **3.10** or newer.
 
 Linux, macOS and Windows are all supported. The base package uses NumPy,
-Polars, pandas, and Matplotlib.
+Polars, and Matplotlib.
 
 ## edf2asc (only for EyeLink data)
 
@@ -27,13 +27,12 @@ The default installation declares only direct dependencies shared across the pac
 
 - `numpy>=1.24`
 - `polars>=1.26.0`
-- `pandas>=1.5`
 - `matplotlib>=3.9.2`
 
-Pandas handles the standards-facing BIDS TSV/JSON boundary, while
-preprocessing and analysis use Polars tables. PyArrow and Seaborn are not
-direct requirements. Transitive dependencies are resolved by the installer
-and are not repeated in Pyxations metadata.
+Raw conversion, BIDS TSV/JSON I/O, preprocessing, and analysis all use Polars
+tables. Pandas, PyArrow, and Seaborn are not direct requirements. Transitive
+dependencies are resolved by the installer and are not repeated in Pyxations
+metadata.
 
 ## Optional feature dependencies
 

@@ -41,7 +41,6 @@ The base installation contains only the shared runtime stack:
 
 - `numpy`
 - `polars`
-- `pandas`
 - `matplotlib`
 
 Feature-specific packages are optional:
@@ -53,10 +52,9 @@ Feature-specific packages are optional:
 
 Packages used internally by these libraries are resolved transitively and are not pinned by Pyxations. Test and documentation tools are kept in optional dependency groups.
 
-Canonical raw and derivative data are stored as compressed BIDS TSV/JSON.
-Pandas is retained at that standards-facing I/O boundary; analysis and
-preprocessing tables are normalized to Polars. PyArrow and Seaborn are not
-direct dependencies.
+Canonical raw and derivative data are stored as compressed BIDS TSV/JSON, and
+the complete tabular pipeline uses Polars in memory. Pandas, PyArrow, and
+Seaborn are not direct dependencies.
 
 
 ## Installation

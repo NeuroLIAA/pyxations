@@ -1,10 +1,4 @@
-"""Engbert–Kliegl eye-movement detection adapter.
-
-The detector performs its numerical work with NumPy and does not depend on
-pandas.  Output tables use the same dataframe family as the input samples,
-which preserves existing pandas callers while allowing parsers to migrate to
-Polars independently.
-"""
+"""Polars-native Engbert–Kliegl eye-movement detection adapter."""
 
 from __future__ import annotations
 
@@ -12,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
+import polars as pl
 
 from pyxations.methods.eyemovement.eye_movement_detection import EyeMovementDetection
 
@@ -49,13 +44,13 @@ _FIXATION_COLUMNS = (
 )
 
 
-def _column_names(frame: Any) -> list[str]:
-    """Return dataframe column names without depending on its implementation."""
+def _column_names(frame: pl.DataFrame) -> list[str]:
+    """Return dataframe column names."""
     return list(frame.columns)
 
 
 def _column_to_numpy(
-    frame: Any,
+    frame: pl.DataFrame,
     name: str,
     *,
     dtype: Any | None = None,
@@ -83,33 +78,21 @@ def _column_to_numpy(
     return array
 
 
-def _is_polars_frame(frame: Any) -> bool:
-    return frame.__class__.__module__.split(".", 1)[0] == "polars"
-
-
 def _make_frame(
-    template: Any,
+    template: pl.DataFrame,
     rows: Sequence[Mapping[str, Any]],
     columns: Sequence[str],
-) -> Any:
-    """Create a dataframe matching ``template`` without importing pandas."""
-    ordered_rows = [{column: row.get(column) for column in columns} for row in rows]
-
-    if _is_polars_frame(template):
-        import polars as pl
-
-        if ordered_rows:
-            return pl.DataFrame(ordered_rows).select(list(columns))
-        return pl.DataFrame({column: [] for column in columns})
-
-    frame_class = template.__class__
-    try:
-        return frame_class(ordered_rows, columns=list(columns))
-    except TypeError as exc:
+) -> pl.DataFrame:
+    """Create an ordered Polars dataframe."""
+    if not isinstance(template, pl.DataFrame):
         raise TypeError(
-            "Unsupported dataframe type. EngbertDetection expects a pandas or "
-            f"Polars DataFrame, got {frame_class.__module__}.{frame_class.__name__}."
-        ) from exc
+            "EngbertDetection expects a Polars DataFrame, "
+            f"got {type(template)!r}."
+        )
+    ordered_rows = [{column: row.get(column) for column in columns} for row in rows]
+    if ordered_rows:
+        return pl.DataFrame(ordered_rows, strict=False).select(list(columns))
+    return pl.DataFrame({column: [] for column in columns})
 
 
 def _smooth_1d(values: np.ndarray, smoothlevel: int) -> np.ndarray:
@@ -270,7 +253,7 @@ def _compute_px2deg(
 
 
 def _forward_backward_fill(values: np.ndarray) -> np.ndarray:
-    """Fill missing numeric values using pandas-compatible ffill then bfill."""
+    """Fill missing numeric values forward, then backward."""
     values = np.asarray(values, dtype=float).copy()
     finite_indices = np.flatnonzero(np.isfinite(values))
     if finite_indices.size == 0:

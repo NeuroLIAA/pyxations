@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 
 pl = pytest.importorskip("polars")
@@ -49,7 +48,7 @@ def _preprocessing(
     )
 
 
-def test_constructor_normalizes_dataframe_inputs_and_clones_them(tmp_path: Path):
+def test_constructor_clones_polars_inputs_and_rejects_other_tables(tmp_path: Path):
     samples = pl.DataFrame({"tSample": [0], "X": [1.0]})
     pp = _preprocessing(tmp_path, samples=samples)
 
@@ -57,22 +56,7 @@ def test_constructor_normalizes_dataframe_inputs_and_clones_them(tmp_path: Path)
     assert pp.samples.equals(samples)
     assert pp.samples is not samples
 
-    pandas_samples = pd.DataFrame({"tSample": [0], "X": [1.0]})
-    normalized = PreProcessing(
-        samples=pandas_samples,
-        fixations=_empty_events(),
-        saccades=_empty_events(),
-        blinks=_empty_events(),
-        user_messages=_messages(),
-        session_path=tmp_path,
-    )
-    assert isinstance(normalized.samples, pl.DataFrame)
-    assert normalized.samples.to_dict(as_series=False) == {
-        "tSample": [0],
-        "X": [1.0],
-    }
-
-    with pytest.raises(TypeError, match="Polars or pandas-like DataFrame"):
+    with pytest.raises(TypeError, match="must be a Polars DataFrame"):
         PreProcessing(
             samples={"tSample": [0]},  # type: ignore[arg-type]
             fixations=_empty_events(),
@@ -321,7 +305,7 @@ def test_add_trial_metadata_validates_tables_and_join_key(tmp_path: Path):
     pp = _metadata_preprocessing(tmp_path)
 
     with pytest.raises(
-        TypeError, match="metadata_df must be a Polars or pandas-like DataFrame"
+        TypeError, match="metadata_df must be a Polars DataFrame"
     ):
         pp.add_trial_metadata({"trial_index": [1]}, ["condition"])  # type: ignore[arg-type]
 

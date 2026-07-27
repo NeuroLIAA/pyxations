@@ -1,7 +1,6 @@
 from pathlib import Path
 import polars as pl
 from pyxations.visualization.visualization import Visualization
-from pyxations.export import BIDS_EXPORT
 import ast
 import matplotlib.pyplot as plt
 import numpy as np
@@ -311,7 +310,6 @@ class VisualSearchExperiment(Experiment):
         excluded_subjects: list | None = None,
         excluded_sessions: dict | None = None,
         excluded_trials: dict | None = None,
-        export_format=BIDS_EXPORT,
     ):
         excluded_subjects = excluded_subjects or []
         excluded_sessions = excluded_sessions or {}
@@ -322,11 +320,10 @@ class VisualSearchExperiment(Experiment):
                                     schema_overrides={"subject_id": pl.Utf8, "old_subject_id": pl.Utf8})
         self.subjects = { subject_id:
             VisualSearchSubject(subject_id, old_subject_id, self, search_phase_name, memorization_phase_name,
-                     excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}),export_format)
+                     excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}))
             for subject_id, old_subject_id in zip(self.metadata["subject_id"], self.metadata["old_subject_id"])
             if subject_id not in excluded_subjects and old_subject_id not in excluded_subjects
         }
-        self.export_format = export_format
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
 
@@ -895,8 +892,8 @@ class VisualSearchExperiment(Experiment):
 
 class VisualSearchSubject(Subject):
     def __init__(self, subject_id: str, old_subject_id: str, experiment: VisualSearchExperiment, search_phase_name, memorization_phase_name,
-                 excluded_sessions: list | None = None, excluded_trials: dict | None = None, export_format=BIDS_EXPORT):
-        super().__init__(subject_id, old_subject_id, experiment, excluded_sessions, excluded_trials, export_format)
+                 excluded_sessions: list | None = None, excluded_trials: dict | None = None):
+        super().__init__(subject_id, old_subject_id, experiment, excluded_sessions, excluded_trials)
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
 
@@ -905,7 +902,7 @@ class VisualSearchSubject(Subject):
         if self._sessions is None:
             self._sessions = { session_folder.name.split("-")[-1] :
                 VisualSearchSession(session_folder.name.split("-")[-1], self,self._search_phase_name, self._memorization_phase_name,
-                        self.excluded_trials.get(session_folder.name.split("-")[-1], {}),self.export_format) 
+                        self.excluded_trials.get(session_folder.name.split("-")[-1], {}))
                 for session_folder in self.subject_derivatives_path.glob("ses-*") 
                 if session_folder.name.split("-")[-1] not in self.excluded_sessions
             }
@@ -1055,10 +1052,9 @@ class VisualSearchSession(Session):
         search_phase_name: str,
         memorization_phase_name: str,
         excluded_trials: list = None,
-        export_format=BIDS_EXPORT,
     ):
         excluded_trials = [] if excluded_trials is None else excluded_trials
-        super().__init__(session_id, subject, excluded_trials, export_format)
+        super().__init__(session_id, subject, excluded_trials)
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
         self.behavior_data = None

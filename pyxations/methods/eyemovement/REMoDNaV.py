@@ -1,10 +1,4 @@
-"""REMoDNaV eye-movement detection adapter.
-
-The adapter performs all numerical processing with NumPy.  It deliberately does
-not depend on pandas: output tables use the same dataframe family as the input
-samples, which keeps existing pandas callers working while allowing parsers to
-migrate to Polars independently.
-"""
+"""Polars-native REMoDNaV eye-movement detection adapter."""
 
 from __future__ import annotations
 
@@ -14,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
+import polars as pl
 from remodnav.clf import EyegazeClassifier
 
 from pyxations.methods.eyemovement.eye_movement_detection import EyeMovementDetection
@@ -66,12 +61,14 @@ _SACCADE_OUTPUT_COLUMNS = _BASE_OUTPUT_COLUMNS + (
 )
 
 
-def _column_names(frame: Any) -> list[str]:
-    """Return dataframe column names without depending on its implementation."""
+def _column_names(frame: pl.DataFrame) -> list[str]:
+    """Return dataframe column names."""
     return list(frame.columns)
 
 
-def _column_to_numpy(frame: Any, name: str, *, dtype: Any | None = None) -> np.ndarray:
+def _column_to_numpy(
+    frame: pl.DataFrame, name: str, *, dtype: Any | None = None
+) -> np.ndarray:
     """Extract a dataframe column as a one-dimensional NumPy array."""
     if name not in _column_names(frame):
         raise ValueError(
@@ -91,38 +88,26 @@ def _column_to_numpy(frame: Any, name: str, *, dtype: Any | None = None) -> np.n
     return array
 
 
-def _is_polars_frame(frame: Any) -> bool:
-    return frame.__class__.__module__.split(".", 1)[0] == "polars"
-
-
-def _make_frame(template: Any, rows: Sequence[Mapping[str, Any]], columns: Sequence[str]) -> Any:
-    """Create a dataframe matching ``template`` without importing pandas."""
-    ordered_rows = [{column: row.get(column) for column in columns} for row in rows]
-
-    if _is_polars_frame(template):
-        import polars as pl
-
-        if ordered_rows:
-            return pl.DataFrame(ordered_rows).select(list(columns))
-        return pl.DataFrame({column: [] for column in columns})
-
-    frame_class = template.__class__
-    try:
-        return frame_class(ordered_rows, columns=list(columns))
-    except TypeError as exc:
+def _make_frame(
+    template: pl.DataFrame,
+    rows: Sequence[Mapping[str, Any]],
+    columns: Sequence[str],
+) -> pl.DataFrame:
+    """Create an ordered Polars dataframe."""
+    if not isinstance(template, pl.DataFrame):
         raise TypeError(
-            "Unsupported dataframe type. REMoDNaV expects a pandas or Polars "
-            f"DataFrame, got {frame_class.__module__}.{frame_class.__name__}."
-        ) from exc
+            "REMoDNaV expects a Polars DataFrame, "
+            f"got {type(template)!r}."
+        )
+    ordered_rows = [{column: row.get(column) for column in columns} for row in rows]
+    if ordered_rows:
+        return pl.DataFrame(ordered_rows, strict=False).select(list(columns))
+    return pl.DataFrame({column: [] for column in columns})
 
 
-def _frame_to_records(frame: Any) -> list[dict[str, Any]]:
-    """Convert a pandas- or Polars-like dataframe into row dictionaries."""
-    if hasattr(frame, "to_dicts"):
-        return list(frame.to_dicts())
-    if hasattr(frame, "to_dict"):
-        return list(frame.to_dict(orient="records"))
-    raise TypeError(f"Cannot convert {type(frame)!r} to row records.")
+def _frame_to_records(frame: pl.DataFrame) -> list[dict[str, Any]]:
+    """Convert a Polars dataframe into row dictionaries."""
+    return frame.to_dicts()
 
 
 def _nanmean_or_nan(values: np.ndarray) -> float:

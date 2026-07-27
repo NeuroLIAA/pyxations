@@ -3,7 +3,7 @@ import shutil
 import sys
 from pathlib import Path
 
-import pandas as pd
+import polars as pl
 import pytest
 
 import pyxations.bids_formatting as bids_formatting
@@ -17,6 +17,7 @@ from pyxations.export.bids import (
     BIDSDerivativeExport,
     initialize_bids_derivative,
 )
+from pyxations.tables import SessionTables
 
 
 def _write_eyelink(folder: Path) -> None:
@@ -39,7 +40,7 @@ def _write_eyelink(folder: Path) -> None:
 
 
 def _write_gazepoint(folder: Path) -> None:
-    pd.DataFrame(
+    pl.DataFrame(
         {
             "TIME": [0.0, 1 / 60, 2 / 60],
             "LPOGX": [0.2, 0.21, 0.22],
@@ -49,11 +50,11 @@ def _write_gazepoint(folder: Path) -> None:
             "RPOGY": [0.35, 0.36, 0.37],
             "RPD": [3.0, 3.1, 3.2],
         }
-    ).to_csv(folder / "s01_A_task-look.csv", index=False)
+    ).write_csv(folder / "s01_A_task-look.csv")
 
 
 def _write_tobii(folder: Path) -> None:
-    pd.DataFrame(
+    pl.DataFrame(
         {
             "Eyetracker timestamp": [1_000_000, 1_016_667, 1_033_334],
             "Gaze2d_Left.x": [100.0, 101.0, 102.0],
@@ -63,7 +64,7 @@ def _write_tobii(folder: Path) -> None:
             "Gaze2d_Right.y": [210.0, 211.0, 212.0],
             "PupilDiam_Right": [3.0, 3.1, 3.2],
         }
-    ).to_csv(folder / "s01_A_task-look.txt", sep="\t", index=False)
+    ).write_csv(folder / "s01_A_task-look.txt", separator="\t")
 
 
 def _write_webgazer(folder: Path) -> None:
@@ -72,13 +73,13 @@ def _write_webgazer(folder: Path) -> None:
         {"x": 101, "y": 201, "t": 17},
         {"x": 102, "y": 202, "t": 34},
     ]
-    pd.DataFrame(
+    pl.DataFrame(
         {
             "trial_index": [0],
             "time_elapsed": [1_000],
             "webgazer_data": [json.dumps(samples)],
         }
-    ).to_csv(folder / "s01_A_task-look.csv", index=False)
+    ).write_csv(folder / "s01_A_task-look.csv")
 
 
 WRITERS = {
@@ -96,13 +97,13 @@ def _make_dataset(
     source.mkdir()
     WRITERS[format_name](source)
     if include_behavior:
-        pd.DataFrame(
+        pl.DataFrame(
             {
                 "participant": ["s01"],
                 "trial_type": ["target"],
                 "response_time": [0.42],
             }
-        ).to_csv(source / "s01_A_task-look_behavior.csv", index=False)
+        ).write_csv(source / "s01_A_task-look_behavior.csv")
     return dataset_to_bids(
         tmp_path,
         source,
@@ -144,8 +145,8 @@ def test_dataset_to_bids_writes_standardized_recordings(
             )
         )) == eye_count
 
-    participants = pd.read_csv(dataset / "participants.tsv", sep="\t")
-    assert participants.loc[0, "participant_id"] == "sub-0001"
+    participants = pl.read_csv(dataset / "participants.tsv", separator="\t")
+    assert participants.item(0, "participant_id") == "sub-0001"
     for sidecar in sidecars:
         metadata = json.loads(sidecar.read_text(encoding="utf-8"))
         assert metadata["PhysioType"] == "eyetrack"
@@ -170,15 +171,14 @@ def test_dataset_to_bids_preserves_source_folder_verbatim(tmp_path, format_name)
     WRITERS[format_name](source)
     behavioral = source / "behavioral"
     behavioral.mkdir()
-    pd.DataFrame(
+    pl.DataFrame(
         {
             "participant": ["s01"],
             "trial_type": ["target"],
             "response_time": [0.42],
         }
-    ).to_csv(
+    ).write_csv(
         behavioral / "s01_A_task-look_behavior.csv",
-        index=False,
     )
     documentation = source / "documentation"
     documentation.mkdir()
@@ -211,10 +211,10 @@ def test_dataset_to_bids_preserves_source_folder_verbatim(tmp_path, format_name)
     event_file = next(
         (dataset / "sub-0001" / "ses-A" / "beh").glob("*_events.tsv")
     )
-    events = pd.read_csv(event_file, sep="\t")
+    events = pl.read_csv(event_file, separator="\t")
     assert (
         "behavioral/s01_A_task-look_behavior.csv"
-        in set(events["source_file"])
+        in set(events.get_column("source_file"))
     )
 
 
@@ -284,7 +284,7 @@ def _make_derivative_dataset(tmp_path: Path, format_name: str) -> Path:
     initialize_bids_derivative(raw, derivatives)
     session = derivatives / "sub-0001" / "ses-A"
 
-    samples = pd.DataFrame(
+    samples = pl.DataFrame(
         {
             "tSample": [1_000.0, 1_017.0, 1_034.0],
             "X": [100.0, 101.0, 102.0],
@@ -295,7 +295,7 @@ def _make_derivative_dataset(tmp_path: Path, format_name: str) -> Path:
             "Calib_index": [1, 1, 1],
         }
     )
-    fixations = pd.DataFrame(
+    fixations = pl.DataFrame(
         {
             "tStart": [1_000.0],
             "tEnd": [1_017.0],
@@ -306,7 +306,7 @@ def _make_derivative_dataset(tmp_path: Path, format_name: str) -> Path:
             "phase": ["look"],
         }
     )
-    saccades = pd.DataFrame(
+    saccades = pl.DataFrame(
         {
             "tStart": [1_017.0],
             "tEnd": [1_034.0],
@@ -319,16 +319,24 @@ def _make_derivative_dataset(tmp_path: Path, format_name: str) -> Path:
             "phase": ["look"],
         }
     )
-    blinks = pd.DataFrame(
-        columns=["tStart", "tEnd", "duration", "trial_number", "phase"]
+    blinks = pl.DataFrame(
+        schema={
+            "tStart": pl.Float64,
+            "tEnd": pl.Float64,
+            "duration": pl.Float64,
+            "trial_number": pl.Int64,
+            "phase": pl.String,
+        }
     )
     exporter = BIDSDerivativeExport()
-    exporter.save_derivatives(
-        session_path=session,
-        samples=samples,
-        fixations=fixations,
-        saccades=saccades,
-        blinks=blinks,
+    exporter.write_session(
+        session,
+        SessionTables(
+            samples=samples,
+            fixations=fixations,
+            saccades=saccades,
+            blinks=blinks,
+        ),
         detection_algorithm="remodnav",
     )
     return derivatives
@@ -350,8 +358,8 @@ def test_bids_derivatives_are_canonical_and_reversible(tmp_path):
     assert len(physio) == 1
     assert len(events) == 1
 
-    bundle = BIDSDerivativeExport().read_derivatives(session, "remodnav")
-    assert bundle["samples"].columns == [
+    bundle = BIDSDerivativeExport().read_session(session, "remodnav")
+    assert bundle.samples.columns == [
         "tSample",
         "X",
         "Y",
@@ -360,9 +368,9 @@ def test_bids_derivatives_are_canonical_and_reversible(tmp_path):
         "phase",
         "Calib_index",
     ]
-    assert bundle["fix"]["trial_number"].to_list() == [0]
-    assert bundle["sacc"]["xEnd"].to_list() == [102.0]
-    assert bundle["blink"].is_empty()
+    assert bundle.fixations["trial_number"].to_list() == [0]
+    assert bundle.saccades["xEnd"].to_list() == [102.0]
+    assert bundle.blinks.is_empty()
 
     experiment = Experiment(derivatives.with_name("gaze-dataset"))
     experiment.load_data("remodnav")

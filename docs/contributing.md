@@ -58,11 +58,11 @@ mkdocs serve
 
 - `pyxations/`: the package source.
     - `bids_formatting.py`, `pre_processing.py`: high-level entry points.
-    - `formats/`: per-vendor parsers (EyeLink, Tobii, Gazepoint, WebGazer).
+    - `bids.py`: vendor readers and canonical raw BIDS conversion.
     - `methods/eyemovement/`: REMoDNaV, Engbert–Kliegl detectors.
     - `analysis/`: `Experiment` and paradigm-specific helpers.
     - `visualization/`: plotting utilities.
-    - `export/`: canonical BIDS derivative writer and legacy Feather writer.
+    - `export/`: canonical BIDS derivative reader and writer.
 - `tests/`: pytest suite.
 - `docs/`: MkDocs sources for this site.
 - `notebooks/`: runnable end-to-end examples.

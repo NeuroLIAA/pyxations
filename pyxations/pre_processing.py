@@ -70,7 +70,7 @@ class PreProcessing:
     Notes
     -----
     Tables are normalized to :class:`polars.DataFrame` at the boundary.
-    Methods preserve Polars schemas and never convert back through pandas.
+    Methods preserve Polars schemas throughout the preprocessing pipeline.
     """
 
     VERSION = "0.3.0"
@@ -104,13 +104,8 @@ class PreProcessing:
     def _copy_frame(df: DataFrame, name: str = "table") -> DataFrame:
         if isinstance(df, pl.DataFrame):
             return df.clone()
-        if hasattr(df, "to_dict") and hasattr(df, "columns"):
-            try:
-                return pl.DataFrame(df.to_dict(orient="list"))
-            except TypeError:
-                pass
         raise TypeError(
-            f"PreProcessing {name} must be a Polars or pandas-like DataFrame, "
+            f"PreProcessing {name} must be a Polars DataFrame, "
             f"got {type(df)!r}."
         )
 
