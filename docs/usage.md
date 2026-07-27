@@ -90,7 +90,7 @@ DataFrames rather than tying downstream code to TSV files.
 pyx.compute_derivatives_for_dataset(
     bids_dataset_folder="path/to/output/my_experiment",
     dataset_format="eyelink",            # "eyelink" | "tobii" | "gaze" | "webgazer"
-    detection_algorithm="remodnav",      # "remodnav" | "engbert"
+    detection_algorithm="remodnav",      # "remodnav" | "engbert" | "eyelink"
     msg_keywords=["begin", "end", "press"],
     start_msgs={"search": ["beginning_of_stimuli"]},
     end_msgs={"search": ["end_of_stimuli"]},
@@ -123,6 +123,8 @@ See [`pyxations.pre_processing`](api_reference.md#pre_processing) for the full s
 
 - **`remodnav`**: wraps the [REMoDNaV](https://github.com/psychoinformatics-de/remodnav) package.
 - **`engbert`**: Python port of `detecteyemovements.m` from the [EYE-EEG toolbox](https://github.com/olafdimigen/eye-eeg/blob/master/detecteyemovements.m).
+- **`eyelink`**: reuses EyeLink-reported events and is available only for
+  EyeLink source recordings.
 
 See [`pyxations.methods.eyemovement`](api_reference.md#methodseyemovement) for parameters specific to each algorithm.
 
@@ -170,6 +172,7 @@ Each `Trial` knows how to plot itself:
 
 ```python
 trial.plot_scanpath(screen_height=1080, screen_width=1920)
+# Requires: pip install "pyxations[video]"
 trial.plot_animation(screen_height=1080, screen_width=1920)
 ```
 
@@ -191,12 +194,13 @@ See [`pyxations.visualization`](api_reference.md#visualization) for the full plo
 
 ## Worked examples
 
-The repository includes runnable notebooks under [`notebooks/`](https://github.com/NeuroLIAA/pyxations/tree/main/notebooks):
+The repository includes focused notebooks under [`notebooks/`](https://github.com/NeuroLIAA/pyxations/tree/main/notebooks):
 
 - `Eyelink tutorial.ipynb`: full EyeLink pipeline on the bundled example dataset.
 - `multimatch_example.ipynb`: scanpath comparison with MultiMatch.
 - `webgazer_example.ipynb`: webcam-based recordings.
-- `driving_animation.ipynb`: visualization on a continuous task.
+- `driving_animation.ipynb`: visualization on a continuous task; the bundled
+  video is included, but its eye-tracking dataset must be supplied separately.
 
 Small vendor-format source recordings under `examples/` reproduce the
 conversion, derivative, hierarchy, and plotting workflows end-to-end.

@@ -10,8 +10,9 @@ The most common entry points are re-exported from the package root:
 from pyxations import (
     dataset_to_bids,
     compute_derivatives_for_dataset,
+    validate_bids_dataset,
+    BIDSValidationError,
     PreProcessing,
-    RemodnavDetection,
     EngbertDetection,
     Visualization,
     SampleVisualization,
@@ -20,6 +21,13 @@ from pyxations import (
     BIDSDerivativeExport,
     SessionTables,
 )
+```
+
+`RemodnavDetection` is also available from the package root after installing
+the `remodnav` extra:
+
+```python
+from pyxations import RemodnavDetection
 ```
 
 ## bids_formatting

@@ -41,7 +41,7 @@ Key points:
 
 ## Derivatives layout
 
-`compute_derivatives_for_dataset` writes a validator-checked sibling
+`compute_derivatives_for_dataset` writes a validator-tested sibling
 `<dataset_name>_derivatives/` dataset that mirrors the raw BIDS
 subject/session tree:
 
@@ -88,10 +88,13 @@ Naming notes:
 
 ## Detection algorithms
 
-Pyxations ships two pluggable eye-movement detectors. Pick one with `detection_algorithm=`.
+Pyxations ships two software detector integrations and can reuse EyeLink's
+reported events. Pick one with `detection_algorithm=`.
 
 - **`remodnav`**: wraps the [REMoDNaV](https://github.com/psychoinformatics-de/remodnav) package.
 - **`engbert`**: Python port of the `detecteyemovements.m` routine from the [EYE-EEG toolbox](https://github.com/olafdimigen/eye-eeg/blob/master/detecteyemovements.m).
+- **`eyelink`**: reuses fixation, saccade, and blink events reported by the
+  EyeLink parser; it is available only for EyeLink source data.
 
 When the source is EyeLink, the tracker's own event reports are retained in the
 raw BIDS `physioevents.tsv.gz`, so they can be selected as the derivative event
@@ -105,9 +108,10 @@ See [`pyxations.methods.eyemovement`](api_reference.md#methodseyemovement) for e
 semantics. Derivative computation itself reads the raw BIDS dataset. Currently
 supported:
 
-- `eyelink`: EDF files; requires `edf2asc` (see [Requirements](requirements.md)).
+- `eyelink`: EDF or ASC files; EDF conversion requires `edf2asc` (see
+  [Requirements](requirements.md)).
 - `tobii`: Tobii native exports.
 - `gaze`: Gazepoint exports.
 - `webgazer`: WebGazer.js browser-based recordings.
 
-Pupil Labs Neon is not yet supported as a `dataset_format`. The `notebooks/` directory contains a manual example showing how to work with Neon recordings until first-class support lands.
+Pupil Labs Neon is not currently supported as a `dataset_format`.

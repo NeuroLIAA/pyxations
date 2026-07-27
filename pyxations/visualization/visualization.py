@@ -7,22 +7,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 
-from pyxations.bids_formatting import EYE_MOVEMENT_DETECTION_DICT
-
 MAX_CACHED_IMAGES = 8
 
 
 class Visualization:
     def __init__(self, derivatives_folder_path, events_detection_algorithm):
         self.derivatives_folder_path = Path(derivatives_folder_path)
-        if (
-            events_detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT
-            and events_detection_algorithm != "eyelink"
-        ):
-            raise ValueError(
-                f"Detection algorithm {events_detection_algorithm} not found."
-            )
-        self.events_detection_folder = Path(events_detection_algorithm)
+        algorithm = str(events_detection_algorithm).strip()
+        if not algorithm or Path(algorithm).name != algorithm:
+            raise ValueError("events_detection_algorithm must be a non-empty name")
+        self.events_detection_folder = Path(algorithm)
 
     def scanpath(
         self,
@@ -508,10 +502,10 @@ class Visualization:
             - Without video: defaults to 60 FPS
         output_format
             Output format for saved animations:
-            - "html": Interactive HTML file (default, works in browsers)
+            - "matplotlib": Show in matplotlib GUI window (default, blocking)
+            - "html": Interactive HTML file (works in browsers)
             - "mp4": Video file (requires ffmpeg)
             - "gif": Animated GIF file (requires pillow)
-            - "matplotlib": Show in matplotlib GUI window (blocking)
         display
             If True and output_format is "html", returns an HTML object for notebooks.
             If output_format is "matplotlib", this is ignored (always shows window).

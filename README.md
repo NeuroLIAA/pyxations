@@ -25,15 +25,19 @@
 - **Trial Segmentation**: Segment continuous eye-tracking data into trials using flexible methods, including start/end messages, fixed durations, or explicit start/end times.
 - **Derivative Computation**: Compute derivatives directly from the normalized
   raw BIDS dataset; the archived source files are not required at runtime.
-- **Processing Derivatives**: Process the derivatives by performing eye movement detection, classifying saccades, splitting them into trials, and visualizing the results.
-- **Eye Movement Detection**: Detect fixations and saccades using multiple algorithms like REMoDNaV, Engbert–Kliegl, among others.
+- **Analysis and Visualization**: Load derivative tables through the experiment,
+  subject, session, and trial hierarchy and generate gaze, scanpath, calibration,
+  and task-specific plots.
+- **Eye Movement Detection**: Use REMoDNaV, the Engbert–Kliegl implementation,
+  or EyeLink-reported events.
 - **Saccades Direction Classification**: Classify saccades based on their start and end coordinates into four primary directions: right, left, up, and down.
 
   
 ## Requirements
 
 * `Python 3.10` or newer is required.
-* The `edf2asc` software from EyeLink is required for converting EDF files to ASCII format. Please ensure that the EyeLink software is installed and accessible in your system's PATH. The program is provided with the lastest version of the EyeLink Developers Kit
+* EyeLink EDF input requires the `edf2asc` program from the EyeLink Developers
+  Kit on `PATH`. Existing EyeLink ASC files can be read directly.
 
 ### Dependencies
 
@@ -47,7 +51,8 @@ Feature-specific packages are optional:
 
 - `pyxations[remodnav]` adds REMoDNaV detection.
 - `pyxations[multimatch]` adds MultiMatch scanpath comparison.
-- `pyxations[video]` adds OpenCV-backed video animation.
+- `pyxations[video]` adds OpenCV-backed gaze animation, with optional video or
+  image backgrounds.
 - `pyxations[all]` installs all three feature groups.
 
 Packages used internally by these libraries are resolved transitively and are not pinned by Pyxations. Test and documentation tools are kept in optional dependency groups.
@@ -113,7 +118,7 @@ pyx.compute_derivatives_for_dataset(
 )
 ```
 
-This produces two sibling, validator-checked BIDS datasets: the raw dataset and
+This produces two sibling, validator-tested BIDS datasets: the raw dataset and
 `dataset_name_derivatives`. Canonical derivative samples and eye-movement
 annotations are stored as compressed BIDS TSV.GZ files with JSON sidecars.
 Pyxations reconstructs the same in-memory analysis tables when they are loaded.

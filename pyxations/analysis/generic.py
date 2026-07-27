@@ -424,8 +424,7 @@ class Experiment:
         fig_width = max(10, min(cell_width * n_trials, 40))
         fig_height = max(8, min(cell_height * n_subjects, 40))
 
-        # Matplotlib's magma_r is visually close to Seaborn's rocket_r, while
-        # avoiding a runtime dependency on Seaborn.
+        # Use a high-contrast reversed sequential map for calibration error.
         cmap = colormaps["magma_r"].copy()
         cmap.set_under("yellow")
         cmap.set_bad("white")
@@ -1103,7 +1102,7 @@ class Trial:
             - gaze_radius: Gaze point radius in pixels
             - gaze_color: RGB tuple for gaze color
             - fps: Animation frames per second
-            - output_format: "html" (default), "mp4", "gif", or "matplotlib"
+            - output_format: "matplotlib" (default), "html", "mp4", or "gif"
             - display: If True, return HTML for notebook display
 
         Returns
@@ -1456,10 +1455,13 @@ class Trial:
             return False  # Or True if no data should be considered long
         return rt_row.select("rt").item() > seconds * 1000.0
 
+    def _multimatch_fixations(self) -> pl.DataFrame:
+        return self.fixations()
+
     def compute_multimatch(self, other_trial: "Trial", screen_height, screen_width):
-        trial_scanpath = _to_multimatch_scanpath(self.search_fixations())
+        trial_scanpath = _to_multimatch_scanpath(self._multimatch_fixations())
         trial_to_compare_scanpath = _to_multimatch_scanpath(
-            other_trial.search_fixations()
+            other_trial._multimatch_fixations()
         )
 
         multimatch = _load_multimatch()

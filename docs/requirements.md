@@ -19,7 +19,8 @@ EyeLink EDF files are parsed by first converting them to ASCII with **`edf2asc`*
 edf2asc -h
 ```
 
-You only need `edf2asc` when `dataset_format="eyelink"`. Tobii, GazePoint and WebGazer pipelines do not require it.
+You only need `edf2asc` for EyeLink EDF input. EyeLink ASC files are read
+directly, and the Tobii, GazePoint, and WebGazer pipelines do not require it.
 
 ## Base Python dependencies
 
@@ -41,7 +42,7 @@ Install feature-specific packages only when needed:
 ```bash
 pip install "pyxations[remodnav]"   # REMoDNaV detection
 pip install "pyxations[multimatch]" # MultiMatch scanpath comparison
-pip install "pyxations[video]"      # OpenCV video animation
+pip install "pyxations[video]"      # OpenCV-backed gaze/video animation
 pip install "pyxations[all]"        # all optional features
 ```
 
@@ -52,6 +53,9 @@ The minimum optional versions are:
 - `opencv-python>=4.9.0.80`
 
 Optional modules are imported lazily. Importing the base package does not load these libraries; requesting an unavailable feature raises an error containing the relevant installation command.
+
+Saving an animation as MP4 also requires an `ffmpeg` executable available on
+`PATH`.
 
 ## Version policy
 

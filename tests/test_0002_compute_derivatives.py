@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+import pyxations.analysis.generic as generic_analysis
 from pyxations import Experiment, VisualSearchExperiment
 from pyxations.bids import validate_bids_dataset, validator_command
 from pyxations.export.bids import BIDSDerivativeExport
@@ -86,6 +87,26 @@ def test_pupil_accessor_does_not_invent_webcam_measurements(
     experiment.load_data(case["algorithm"])
 
     assert experiment.pupil_samples().is_empty()
+
+
+def test_generic_trials_support_optional_multimatch(generated_datasets, monkeypatch):
+    case = generated_datasets["eyelink"]
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+    session = experiment["0001"]["second"]
+
+    class FakeMultimatch:
+        @staticmethod
+        def docomparison(first, second, screen):
+            return len(first), len(second), first.dtype.names, screen
+
+    monkeypatch.setattr(generic_analysis, "_load_multimatch", lambda: FakeMultimatch)
+    result = session[0].compute_multimatch(session[1], 1080, 1920)
+
+    assert result[0] > 0
+    assert result[1] > 0
+    assert result[2] == ("start_x", "start_y", "duration")
+    assert result[3] == (1920, 1080)
 
 
 def test_visual_search_hierarchy_uses_bids_events(generated_datasets):

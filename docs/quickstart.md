@@ -84,9 +84,10 @@ TSV.GZ/JSON outputs remain validator-compatible after plotting.
 - [Concepts](concepts.md): what the BIDS and derivatives folders actually contain, and how to pick a detection algorithm.
 - [API reference](api_reference.md): every public function and class.
 
-For longer, runnable walkthroughs see the notebooks in [`notebooks/`](https://github.com/NeuroLIAA/pyxations/tree/main/notebooks):
+For longer walkthroughs see the notebooks in [`notebooks/`](https://github.com/NeuroLIAA/pyxations/tree/main/notebooks):
 
 - `Eyelink tutorial.ipynb`: full EyeLink pipeline.
 - `multimatch_example.ipynb`: scanpath comparison with MultiMatch.
 - `webgazer_example.ipynb`: webcam-based recordings.
-- `driving_animation.ipynb`: visualization on a continuous task.
+- `driving_animation.ipynb`: visualization on a continuous task; it requires
+  a separately supplied eye-tracking dataset.

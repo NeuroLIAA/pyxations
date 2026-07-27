@@ -20,7 +20,7 @@ For EDF inputs you also need EyeLink's `edf2asc` tool on your `PATH`. See [Requi
 import pyxations as pyx
 
 # 1) Convert raw recordings into a BIDS dataset
-pyx.dataset_to_bids(
+bids_path = pyx.dataset_to_bids(
     target_folder_path="path/to/output",
     files_folder_path="path/to/raw/edf/files",
     dataset_name="my_experiment",
@@ -28,7 +28,7 @@ pyx.dataset_to_bids(
 
 # 2) Compute derivatives (parse, detect fixations/saccades, split into trials)
 pyx.compute_derivatives_for_dataset(
-    bids_path="path/to/output/my_experiment",
+    bids_dataset_folder=bids_path,
     dataset_format="eyelink",
     detection_algorithm="remodnav",
     msg_keywords=["begin", "end", "press"],
@@ -48,7 +48,8 @@ See [Usage](usage.md) for an end-to-end walkthrough.
 - **EDF parsing**: extract headers, messages, calibration, events and raw samples from EyeLink EDF files (via `edf2asc`).
 - **Multi-vendor support**: input formats for EyeLink, Tobii, Gazepoint and WebGazer.
 - **Trial segmentation**: split continuous recordings using start/end messages, fixed durations or explicit timestamps.
-- **Eye movement detection**: fixations and saccades with REMoDNaV, Engbert–Kliegl and other algorithms.
+- **Eye movement detection**: fixations and saccades with REMoDNaV,
+  Engbert–Kliegl, or EyeLink-reported events.
 - **Saccade direction classification**: right / left / up / down based on start–end coordinates.
 - **Derivatives pipeline**: reproducible per-subject derivatives computed from
   raw BIDS without re-reading vendor files.

@@ -256,9 +256,9 @@ def _plot_rt_bin_bars(
 ) -> None:
     """Plot RT-bin summaries using Polars and Matplotlib.
 
-    RT bins are treated as ordered categories, matching Seaborn's previous
-    categorical-bar behavior. When ``hue_column`` is provided, bars are grouped
-    side by side and missing combinations are represented by zero-height bars.
+    RT bins are treated as ordered categories so their positions remain evenly
+    spaced. When ``hue_column`` is provided, bars are grouped side by side and
+    missing combinations are represented by zero-height bars.
     """
     if data.is_empty():
         return
@@ -1498,6 +1498,9 @@ class VisualSearchTrial(Trial):
             .sort(by="tStart")
         )
 
+    def _multimatch_fixations(self) -> pl.DataFrame:
+        return self.search_fixations()
+
     def memorization_fixations(self):
         return (
             self.fixations()
@@ -1617,7 +1620,7 @@ class VisualSearchTrial(Trial):
             - gaze_radius: Gaze point radius in pixels
             - gaze_color: RGB tuple for gaze color
             - fps: Animation frames per second
-            - output_format: "html" (default), "mp4", "gif", or "matplotlib"
+            - output_format: "matplotlib" (default), "html", "mp4", or "gif"
             - display: If True, return HTML for notebook display
 
         Returns
