@@ -142,7 +142,7 @@ def test_dataset_to_bids_writes_standardized_recordings(
             (dataset / "sub-0001" / "ses-A" / "beh").glob(
                 "*_physioevents.tsv.gz"
             )
-        )) == 1
+        )) == eye_count
 
     participants = pd.read_csv(dataset / "participants.tsv", sep="\t")
     assert participants.loc[0, "participant_id"] == "sub-0001"

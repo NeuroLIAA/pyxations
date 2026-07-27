@@ -815,6 +815,33 @@ def _write_physio_events(
     return path, json_path
 
 
+def _events_for_recording(
+    events: pd.DataFrame,
+    *,
+    recorded_eye: str,
+    available_eyes: Sequence[str],
+) -> pd.DataFrame:
+    """Select events associated with one per-eye physiological recording."""
+
+    if events is None or events.empty or "eye" not in events:
+        return events
+    normalized = events["eye"].fillna("n/a").astype(str).str.lower()
+    eye_values = {
+        "left": {"l", "left"},
+        "right": {"r", "right"},
+        "cyclopean": {"c", "cyclopean", "both", "binocular"},
+    }.get(recorded_eye, {recorded_eye.lower()})
+    shared_values = {"", "n/a", "na", "none", "unknown", "all"}
+    if "cyclopean" not in available_eyes:
+        # Some trackers report only a device-wide blink/event stream while
+        # exposing separate left/right sample streams. Retain that shared
+        # stream alongside each corresponding recording.
+        shared_values.update({"c", "cyclopean", "both", "binocular"})
+    return events.loc[
+        normalized.isin(eye_values | shared_values)
+    ].reset_index(drop=True)
+
+
 def _read_behavioral_table(path: Path) -> pd.DataFrame | None:
     try:
         if path.suffix.lower() == ".csv":
@@ -1082,6 +1109,10 @@ def write_bids_dataset(
                 destination = (
                     dataset_root / f"sub-{subject}" / f"ses-{session}" / "beh"
                 )
+                available_eyes = [
+                    recording.recorded_eye
+                    for recording in bundle.recordings
+                ]
                 for eye_index, recording in enumerate(
                     bundle.recordings, start=1
                 ):
@@ -1104,11 +1135,15 @@ def write_bids_dataset(
                             else None
                         ),
                     )
-                _write_physio_events(
-                    bundle.events,
-                    destination=destination,
-                    prefix=f"{base}_recording-eye1",
-                )
+                    _write_physio_events(
+                        _events_for_recording(
+                            bundle.events,
+                            recorded_eye=recording.recorded_eye,
+                            available_eyes=available_eyes,
+                        ),
+                        destination=destination,
+                        prefix=prefix,
+                    )
                 task_events = _prepare_task_events(
                     session_sources,
                     source_root=source_root,
@@ -1302,6 +1337,10 @@ def read_raw_bids_session(session_path: str | Path) -> RawBIDSSession:
         if event_frames
         else pd.DataFrame()
     )
+    if not events.empty:
+        # Device-wide messages may be associated with every per-eye
+        # physiological recording. Reconstruct them only once in memory.
+        events = events.drop_duplicates(ignore_index=True)
     time_scale = _milliseconds_per_unit(
         first_metadata.get("timestamp", {}).get("Units")
     )

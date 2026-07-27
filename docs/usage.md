@@ -70,8 +70,11 @@ EyeLink, Tobii, GazePoint, and WebGazer datasets.
 Derivatives are the parsed, processed outputs of the pipeline: samples,
 messages, detected fixations, saccades and blinks, split into trials. They are
 stored in a sibling `*_derivatives/` folder next to the raw BIDS dataset,
-preserving its subject/session layout. Both folders are checked with the
-official BIDS Validator.
+preserving its subject/session layout. The derivative dataset follows the
+general BIDS Derivatives conventions because BIDS 1.11.1 does not yet define a
+domain-specific derivative schema for detected eye movements. Both folders are
+checked without validation errors in continuous integration using the official
+BIDS Validator 3.0.1.
 
 The derivative step starts from raw BIDS `physio`, `physioevents`, and
 `events` files. This keeps conversion work out of repeated analyses and means

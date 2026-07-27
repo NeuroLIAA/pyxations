@@ -68,6 +68,13 @@ payloads, and a reversible mapping to Pyxations' in-memory table columns.
 `Experiment` reconstructs those Polars tables when loading the dataset, so
 analysis and plotting remain independent of the on-disk format.
 
+BIDS 1.11.1 does not define a domain-specific derivative schema for detected
+eye movements. Pyxations therefore follows the general BIDS Derivatives
+conventions, uses the physiological recording file types, and explicitly
+documents its additional columns and processing provenance. The raw and
+derivative example datasets are checked without validation errors using BIDS
+Validator 3.0.1 in continuous integration.
+
 Naming notes:
 
 - The processing algorithm is included in the `recording-` entity because the
