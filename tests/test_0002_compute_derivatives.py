@@ -9,7 +9,10 @@ import shutil
 current_path = Path(__file__).resolve()
 data_folder = os.path.join(current_path.parent, 'data')
 
+HAS_EDF2ASC = shutil.which("edf2asc") is not None
+
 class TestComputeDerivatives(unittest.TestCase):
+    @unittest.skipUnless(HAS_EDF2ASC, "edf2asc (EyeLink Developers Kit) not available on this platform")
     def test_compute_derivatives_eyelink(self):
         bids_dataset_folder = os.path.join(data_folder,"example_dataset")
         derivatives_path = os.path.join(data_folder, "example_dataset_derivatives")
@@ -31,6 +34,7 @@ class TestComputeDerivatives(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(derivatives_path, "sub-0001", "ses-second", "samples.hdf5")))
 
 
+    @unittest.skipUnless(HAS_EDF2ASC, "edf2asc (EyeLink Developers Kit) not available on this platform")
     def test_compute_derivatives_eyelink_remodnav(self):
         bids_dataset_folder = os.path.join(data_folder,"example_dataset")
         derivatives_path = os.path.join(data_folder, "example_dataset_derivatives")
@@ -116,6 +120,7 @@ class TestComputeDerivatives(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(data_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A", "samples.hdf5")))
         self.assertTrue(os.path.exists(os.path.join(data_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A", "remodnav_events", "blink.hdf5")))
 
+    @unittest.skipUnless(HAS_EDF2ASC, "edf2asc (EyeLink Developers Kit) not available on this platform")
     def test_compute_derivatives_feather_format(self):
         bids_dataset_folder = os.path.join(data_folder,"example_dataset")
         msg_keywords = ["begin","end","press"]

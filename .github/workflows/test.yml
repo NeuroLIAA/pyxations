@@ -8,11 +8,13 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
         python-version: ["3.10", "3.11"]
 
     steps:
@@ -26,7 +28,13 @@ jobs:
 
       - run: uv pip install --system .
 
-      - run: |
+      # edf2asc (EyeLink Developers Kit) is only freely available as a Linux
+      # binary here. On Windows/macOS the EyeLink tests are skipped at runtime
+      # via shutil.which("edf2asc"), so the other formats still exercise those
+      # platforms.
+      - name: Install edf2asc (Linux only)
+        if: runner.os == 'Linux'
+        run: |
           curl -L -o /usr/local/bin/edf2asc https://github.com/ihrke/pypillometry/raw/refs/heads/master/external/edf2asc-linux
           chmod +x /usr/local/bin/edf2asc
 

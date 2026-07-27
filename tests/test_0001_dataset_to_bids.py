@@ -1,6 +1,7 @@
 import unittest
 #from pyxations import pyx.dataset_to_bids
 import os
+import shutil
 
 import pyxations as pyx
 from pathlib import Path
@@ -8,7 +9,10 @@ from pathlib import Path
 current_path = Path(__file__).resolve()
 data_folder = os.path.join(current_path.parent, 'data')
 
+HAS_EDF2ASC = shutil.which("edf2asc") is not None
+
 class TestDatasetToBids(unittest.TestCase):
+    @unittest.skipUnless(HAS_EDF2ASC, "edf2asc (EyeLink Developers Kit) not available on this platform")
     def test_dataset_to_bids(self):
         files_folder_path = os.path.join(data_folder,"example_files")
         bids_dataset_folder = pyx.dataset_to_bids(data_folder,files_folder_path,"example_dataset")
