@@ -428,6 +428,7 @@ class Visualization():
         fps: float | None = None,
         output_format: str = "matplotlib",
         display: bool = True,
+        in_percent: bool = False,
     ):
         """
         Create an animated visualization of eye-tracking data.
@@ -475,6 +476,11 @@ class Visualization():
             If True and output_format is "html", returns an HTML object for notebooks.
             If output_format is "matplotlib", this is ignored (always shows window).
             If False, only saves to file (if folder_path is provided).
+        in_percent
+            If True, the gaze columns are normalized 0-1 screen coordinates and are
+            scaled to pixels (multiplied by screen_width/screen_height) before
+            drawing. Use this for trackers that report normalized gaze (e.g.
+            Gazepoint BPOG).
 
         Returns
         -------
@@ -506,6 +512,13 @@ class Visualization():
             x_col, y_col = "RX", "RY"
         else:
             raise ValueError("Samples DataFrame must contain gaze columns (X, Y) or (LX, LY) or (RX, RY)")
+
+        # ---- Scale normalized 0-1 gaze to pixels if requested ----
+        if in_percent:
+            samples = samples.with_columns([
+                (pl.col(x_col) * screen_width).alias(x_col),
+                (pl.col(y_col) * screen_height).alias(y_col),
+            ])
 
         # ---- Time filter ----
         if tmin is not None and tmax is not None:

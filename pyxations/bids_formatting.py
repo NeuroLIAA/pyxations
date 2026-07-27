@@ -119,6 +119,10 @@ def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session
         for file in file_paths:
             file_name = Path(file).name
             session_id = "_".join("".join(file_name.split(".")[:-1]).split("_")[1:session_substrings + 1])
+            # If the filename already uses a BIDS-style "ses-" token, strip the
+            # prefix so we don't end up with a doubled "ses-ses-" folder name.
+            if session_id.startswith("ses-"):
+                session_id = session_id[len("ses-"):]
             converter.move_file_to_bids_folder(file, bids_folder_path, subject_id, old_subject_id, session_id)
 
         metadata.loc[len(metadata.index)] = [subject_id, old_subject_id]
@@ -146,7 +150,7 @@ def process_session(eye_tracking_data_path, dataset_format, detection_algorithm,
     elif dataset_format == 'webgazer':
         webgazer_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, exp_format, **kwargs)
     elif dataset_format == 'tobii':
-        tobii_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, exp_format, **kwargs)
+        tobii_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, overwrite, exp_format, **kwargs)
     elif dataset_format == 'gaze':
         gaze_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
     else:

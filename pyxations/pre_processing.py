@@ -244,6 +244,33 @@ class PreProcessing:
                 require_nonoverlap=require_nonoverlap,
             )
 
+    def split_all_into_single_trial(
+        self,
+        phase_name: str = "complete_recording",
+    ) -> None:
+        """Segment the entire recording as a single trial.
+
+        Intended for continuous recordings that carry no trial markers. Every
+        sample/fixation/saccade/blink that falls within the full time span of
+        the recording is assigned ``trial_number`` 0 and ``phase`` equal to
+        *phase_name*, so downstream trial-based analysis and visualization
+        (e.g. ``plot_multipanel``, ``plot_scanpath``) work without explicit
+        segmentation.
+        """
+        self._require_columns(self.samples, ["tSample"], "split_all_into_single_trial")
+        if self.samples.empty:
+            raise ValueError(
+                f"[split_all_into_single_trial] No samples to segment "
+                f"in session: {self.session_path}"
+            )
+        # Span the full sample time range. Pad by 1 unit so events whose tStart/tEnd coincide with the first/last
+        # sample are inclusively captured.
+        t_min = int(self.samples["tSample"].min()) - 1
+        t_max = int(self.samples["tSample"].max()) + 1
+        start_times = {phase_name: [t_min]}
+        end_times = {phase_name: [t_max]}
+        self.split_all_into_trials(start_times, end_times)
+
     def split_all_into_trials_by_msgs(
         self,
         start_msgs: Dict[str, List[str]],
