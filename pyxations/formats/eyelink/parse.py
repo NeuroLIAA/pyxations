@@ -15,11 +15,28 @@ from pyxations.formats.generic import BidsParse
 
 
 def process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs):
-    edf_files = [file for file in eye_tracking_data_path.iterdir() if file.suffix.lower() == '.edf']
-    if len(edf_files) > 1:
-        print(f"More than one EDF file found in {eye_tracking_data_path}. Skipping folder.")
+    recording_files = [
+        file
+        for file in eye_tracking_data_path.iterdir()
+        if file.suffix.lower() in {'.edf', '.asc'}
+    ]
+    edf_stems = {
+        file.stem.lower()
+        for file in recording_files
+        if file.suffix.lower() == '.edf'
+    }
+    recording_files = [
+        file
+        for file in recording_files
+        if file.suffix.lower() != '.asc' or file.stem.lower() not in edf_stems
+    ]
+    if len(recording_files) != 1:
+        print(
+            f"Expected one EyeLink EDF or ASC file in {eye_tracking_data_path}; "
+            f"found {len(recording_files)}. Skipping folder."
+        )
         return
-    edf_file_path = edf_files[0]
+    edf_file_path = recording_files[0]
     (session_folder_path / 'eyelink_events').mkdir(parents=True, exist_ok=True)
 
        
@@ -39,6 +56,12 @@ def convert_edf_to_ascii(edf_file_path, output_dir):
     Returns:
         str: Path to the generated ASCII file.
     """
+    if edf_file_path.suffix.lower() == ".asc":
+        ascii_file_path = output_dir / edf_file_path.name
+        if edf_file_path.resolve() != ascii_file_path.resolve():
+            shutil.copy2(edf_file_path, ascii_file_path)
+        return ascii_file_path
+
     # Check if edf2asc is installed
     if not shutil.which("edf2asc"):
         raise FileNotFoundError("edf2asc not found. Please make sure EyeLink software is installed and accessible in the system PATH.")
@@ -64,6 +87,7 @@ class EyelinkParse(BidsParse):
     def parse(self, edf_file_path, detection_algorithm, msg_keywords, force_best_eye, keep_ascii, overwrite, **kwargs):
         from pyxations.bids_formatting import find_besteye, EYE_MOVEMENT_DETECTION_DICT, keep_eye
         from pyxations.pre_processing import PreProcessing
+        self.detection_algorithm = detection_algorithm
         
         #detection_algorithm = 'eyelink'
         # Convert EDF to ASCII (only if necessary)

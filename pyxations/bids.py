@@ -285,7 +285,10 @@ def _eyelink_ascii_path(path: Path, output_directory: Path) -> Path:
         text=True,
         check=False,
     )
-    if result.returncode != 0 or not output_path.exists():
+    # Some EDF2ASC releases return a non-zero status for a recoverable
+    # end-of-file warning after reporting a successful conversion. A
+    # non-empty ASC output is the reliable success criterion in that case.
+    if not output_path.exists() or output_path.stat().st_size == 0:
         raise RuntimeError(
             f"edf2asc failed for {path}:\n{result.stdout}\n{result.stderr}"
         )

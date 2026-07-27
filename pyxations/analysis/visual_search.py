@@ -1029,13 +1029,17 @@ class VisualSearchTrial(Trial):
 
         trial_data = behavior_data.filter(pl.col("trial_number") == trial_number)
 
-        self._target_present = trial_data.select("target_present").item()
+        self._target_present = bool(
+            trial_data.select("target_present").item()
+        )
         self._target = trial_data.select("target").item()
         
         if self._target_present:
             self._target_location = _as(trial_data.select("target_location").item(), tuple)
 
-        self._correct_response = trial_data.select("correct_response").item()
+        self._correct_response = bool(
+            trial_data.select("correct_response").item()
+        )
         self._stimulus = trial_data.select("stimulus").item()
         self._stimulus_coords = _as(trial_data.select("stimulus_coords").item(), tuple)
 
@@ -1043,7 +1047,9 @@ class VisualSearchTrial(Trial):
         self._memory_set_locations = _as(trial_data.select("memory_set_locations").item(), list)
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
-        self._was_answered = trial_data.select("was_answered").item()
+        self._was_answered = bool(
+            trial_data.select("was_answered").item()
+        )
 
     @property
     def target(self):
@@ -1163,11 +1169,11 @@ class VisualSearchTrial(Trial):
 
         '''
         vis = Visualization(self.events_path, self.detection_algorithm)
-        (self.events_path / "plots").mkdir(parents=True, exist_ok=True)
+        self.events_path.mkdir(parents=True, exist_ok=True)
 
         
         phase_data = {self._search_phase_name:{}, self._memorization_phase_name:{}}
-        dataset_parent_folder = self.events_path.parent.parent.parent.parent
+        dataset_parent_folder = self.session.session_dataset_path.parents[1]
         phase_data[self._search_phase_name]["img_paths"] = [dataset_parent_folder / STIMULI_FOLDER / self._stimulus]
         phase_data[self._search_phase_name]["img_plot_coords"] = [self._stimulus_coords]
         if self._memorization_phase_name is not None:
@@ -1178,7 +1184,7 @@ class VisualSearchTrial(Trial):
         if self._target_present:
             phase_data[self._search_phase_name]["bbox"] = self._target_location
         vis.scanpath(fixations=self._fix,phase_data=phase_data, saccades=self._sacc, samples=self._samples, screen_height=screen_height, screen_width=screen_width, 
-                      folder_path=self.events_path / "plots", **kwargs)
+                      folder_path=self.events_path, **kwargs)
 
     def plot_animation(self, screen_height, screen_width, video_path=None, background_image_path=None, **kwargs):
         """
@@ -1218,15 +1224,15 @@ class VisualSearchTrial(Trial):
             For output_format="matplotlib", displays in a GUI window and returns None.
         """
         vis = Visualization(self.events_path, self.detection_algorithm)
-        (self.events_path / "plots").mkdir(parents=True, exist_ok=True)
+        self.events_path.mkdir(parents=True, exist_ok=True)
 
         # Set default folder_path if not provided
         if 'folder_path' not in kwargs:
-            kwargs['folder_path'] = self.events_path / "plots"
+            kwargs['folder_path'] = self.events_path
 
         # If no background image provided and no video, try to use the stimulus
         if video_path is None and background_image_path is None:
-            dataset_parent_folder = self.events_path.parent.parent.parent.parent
+            dataset_parent_folder = self.session.session_dataset_path.parents[1]
             stimulus_path = dataset_parent_folder / STIMULI_FOLDER / self._stimulus
             if stimulus_path.exists():
                 background_image_path = stimulus_path

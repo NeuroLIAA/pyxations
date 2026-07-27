@@ -147,7 +147,7 @@ class Experiment:
         saccades = pl.concat([subject.saccades() for subject in self.subjects.values()])
 
         visualization_root = (
-            self.derivatives_path / "docs" / "figures"
+            self.derivatives_path / "figures" / "group"
             if self.export_format == BIDS_EXPORT
             else self.derivatives_path
         )
@@ -635,11 +635,10 @@ class Session():
                 )
                 events_path = (
                     self.session_derivatives_path.parents[1]
-                    / "docs"
                     / "figures"
                     / self.session_derivatives_path.parent.name
                     / self.session_derivatives_path.name
-                    / f"{self.detection_algorithm}_events"
+                    / self.detection_algorithm
                 )
             except FileNotFoundError:
                 # Read derivative folders created by Pyxations <= 0.3.
@@ -810,7 +809,7 @@ class Trial:
             ])
 
         self.events_path = events_path
-        self.detection_algorithm = events_path.name[:-7]
+        self.detection_algorithm = events_path.name.removesuffix("_events")
 
  
     def fixations(self):
@@ -833,9 +832,9 @@ class Trial:
 
     def plot_scanpath(self,screen_height,screen_width, **kwargs):
         vis = Visualization(self.events_path, self.detection_algorithm)
-        (self.events_path / "plots").mkdir(parents=True, exist_ok=True)
+        self.events_path.mkdir(parents=True, exist_ok=True)
         vis.scanpath(fixations=self._fix, saccades=self._sacc, samples=self._samples, screen_height=screen_height, screen_width=screen_width, 
-                      folder_path=self.events_path / "plots", **kwargs)
+                      folder_path=self.events_path, **kwargs)
 
     def plot_animation(self, screen_height, screen_width, video_path=None, background_image_path=None, **kwargs):
         """
@@ -873,7 +872,8 @@ class Trial:
             For output_format="matplotlib", displays in a GUI window and returns None.
         """
         vis = Visualization(self.events_path, self.detection_algorithm)
-        (self.events_path / "plots").mkdir(parents=True, exist_ok=True)
+        self.events_path.mkdir(parents=True, exist_ok=True)
+        kwargs.setdefault("folder_path", self.events_path)
         
         return vis.plot_animation(
             samples=self._samples,

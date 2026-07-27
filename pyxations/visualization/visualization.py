@@ -12,7 +12,7 @@ class Visualization():
         self.derivatives_folder_path = Path(derivatives_folder_path)
         if events_detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and events_detection_algorithm != 'eyelink':
             raise ValueError(f"Detection algorithm {events_detection_algorithm} not found.")
-        self.events_detection_folder = Path(events_detection_algorithm+'_events')
+        self.events_detection_folder = Path(events_detection_algorithm)
 
     def scanpath(
         self,
@@ -112,6 +112,10 @@ class Visualization():
         _MAX_CACHE_ITEMS = 8  # or 5, 10, etc. Tune as you like.
 
         trial_idx = fixations["trial_number"][0]
+        if isinstance(trial_idx, (float, np.floating)) and float(
+            trial_idx
+        ).is_integer():
+            trial_idx = int(trial_idx)
 
         # ---- time filter ----------------------------------------------------------
         if tmin is not None and tmax is not None:
@@ -369,13 +373,12 @@ class Visualization():
         """
         Create a 2×2 multi‑panel diagnostic plot for every non‑empty
         phase label and save it as PNG in
-        <derivatives_folder_path>/<events_detection_folder>/plots/.
+        <derivatives_folder_path>/<events_detection_folder>/.
         """
         # ── paths & matplotlib style ────────────────────────────────
         folder_path: Path = (
             self.derivatives_folder_path
             / self.events_detection_folder
-            / "plots"
         )
         folder_path.mkdir(parents=True, exist_ok=True)
         plt.rcParams.update({"font.size": 12})
@@ -676,6 +679,10 @@ class Visualization():
         # ================= SAVE / DISPLAY =================
         result = None
         trial_idx_val = trial_idx
+        if isinstance(trial_idx_val, (float, np.floating)) and float(
+            trial_idx_val
+        ).is_integer():
+            trial_idx_val = int(trial_idx_val)
         
         # Build output filename
         anim_name = f"animation_{trial_idx_val}"

@@ -73,8 +73,10 @@ Naming notes:
   `physio`/`physioevents`.
 - BIDS TSV.GZ/JSON is the canonical default. Feather and HDF5 remain available
   as explicit legacy exports through `exp_format`.
-- Generated figures are kept below `docs/figures/`, an allowed opaque
-  derivatives directory, so plots do not invalidate the dataset.
+- Generated figures are kept below `figures/` in the derivative dataset.
+  Pyxations lists that directory in the derivative dataset's `.bidsignore`, so
+  plots stay near their provenance without becoming canonical BIDS data or
+  invalidating the dataset.
 
 ## Detection algorithms
 

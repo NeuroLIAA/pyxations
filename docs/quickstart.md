@@ -2,31 +2,37 @@
 
 This page runs the full Pyxations pipeline on the small dataset bundled with the repository, so you can see what the inputs, outputs and APIs look like before pointing it at your own data.
 
-## 0. Get the example dataset
+## 0. Get the source example
 
-Clone the repository (or download the `example_dataset/` folder from GitHub):
+Clone the repository:
 
 ```bash
 git clone https://github.com/NeuroLIAA/pyxations.git
 cd pyxations
 ```
 
-The bundled example uses Pyxations' legacy pre-BIDS layout: four subjects
-(`sub-0001` … `sub-0004`), each with one session containing EyeLink recordings
-under `ET/` and behavioral logs under `behavioral/`. It remains available for
-reproducing the existing analysis tutorial. New datasets created with
-`dataset_to_bids` use standardized BIDS `physio` files and retain the original
-vendor layout under `sourcedata/`.
+The repository commits only small source recordings under `examples/`. Raw
+BIDS datasets, derivative datasets, and figures are generated locally and are
+not versioned.
 
-## 1. Compute derivatives
+## 1. Create raw BIDS and compute derivatives
 
 ```python
+from pathlib import Path
 import pyxations as pyx
 
+repo = Path.cwd()
+bids_path = pyx.dataset_to_bids(
+    target_folder_path=repo / "generated",
+    files_folder_path=repo / "examples" / "eyelink_visual_search",
+    dataset_name="example_dataset",
+    format_name="eyelink",
+)
+
 pyx.compute_derivatives_for_dataset(
-    bids_dataset_folder="example_dataset",
+    bids_dataset_folder=bids_path,
     dataset_format="eyelink",
-    detection_algorithm="remodnav",
+    detection_algorithm="eyelink",
     msg_keywords=["begin", "end", "press"],
     start_msgs={"search": ["beginning_of_stimuli"]},
     end_msgs={"search": ["end_of_stimuli"]},
@@ -34,13 +40,10 @@ pyx.compute_derivatives_for_dataset(
 )
 ```
 
-This creates a BIDS-valid sibling dataset, `example_dataset_derivatives/`.
-Processed samples use `physio.tsv.gz`/JSON and eye-movement annotations use
+This creates `generated/example_dataset/` and its BIDS-valid sibling
+`generated/example_dataset_derivatives/`. Processed samples use
+`physio.tsv.gz`/JSON and eye-movement annotations use
 `physioevents.tsv.gz`/JSON.
-
-A pre-computed legacy Feather copy of the derivatives ships in the repo
-(`example_dataset_derivatives/`), so you can also skip this step and jump
-straight to loading. `Experiment` detects that older layout automatically.
 
 ## 2. Load and inspect
 
@@ -49,10 +52,10 @@ straight to loading. `Experiment` detects that older layout automatically.
 ```python
 from pyxations import Experiment
 
-exp = Experiment(dataset_path="example_dataset")
-exp.load_data("remodnav")
+exp = Experiment(dataset_path=bids_path)
+exp.load_data("eyelink")
 
-print(list(exp.subjects.keys()))   # ['0001', '0002', '0003', '0004']
+print(list(exp.subjects.keys()))   # ['0001']
 
 subject = exp.subjects["0001"]
 session = subject.sessions["second"]
@@ -70,7 +73,10 @@ Tables come back as **polars** DataFrames.
 trial.plot_scanpath(screen_height=1080, screen_width=1920)
 ```
 
-The plot is saved under `example_dataset_derivatives/sub-0001/ses-second/remodnav_events/plots/`.
+The plot is saved under
+`generated/example_dataset_derivatives/figures/sub-0001/ses-second/eyelink/`.
+The derivative dataset's `.bidsignore` excludes `figures/`, so the canonical
+TSV.GZ/JSON outputs remain validator-compatible after plotting.
 
 ## Where to go next
 

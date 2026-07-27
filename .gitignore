@@ -1,6 +1,5 @@
-# Ignore all derivatives
-example_dataset_derivatives/
-example_dataset/
+# Locally generated example datasets
+/generated/
 *.pyc
 
 
@@ -12,6 +11,7 @@ example_dataset/
 vend/
 env/
 .pytest_cache/
+.migration-*/
 
 *.log
 *pyxations.egg-info

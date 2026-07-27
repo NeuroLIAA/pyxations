@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
 from pyxations.methods.eyemovement.REMoDNaV import RemodnavDetection
@@ -13,6 +14,25 @@ from pyxations.bids import write_bids_dataset
 from pyxations.export.bids import initialize_bids_derivative
 
 EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection, 'engbert': EngbertDetection}
+
+
+def _clean_bids_session_workfiles(session_folder_path, detection_algorithm):
+    """Keep only canonical BIDS data after a parser finishes its export."""
+
+    session_folder_path = Path(session_folder_path)
+    if not session_folder_path.is_dir():
+        return
+    work_directories = {
+        "events",
+        "eyelink_events",
+        f"{detection_algorithm}_events",
+    }
+    for directory_name in work_directories:
+        directory = session_folder_path / directory_name
+        if directory.is_dir():
+            shutil.rmtree(directory)
+    for ascii_file in session_folder_path.glob("*.asc"):
+        ascii_file.unlink()
 
 
 def find_besteye(df_cal):
@@ -130,6 +150,11 @@ def process_session(eye_tracking_data_path, dataset_format, detection_algorithm,
     else:
         raise ValueError(f"Dataset format {dataset_format} not found.")
 
+    if exp_format == BIDS_EXPORT:
+        _clean_bids_session_workfiles(
+            session_folder_path, detection_algorithm
+        )
+
 
 def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detection_algorithm='remodnav', num_processes=4,
                                     force_best_eye=True, keep_ascii=True, overwrite=False, exp_format=BIDS_EXPORT,
@@ -174,49 +199,112 @@ def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detecti
         dtype={'subject_id': str, 'old_subject_id': str},
     )
 
-    with ProcessPoolExecutor(max_workers=num_processes) as executor:
-        futures = []
-        for subject in bids_folders:
-            # To get subject_name go to the bids_dataset_folder and open the "participants.tsv" file
-            # There are two columns: subject_id and old_subject_id
-            # subject_id equals subject.name[4:] and old_subject_id is the one we want to use in this case
+    jobs = []
+    for subject in bids_folders:
+        subject_name = participants_tsv.loc[
+            participants_tsv['subject_id'] == subject.name[4:],
+            'old_subject_id',
+        ].values[0]
+        subject_path = bids_dataset_folder / subject.name
 
+        for session in subject_path.iterdir():
+            if not (session.name.startswith("ses-") and session.is_dir()):
+                continue
+            session_name = session.name[4:]
 
-            subject_name = participants_tsv.loc[participants_tsv['subject_id'] == subject.name[4:], 'old_subject_id'].values[0]
-            subject_path = bids_dataset_folder / subject.name
+            session_kwargs = dict(kwargs)
+            if (
+                start_times
+                and subject_name in start_times
+                and session_name in start_times[subject_name]
+            ):
+                session_kwargs["start_times"] = start_times[subject_name][
+                    session_name
+                ]
+            if (
+                end_times
+                and subject_name in end_times
+                and session_name in end_times[subject_name]
+            ):
+                session_kwargs["end_times"] = end_times[subject_name][
+                    session_name
+                ]
 
-            for session in subject_path.iterdir():
-                if session.name.startswith("ses-") and session.is_dir():
-                    session_name = session.name[4:]  # Remove "ses-" prefix
+            source_session = (
+                bids_dataset_folder
+                / "sourcedata"
+                / subject.name
+                / session.name
+            )
+            if not source_session.exists():
+                source_session = session
 
-                    # Build per-session kwargs
-                    session_kwargs = dict(kwargs)  # base kwargs
-                    if start_times and subject_name in start_times and session_name in start_times[subject_name]:
-                        session_kwargs["start_times"] = start_times[subject_name][session_name]
-                    if end_times and subject_name in end_times and session_name in end_times[subject_name]:
-                        session_kwargs["end_times"] = end_times[subject_name][session_name]
+            jobs.append(
+                (
+                    source_session / "ET",
+                    dataset_format,
+                    detection_algorithm,
+                    derivatives_folder / subject.name / session.name,
+                    force_best_eye,
+                    keep_ascii,
+                    overwrite,
+                    exp_format,
+                    session_kwargs,
+                )
+            )
 
-                    source_session = (
-                        bids_dataset_folder
-                        / "sourcedata"
-                        / subject.name
-                        / session.name
-                    )
-                    if not source_session.exists():
-                        source_session = session
-
-                    futures.append(
-                        executor.submit(
-                            process_session,
-                            source_session / "ET", dataset_format, detection_algorithm,
-                            derivatives_folder / subject.name / session.name,
-                            force_best_eye, keep_ascii, overwrite, exp_format,
-                            **session_kwargs
-                        )
-                    )
-
-        for future in futures:
-            future.result()
+    if num_processes == 1:
+        for (
+            source_path,
+            format_name,
+            algorithm,
+            destination,
+            choose_eye,
+            preserve_ascii,
+            replace,
+            output_format,
+            session_kwargs,
+        ) in jobs:
+            process_session(
+                source_path,
+                format_name,
+                algorithm,
+                destination,
+                choose_eye,
+                preserve_ascii,
+                replace,
+                output_format,
+                **session_kwargs,
+            )
+    else:
+        with ProcessPoolExecutor(max_workers=num_processes) as executor:
+            futures = [
+                executor.submit(
+                    process_session,
+                    source_path,
+                    format_name,
+                    algorithm,
+                    destination,
+                    choose_eye,
+                    preserve_ascii,
+                    replace,
+                    output_format,
+                    **session_kwargs,
+                )
+                for (
+                    source_path,
+                    format_name,
+                    algorithm,
+                    destination,
+                    choose_eye,
+                    preserve_ascii,
+                    replace,
+                    output_format,
+                    session_kwargs,
+                ) in jobs
+            ]
+            for future in futures:
+                future.result()
 
     return derivatives_folder
         

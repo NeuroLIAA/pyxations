@@ -22,7 +22,10 @@ uv pip install -e '.[dev]'
 uv run pytest
 ```
 
-The test suite covers BIDS conversion, derivative computation, scanpath visualization and multipanel plots. Test fixtures live under `tests/data/`.
+The test suite covers BIDS conversion, derivative computation, hierarchy
+loading, scanpath visualization, and multipanel plots. Small source-only
+fixtures live under `examples/`; pytest generates raw BIDS, derivatives, and
+figures in temporary directories.
 
 BIDS raw and derivative writer tests use the official validator. Install
 [Deno](https://docs.deno.com/runtime/getting_started/installation/) and run:
@@ -63,7 +66,8 @@ mkdocs serve
 - `tests/`: pytest suite.
 - `docs/`: MkDocs sources for this site.
 - `notebooks/`: runnable end-to-end examples.
-- `example_dataset/`, `example_dataset_derivatives/`: small bundled dataset used by the quickstart.
+- `examples/`: small source recordings used by the quickstart and integration
+  tests; generated datasets are intentionally not committed.
 
 ## Coding style
 
