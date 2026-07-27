@@ -100,8 +100,8 @@ pyx.compute_derivatives_for_dataset(
 
 The returned derivatives path contains a `dataset_description.json` with
 `DatasetType` set to `derivative`, `GeneratedBy` metadata for Pyxations, and a
-link to the source dataset. Feather and HDF5 exports are retained only for
-backward compatibility and can be selected explicitly with `exp_format`.
+link to the source dataset. Feather export is retained only for backward
+compatibility and can be selected explicitly with `exp_format`.
 
 ### Trial segmentation parameters
 

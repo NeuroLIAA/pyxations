@@ -44,12 +44,16 @@ def _frame_payload(frame: pd.DataFrame | pl.DataFrame | None) -> dict:
     if frame is None:
         return {"Columns": [], "Records": []}
     if isinstance(frame, pl.DataFrame):
-        frame = frame.to_pandas()
+        columns = frame.columns
+        source_records = frame.to_dicts()
+    else:
+        columns = list(frame.columns)
+        source_records = frame.to_dict(orient="records")
     records = [
         {column: _json_value(value) for column, value in row.items()}
-        for row in frame.to_dict(orient="records")
+        for row in source_records
     ]
-    return {"Columns": list(frame.columns), "Records": records}
+    return {"Columns": columns, "Records": records}
 
 
 def _payload_frame(payload: Mapping | None) -> pl.DataFrame:
@@ -59,15 +63,14 @@ def _payload_frame(payload: Mapping | None) -> pl.DataFrame:
     records = list(payload.get("Records", []))
     if not records:
         return pl.DataFrame({column: [] for column in columns})
-    pandas_frame = pd.DataFrame.from_records(records, columns=columns)
-    return pl.from_pandas(pandas_frame)
+    return pl.DataFrame(records).select(columns)
 
 
 def _as_pandas(frame: pd.DataFrame | pl.DataFrame | None) -> pd.DataFrame:
     if frame is None:
         return pd.DataFrame()
     if isinstance(frame, pl.DataFrame):
-        return frame.to_pandas()
+        return pd.DataFrame(frame.to_dict(as_series=False))
     return frame.copy()
 
 

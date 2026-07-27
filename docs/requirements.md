@@ -4,7 +4,8 @@
 
 Python **3.10** or newer.
 
-Linux, macOS and Windows are all supported. The package is pure Python and depends on the standard scientific stack.
+Linux, macOS and Windows are all supported. The base package uses NumPy,
+Polars, pandas, and Matplotlib.
 
 ## edf2asc (only for EyeLink data)
 
@@ -18,18 +19,47 @@ EyeLink EDF files are parsed by first converting them to ASCII with **`edf2asc`*
 edf2asc -h
 ```
 
-If you see a usage message, you're set. If not, add the install directory to `PATH` (or symlink the binary into `/usr/local/bin`).
+You only need `edf2asc` when `dataset_format="eyelink"`. Tobii, GazePoint and WebGazer pipelines do not require it.
 
-You only need `edf2asc` when `dataset_format="eyelink"`. Tobii, Gazepoint and WebGazer pipelines don't require it.
+## Base Python dependencies
 
-## Python dependencies
+The default installation declares only direct dependencies shared across the package:
 
-Pyxations relies on the standard scientific Python stack:
+- `numpy>=1.24`
+- `polars>=1.26.0`
+- `pandas>=1.5`
+- `matplotlib>=3.9.2`
 
-- `numpy`, `pandas`, `pyarrow`, `polars`
-- `scipy`, `statsmodels`
-- `matplotlib`, `seaborn`, `opencv-python`
-- `remodnav`, `multimatch-gaze` (eye-movement algorithms)
-- `tqdm`
+Pandas handles the standards-facing BIDS TSV/JSON boundary, while
+preprocessing and analysis use Polars tables. PyArrow and Seaborn are not
+direct requirements. Transitive dependencies are resolved by the installer
+and are not repeated in Pyxations metadata.
 
-The pinned full list lives in `pyproject.toml`. `pip install pyxations` pulls them all in.
+## Optional feature dependencies
+
+Install feature-specific packages only when needed:
+
+```bash
+pip install "pyxations[remodnav]"   # REMoDNaV detection
+pip install "pyxations[multimatch]" # MultiMatch scanpath comparison
+pip install "pyxations[video]"      # OpenCV video animation
+pip install "pyxations[all]"        # all optional features
+```
+
+The minimum optional versions are:
+
+- `remodnav>=1.1.2`
+- `multimatch-gaze>=0.1.3`
+- `opencv-python>=4.9.0.80`
+
+Optional modules are imported lazily. Importing the base package does not load these libraries; requesting an unavailable feature raises an error containing the relevant installation command.
+
+## Version policy
+
+Runtime dependencies use minimum supported versions rather than exact pins.
+This allows Pyxations to coexist with newer compatible releases and other
+scientific packages. The committed `uv.lock` records a cross-platform,
+reproducible development and release environment without enforcing those
+exact versions on library users.
+
+Development and documentation tools are installed through the `dev` and `docs` optional groups.

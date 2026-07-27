@@ -62,7 +62,7 @@ mkdocs serve
     - `methods/eyemovement/`: REMoDNaV, Engbert–Kliegl detectors.
     - `analysis/`: `Experiment` and paradigm-specific helpers.
     - `visualization/`: plotting utilities.
-    - `export/`: canonical BIDS derivative writer and legacy Feather/HDF5 writers.
+    - `export/`: canonical BIDS derivative writer and legacy Feather writer.
 - `tests/`: pytest suite.
 - `docs/`: MkDocs sources for this site.
 - `notebooks/`: runnable end-to-end examples.

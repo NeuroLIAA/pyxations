@@ -3,8 +3,8 @@ import inspect
 import re
 import shutil
 import pandas as pd
+import polars as pl
 from concurrent.futures import ProcessPoolExecutor
-from pyxations.methods.eyemovement.REMoDNaV import RemodnavDetection
 from pyxations.methods.eyemovement.engbert import EngbertDetection
 
 from pyxations.export import BIDS_EXPORT
@@ -13,7 +13,26 @@ from pyxations.export.bids import initialize_bids_derivative
 from pyxations.formats.generic import BidsParse
 from pyxations.pre_processing import PreProcessing
 
-EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection, 'engbert': EngbertDetection}
+EYE_MOVEMENT_DETECTION_DICT = {"engbert": EngbertDetection}
+
+
+def _detector_type(name):
+    """Load optional detectors only when the corresponding feature is used."""
+
+    if name == "remodnav":
+        try:
+            from pyxations.methods.eyemovement.REMoDNaV import (
+                RemodnavDetection,
+            )
+        except ImportError as exc:
+            if exc.name and exc.name.startswith("remodnav"):
+                raise ImportError(
+                    "REMoDNaV support is optional. Install it with "
+                    "`pip install 'pyxations[remodnav]'`."
+                ) from exc
+            raise
+        return RemodnavDetection
+    return EYE_MOVEMENT_DETECTION_DICT.get(name)
 
 
 def _clean_bids_session_workfiles(session_folder_path, detection_algorithm):
@@ -77,32 +96,45 @@ def _segmentation_recipe(pre_processing, kwargs):
 
 
 def _assign_default_trials(pre_processing):
-    samples = pre_processing.samples
-    if "trial_number" not in samples:
-        samples["trial_number"] = 0
-    else:
-        samples["trial_number"] = (
-            pd.to_numeric(samples["trial_number"], errors="coerce")
-            .fillna(0)
-            .astype(int)
-        )
-    if "phase" not in samples:
-        samples["phase"] = ""
+    samples = pre_processing.samples.with_columns(
+        (
+            pl.col("trial_number").cast(pl.Int64, strict=False).fill_null(0)
+            if "trial_number" in pre_processing.samples.columns
+            else pl.lit(0, dtype=pl.Int64)
+        ).alias("trial_number"),
+        (
+            pl.col("phase")
+            if "phase" in pre_processing.samples.columns
+            else pl.lit("")
+        ).alias("phase"),
+    )
+    pre_processing.samples = samples
+
     for table_name in ("fixations", "saccades", "blinks"):
         table = getattr(pre_processing, table_name)
-        if table.empty:
-            if "trial_number" not in table:
-                table["trial_number"] = pd.Series(dtype="int64")
-            if "phase" not in table:
-                table["phase"] = pd.Series(dtype="object")
-            continue
-        table["trial_number"] = 0
-        table["phase"] = ""
-        for trial_number, group in samples.groupby("trial_number"):
-            start = group["tSample"].min()
-            end = group["tSample"].max()
-            mask = (table["tStart"] >= start) & (table["tEnd"] <= end)
-            table.loc[mask, "trial_number"] = int(trial_number)
+        table = table.with_columns(
+            pl.lit(0, dtype=pl.Int64).alias("trial_number"),
+            pl.lit("").alias("phase"),
+        )
+        if not table.is_empty():
+            for trial_number, group in samples.partition_by(
+                "trial_number", as_dict=True
+            ).items():
+                trial_value = trial_number[0] if isinstance(
+                    trial_number, tuple
+                ) else trial_number
+                start = group.get_column("tSample").min()
+                end = group.get_column("tSample").max()
+                table = table.with_columns(
+                    pl.when(
+                        (pl.col("tStart") >= start)
+                        & (pl.col("tEnd") <= end)
+                    )
+                    .then(pl.lit(int(trial_value)))
+                    .otherwise(pl.col("trial_number"))
+                    .alias("trial_number")
+                )
+        setattr(pre_processing, table_name, table)
 
 
 def _detect_from_bids(
@@ -127,7 +159,7 @@ def _detect_from_bids(
             blinks,
         )
 
-    detector_type = EYE_MOVEMENT_DETECTION_DICT.get(detection_algorithm)
+    detector_type = _detector_type(detection_algorithm)
     if detector_type is None:
         raise ValueError(
             f"Unknown eye-movement detector: {detection_algorithm}"
@@ -433,8 +465,8 @@ def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detecti
 
     BIDS TSV.GZ/JSON is the canonical output. The sibling derivatives dataset
     receives its own ``dataset_description.json`` and mirrors the source
-    subject/session hierarchy. Feather and HDF5 remain explicit compatibility
-    exports through ``exp_format``.
+    subject/session hierarchy. Feather remains an explicit compatibility
+    export through ``exp_format``.
 
     Returns
     -------

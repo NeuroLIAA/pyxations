@@ -9,7 +9,7 @@ Cognitive scientists, vision researchers and developers working with eye-trackin
 ## Quick install
 
 ```bash
-pip install pyxations
+pip install "pyxations[remodnav]"
 ```
 
 For EDF inputs you also need EyeLink's `edf2asc` tool on your `PATH`. See [Requirements](requirements.md) and [Installation](installation.md) for details.
@@ -43,8 +43,8 @@ See [Usage](usage.md) for an end-to-end walkthrough.
 ## Features
 
 - **Validated BIDS conversion**: write per-eye physiological recordings from
-  EyeLink, Tobii, GazePoint, and WebGazer data, normalize tracker/behavioral
-  events, and retain a verbatim archival copy under `sourcedata/`.
+  EyeLink, Tobii, GazePoint, and webcam/WebGazer data, normalize tracker and
+  behavioral events, and retain a verbatim archival copy under `sourcedata/`.
 - **EDF parsing**: extract headers, messages, calibration, events and raw samples from EyeLink EDF files (via `edf2asc`).
 - **Multi-vendor support**: input formats for EyeLink, Tobii, Gazepoint and WebGazer.
 - **Trial segmentation**: split continuous recordings using start/end messages, fixed durations or explicit timestamps.

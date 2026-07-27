@@ -80,8 +80,8 @@ Naming notes:
 - The processing algorithm is included in the `recording-` entity because the
   current BIDS eye-tracking schema does not allow a `desc-` entity on
   `physio`/`physioevents`.
-- BIDS TSV.GZ/JSON is the canonical default. Feather and HDF5 remain available
-  as explicit legacy exports through `exp_format`.
+- BIDS TSV.GZ/JSON is the canonical default. Feather remains available as an
+  explicit legacy export through `exp_format`.
 - Generated figures are kept below `figures/` in the derivative dataset.
   Pyxations lists that directory in the derivative dataset's `.bidsignore`, so
   plots stay near their provenance without becoming canonical BIDS data or

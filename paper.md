@@ -63,13 +63,13 @@ Pyxations is designed as a reproducible and extensible framework that unifies th
 
 **Flexible trial segmentation.** The framework accommodates multiple trialing paradigms: explicit start and end timestamps, event-based markers, or fixed-duration trials. All of them with overlap controls and regular-expression message matching. This flexibility enables consistent parsing of diverse experimental logics without manual preprocessing.
 
-**Declarative, provenance-aware workflow.** Every preprocessing operation (e.g., interpolation, blink rejection, event detection) is logged automatically in machine-readable JSON recipes and provenance sidecars. This ensures exact reproducibility of analysis pipelines across computing environments.
+**Declarative, provenance-aware workflow.** Configured trial-segmentation operations and their parameters are logged in machine-readable JSON recipes and provenance sidecars alongside the detection algorithm. This makes the transformations used to create each derivative dataset explicit and repeatable.
 
-**Scalability and performance.** Built on the Polars data engine [@vink2022], Pyxations executes parallelized operations on large eye-tracking datasets, significantly outperforming traditional pandas-based workflows [@mckinney2020]. This makes it suitable for multi-subject, multi-session analyses typical in modern cognitive experiments.
+**Scalability and performance.** Pyxations uses the Polars data engine for in-memory preprocessing and analysis transformations [@vink2022] and can process independent recordings in parallel. These choices are intended to support multi-subject, multi-session analyses without making an unbenchmarked performance claim against other dataframe libraries.
 
 **Visualization, statistics, and inspection tools.** In addition to standard gaze plots, Pyxations includes dynamic scanpath visualizations, hierarchical data analysis (experiment, subject, session, trial), per-trial calibration visualization, and task-specific visualization utilities tailored to paradigms such as visual search. Fixations, saccades, blinks, gaze samples, and pupil-containing samples can be retrieved at every level of the hierarchy. Multimatch metrics [@dewhurst2012] are also embedded at the trial level to compare similarity between scanpaths.
 
-**Integration and interoperability.** Pyxations can interface with existing libraries such as PyMovements for event detection [@krakowczyk2023pymovements] or PyTrack for visualization within its standardized processing pipeline [@ghose2020pytrack]. It thus functions not as a replacement but as an orchestration layer that harmonizes and scales the use of existing tools.
+**Interoperability.** Pyxations exposes standardized Polars tables for gaze samples, fixations, saccades, blinks, and pupil measurements, allowing downstream conversion or use by other Python analysis tools. It complements specialized packages such as PyMovements [@krakowczyk2023pymovements], PyTrack [@ghose2020pytrack], and PupEyes [@zhang2026pupeyes].
 
 # Figure 1
 

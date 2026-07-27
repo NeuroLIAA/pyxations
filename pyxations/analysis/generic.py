@@ -6,14 +6,57 @@ from pyxations.export import BIDS_EXPORT, FEATHER_EXPORT, get_exporter
 from math import hypot
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 from matplotlib import colormaps
+from matplotlib.colors import TwoSlopeNorm
 import weakref
 import warnings
-import multimatch_gaze as mm
 
 STIMULI_FOLDER = "stimuli"
 ITEMS_FOLDER = "items"
+
+_MULTIMATCH_DTYPE = np.dtype([
+    ("start_x", "<f8"),
+    ("start_y", "<f8"),
+    ("duration", "<f8"),
+])
+
+
+def _load_multimatch():
+    """Import the optional MultiMatch dependency with an actionable error."""
+    try:
+        import multimatch_gaze
+    except ImportError as exc:
+        raise ImportError(
+            "MultiMatch support is optional. Install it with "
+            "`pip install 'pyxations[multimatch]'`."
+        ) from exc
+    return multimatch_gaze
+
+
+def _to_multimatch_scanpath(fixations: pl.DataFrame) -> np.ndarray:
+    """Convert fixation data to MultiMatch's structured NumPy format."""
+    required_columns = ("xAvg", "yAvg", "duration")
+    missing_columns = [
+        column for column in required_columns if column not in fixations.columns
+    ]
+    if missing_columns:
+        missing = ", ".join(missing_columns)
+        raise ValueError(
+            f"Cannot compute MultiMatch: missing fixation columns: {missing}."
+        )
+
+    scanpath = np.empty(fixations.height, dtype=_MULTIMATCH_DTYPE)
+    for source, target in zip(
+        required_columns, ("start_x", "start_y", "duration"), strict=True
+    ):
+        scanpath[target] = (
+            fixations.get_column(source)
+            .cast(pl.Float64)
+            .to_numpy()
+        )
+
+    return scanpath
+
 
 def _find_fixation_cutoff(fix_count_list, threshold, max_possible):
     """
@@ -108,7 +151,17 @@ def _parse_validations(df: pl.DataFrame) -> pl.DataFrame:
     return parsed
 class Experiment:
 
-    def __init__(self, dataset_path: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = BIDS_EXPORT):
+    def __init__(
+        self,
+        dataset_path: str,
+        excluded_subjects: list | None = None,
+        excluded_sessions: dict | None = None,
+        excluded_trials: dict | None = None,
+        export_format=BIDS_EXPORT,
+    ):
+        excluded_subjects = excluded_subjects or []
+        excluded_sessions = excluded_sessions or {}
+        excluded_trials = excluded_trials or {}
         self.dataset_path = Path(dataset_path)
         self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
         self.metadata = pl.read_csv(self.dataset_path / "participants.tsv", separator="\t", 
@@ -222,19 +275,17 @@ class Experiment:
         return pl.concat([subject.saccades() for subject in self.subjects.values()])
 
     def blinks(self):
-        """Return blink events from every included subject."""
-
+        """Return blink events from every loaded subject."""
         return pl.concat([subject.blinks() for subject in self.subjects.values()])
 
-    def samples(self):
-        return pl.concat([subject.samples() for subject in self.subjects.values()])
-
     def pupil_samples(self):
-        """Return sample rows containing recorded pupil-size values."""
-
+        """Return samples containing pupil measurements from every subject."""
         return pl.concat(
             [subject.pupil_samples() for subject in self.subjects.values()]
         )
+
+    def samples(self):
+        return pl.concat([subject.samples() for subject in self.subjects.values()])
     
     def remove_subject(self, subject_id):
         if subject_id in self.subjects:
@@ -301,27 +352,26 @@ class Experiment:
             )
             .drop("session_id")
         )
-        # Create a copy of the colormap and set 'under' color for -1s
-        cmap = colormaps["rocket_r"].copy()
-        cmap.set_under("yellow")  # or any color you prefer, e.g., "black", "white"
-
         heatmap_data = (
             calib_data
             .pivot(
                 values="avg_error",
                 index="subject_id",
                 on="trial_number",
-                aggregate_function="first"  # safe if unique per cell
+                aggregate_function="first",  # safe if unique per cell
             )
             .sort("subject_id")
-            .to_pandas()
-            .set_index("subject_id")
         )
-        heatmap_data = heatmap_data[sorted(heatmap_data.columns, key=lambda x: int(x))]
-        
+
+        trial_columns = sorted(
+            (column for column in heatmap_data.columns if column != "subject_id"),
+            key=lambda value: int(value),
+        )
+        subject_labels = heatmap_data.get_column("subject_id").to_list()
+        heatmap_values = heatmap_data.select(trial_columns).to_numpy()
+
         # Step 5: Plot with adaptive sizing
-        n_subjects = heatmap_data.shape[0]
-        n_trials = heatmap_data.shape[1]
+        n_subjects, n_trials = heatmap_values.shape
 
         # Define a base size per cell, then scale it
         cell_width = 0.5   # width per trial column
@@ -331,32 +381,53 @@ class Experiment:
         fig_width = max(10, min(cell_width * n_trials, 40))
         fig_height = max(8, min(cell_height * n_subjects, 40))
 
-        plt.figure(figsize=(fig_width, fig_height))
-        sns.heatmap(
-            heatmap_data,
+        # Matplotlib's magma_r is visually close to Seaborn's rocket_r, while
+        # avoiding a runtime dependency on Seaborn.
+        cmap = colormaps["magma_r"].copy()
+        cmap.set_under("yellow")
+        cmap.set_bad("white")
+
+        valid_values = heatmap_values[np.isfinite(heatmap_values) & (heatmap_values >= 0)]
+        vmax = max(0.500001, float(valid_values.max())) if valid_values.size else 1.0
+        norm = TwoSlopeNorm(vmin=0, vcenter=0.5, vmax=vmax)
+        masked_values = np.ma.masked_invalid(heatmap_values)
+
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        mesh = ax.pcolormesh(
+            masked_values,
             cmap=cmap,
-            center=0.5,
-            vmin=0,
-            linewidths=0.3,
-            linecolor="grey",
-            cbar_kws=dict(label="Avg. error (°)")
+            norm=norm,
+            edgecolors="grey",
+            linewidth=0.3,
+            shading="flat",
         )
-        plt.xlabel("Trial #", fontsize=14)
-        plt.ylabel("Subject", fontsize=14)
-        plt.title("Calibration Error per Subject and Trial", fontsize=16)
+        ax.invert_yaxis()
+
+        ax.set_xticks(np.arange(n_trials) + 0.5, labels=trial_columns)
+        ax.set_yticks(np.arange(n_subjects) + 0.5, labels=subject_labels)
+        ax.set_xlabel("Trial #", fontsize=14)
+        ax.set_ylabel("Subject", fontsize=14)
+        ax.set_title("Calibration Error per Subject and Trial", fontsize=16)
 
         # Rotate labels
-        plt.xticks(rotation=45, ha="right", fontsize=10)
-        plt.yticks(rotation=0, ha="right", va="center", fontsize=10)  # horizontal y labels
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right", fontsize=10)
+        plt.setp(ax.get_yticklabels(), rotation=0, ha="right", va="center", fontsize=10)
 
-        plt.tight_layout()
+        colorbar = fig.colorbar(mesh, ax=ax)
+        colorbar.set_label("Avg. error (°)")
+
+        fig.tight_layout()
         plt.show()
         plt.close()
 
 class Subject:
 
     def __init__(self, subject_id: str, old_subject_id: str, experiment: Experiment,
-                 excluded_sessions: list = [], excluded_trials: dict = {}, export_format = BIDS_EXPORT):
+                 excluded_sessions: list | None = None,
+                 excluded_trials: dict | None = None,
+                 export_format=BIDS_EXPORT):
+        excluded_sessions = excluded_sessions or []
+        excluded_trials = excluded_trials or {}
         self.subject_id = subject_id
         self.old_subject_id = old_subject_id
         self.experiment = weakref.ref(experiment)
@@ -494,23 +565,21 @@ class Subject:
         return df
 
     def blinks(self):
-        """Return blink events from every included session."""
-
+        """Return blink events with the subject identifier attached."""
         return pl.concat(
             [session.blinks() for session in self.sessions.values()]
+        ).with_columns(pl.lit(self.subject_id).alias("subject_id"))
+
+    def pupil_samples(self):
+        """Return pupil samples with the subject identifier attached."""
+        return pl.concat(
+            [session.pupil_samples() for session in self.sessions.values()]
         ).with_columns(pl.lit(self.subject_id).alias("subject_id"))
 
     def samples(self):
         df = pl.concat([session.samples() for session in self.sessions.values()]).with_columns([
             (pl.lit(self.subject_id)).alias("subject_id"),])
         return df
-
-    def pupil_samples(self):
-        """Return sample rows containing recorded pupil-size values."""
-
-        return pl.concat(
-            [session.pupil_samples() for session in self.sessions.values()]
-        ).with_columns(pl.lit(self.subject_id).alias("subject_id"))
 
     def calib_data(self):
         calib_data = [session.calib_data() for session in self.sessions.values()]
@@ -522,15 +591,18 @@ class Subject:
 
 class Session():
     
-    def __init__(self, session_id: str, subject: Subject, excluded_trials: list = [],export_format = BIDS_EXPORT):
+    def __init__(
+        self,
+        session_id: str,
+        subject: Subject,
+        excluded_trials: list | None = None,
+        export_format=BIDS_EXPORT,
+    ):
+        excluded_trials = excluded_trials or []
         self.session_id = session_id
         self.subject = weakref.ref(subject)
         self.excluded_trials = excluded_trials
         self.session_dataset_path = self.subject().subject_dataset_path / f"ses-{self.session_id}"
-        bids_root = self.subject().experiment().dataset_path
-        # Kept as a compatibility alias. Runtime analysis consumes normalized
-        # BIDS data and never depends on the archival sourcedata directory.
-        self.session_source_path = self.session_dataset_path
         self.session_derivatives_path = self.subject().subject_derivatives_path / f"ses-{self.session_id}"
         self._trials = None  # Lazy load trials
         self.export_format = export_format
@@ -666,7 +738,6 @@ class Session():
                     / self.detection_algorithm
                 )
             except FileNotFoundError:
-                # Read derivative folders created by Pyxations <= 0.3.
                 exporter = get_exporter(FEATHER_EXPORT)
                 events_path = (
                     self.session_derivatives_path
@@ -713,9 +784,8 @@ class Session():
                 if calibration_path.exists()
                 else None
             )
-   
-        # Initialize trials
-        self._init_trials(samples,fix,sacc,blink,events_path)
+
+        self._init_trials(samples, fix, sacc, blink, events_path)
 
     def calib_data(self):
         if self._calib_data is None:
@@ -807,23 +877,21 @@ class Session():
         return df
 
     def blinks(self):
-        """Return blink events from every included trial."""
-
+        """Return blink events with the session identifier attached."""
         return pl.concat(
             [trial.blinks() for trial in self.trials.values()]
+        ).with_columns(pl.lit(self.session_id).alias("session_id"))
+
+    def pupil_samples(self):
+        """Return pupil samples with the session identifier attached."""
+        return pl.concat(
+            [trial.pupil_samples() for trial in self.trials.values()]
         ).with_columns(pl.lit(self.session_id).alias("session_id"))
 
     def samples(self):
         df = pl.concat([trial.samples() for trial in self.trials.values()]).with_columns([
             (pl.lit(self.session_id)).alias("session_id"),])
         return df
-
-    def pupil_samples(self):
-        """Return sample rows containing recorded pupil-size values."""
-
-        return pl.concat(
-            [trial.pupil_samples() for trial in self.trials.values()]
-        ).with_columns(pl.lit(self.session_id).alias("session_id"))
 
     def remove_trial(self, trial_number):
         if self._trials and trial_number in self._trials:
@@ -836,44 +904,44 @@ class Session():
                 self.subject = lambda: None
 class Trial:
 
-    def __init__(self, trial_number: int, session: Session, samples: pl.DataFrame, fix: pl.DataFrame, 
-                sacc: pl.DataFrame, blink: pl.DataFrame, events_path: Path,
-                prefiltered: bool = False):
+    def __init__(
+        self,
+        trial_number: int,
+        session: Session,
+        samples: pl.DataFrame,
+        fix: pl.DataFrame,
+        sacc: pl.DataFrame,
+        blink: pl.DataFrame | None,
+        events_path: Path,
+        *,
+        prefiltered: bool = False,
+    ):
         self.trial_number = trial_number
         self.session = session
 
-        # Filter per trial
-        # If "Calib_index" is a column in samples, set self._calib_index to the value of that column
-        
-        sample_rows = (
-            samples
-            if prefiltered
-            else samples.filter(pl.col("trial_number") == trial_number)
-        )
-        fix_rows = (
-            fix
-            if prefiltered
-            else fix.filter(pl.col("trial_number") == trial_number)
-        )
-        sacc_rows = (
-            sacc
-            if prefiltered
-            else sacc.filter(pl.col("trial_number") == trial_number)
-        )
-        blink_rows = (
-            blink
-            if prefiltered or blink is None
-            else blink.filter(pl.col("trial_number") == trial_number)
-        )
+        if prefiltered:
+            sample_rows = samples
+            fixation_rows = fix
+            saccade_rows = sacc
+            blink_rows = blink
+        else:
+            sample_rows = samples.filter(pl.col("trial_number") == trial_number)
+            fixation_rows = fix.filter(pl.col("trial_number") == trial_number)
+            saccade_rows = sacc.filter(pl.col("trial_number") == trial_number)
+            blink_rows = (
+                blink.filter(pl.col("trial_number") == trial_number)
+                if blink is not None
+                else None
+            )
+
         self._calib_index = (
-            sample_rows["Calib_index"][0]
-            if "Calib_index" in sample_rows.columns
+            sample_rows.get_column("Calib_index")[0]
+            if "Calib_index" in sample_rows.columns and sample_rows.height
             else None
         )
-
         self._samples = sample_rows.drop("Calib_index", strict=False)
-        self._fix = fix_rows.drop("Calib_index", strict=False)
-        self._sacc = sacc_rows.drop("Calib_index", strict=False)
+        self._fix = fixation_rows.drop("Calib_index", strict=False)
+        self._sacc = saccade_rows.drop("Calib_index", strict=False)
         self._blink = (
             blink_rows.drop("Calib_index", strict=False)
             if blink_rows is not None
@@ -919,12 +987,11 @@ class Trial:
     def saccades(self):
         return self._sacc
 
-    def samples(self):
-        return self._samples
-
     def blinks(self):
-        """Return blink events reported or detected for this trial."""
+        """Return blink events for this trial.
 
+        Times and durations retain the units used by the source eye tracker.
+        """
         if self._blink is None:
             return pl.DataFrame(
                 schema={
@@ -936,14 +1003,12 @@ class Trial:
         return self._blink
 
     def pupil_samples(self):
-        """Return sample rows containing recorded pupil-size values.
+        """Return samples with at least one recorded pupil-size value.
 
-        Pupil values retain the source tracker's units and original Pyxations
-        column names (``Pupil``, ``LPupil``, or ``RPupil``). Consult the BIDS
-        JSON sidecar for the measurement units and whether the tracker reports
-        pupil diameter or area.
+        Pupil values retain the units reported by the source eye tracker.
+        Depending on the recording, the columns are ``Pupil`` or the
+        eye-specific ``LPupil`` and ``RPupil``.
         """
-
         pupil_columns = [
             column
             for column in ("Pupil", "LPupil", "RPupil", "pupil_size")
@@ -952,13 +1017,17 @@ class Trial:
         if not pupil_columns:
             return self._samples.head(0)
 
-        has_pupil_value = pl.any_horizontal(
+        valid_pupil = pl.any_horizontal(
             [
-                pl.col(column).is_not_null() & ~pl.col(column).is_nan()
+                pl.col(column).is_not_null()
+                & ~pl.col(column).cast(pl.Float64, strict=False).is_nan()
                 for column in pupil_columns
             ]
         )
-        return self._samples.filter(has_pupil_value)
+        return self._samples.filter(valid_pupil)
+
+    def samples(self):
+        return self._samples
 
     def __repr__(self):
         return f"Trial = '{self.trial_number}', " + self.session.__repr__()
@@ -1007,7 +1076,7 @@ class Trial:
         vis = Visualization(self.events_path, self.detection_algorithm)
         self.events_path.mkdir(parents=True, exist_ok=True)
         kwargs.setdefault("folder_path", self.events_path)
-        
+
         return vis.plot_animation(
             samples=self._samples,
             screen_height=screen_height,
@@ -1348,15 +1417,17 @@ class Trial:
             return False  # Or True if no data should be considered long
         return rt_row.select("rt").item() > seconds * 1000.0
 
-    def compute_multimatch(self,other_trial: "Trial",screen_height,screen_width):
-        trial_scanpath = self.search_fixations().to_pandas()
-        trial_to_compare_scanpath = other_trial.search_fixations().to_pandas()
-        # Turn trial scanpath into list of tuples
-        trial_scanpath = [tuple(row) for row in trial_scanpath[["xAvg", "yAvg", "duration"]].values]
-        trial_to_compare_scanpath = [tuple(row) for row in trial_to_compare_scanpath[["xAvg", "yAvg", "duration"]].values]
+    def compute_multimatch(
+        self, other_trial: "Trial", screen_height, screen_width
+    ):
+        trial_scanpath = _to_multimatch_scanpath(self.search_fixations())
+        trial_to_compare_scanpath = _to_multimatch_scanpath(
+            other_trial.search_fixations()
+        )
 
-        # Convert the list of tuples into a numpy array with the format needed for the multimatch function
-        trial_scanpath = np.array(trial_scanpath, dtype=[('start_x', '<f8'), ('start_y', '<f8'), ('duration', '<f8')])
-        trial_to_compare_scanpath = np.array(trial_to_compare_scanpath, dtype=[('start_x', '<f8'), ('start_y', '<f8'), ('duration', '<f8')])
-
-        return mm.docomparison(trial_scanpath, trial_to_compare_scanpath, (screen_width, screen_height))
+        multimatch = _load_multimatch()
+        return multimatch.docomparison(
+            trial_scanpath,
+            trial_to_compare_scanpath,
+            (screen_width, screen_height),
+        )

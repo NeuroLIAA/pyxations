@@ -1,358 +1,892 @@
-'''
-Created on Oct 31, 2024
+"""EyeLink EDF/ASC parser.
 
-@author: placiana
-'''
-from pathlib import Path
+The parser streams an EyeLink ASC export directly into typed Polars tables.
+Sample, message, blink, fixation, saccade, and calibration tables remain Polars
+through preprocessing, best-eye selection, and Feather storage.
+"""
+
+from __future__ import annotations
+
+import inspect
+import logging
+import re
 import shutil
 import subprocess
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Any
+
 import numpy as np
-import pandas as pd
-import inspect
+import polars as pl
+
 from pyxations.formats.generic import BidsParse
+from pyxations.pre_processing import PreProcessing, SessionMetadata
+
+logger = logging.getLogger(__name__)
+
+_RATE_PATTERN = re.compile(r"\bRATE\s+([0-9]+(?:\.[0-9]+)?)\s+TRACKING\b")
+_SEGMENTATION_KEYS = {
+    "trial_labels",
+    "start_times",
+    "end_times",
+    "allow_open_last",
+    "require_nonoverlap",
+    "start_msgs",
+    "end_msgs",
+    "durations",
+    "case_insensitive",
+    "use_regex",
+    "return_match_token",
+}
+
+_HEADER_SCHEMA = {"line": pl.String, "Line_number": pl.Int64}
+_CALIBRATION_SCHEMA = {
+    "line": pl.String,
+    "Line_number": pl.Int64,
+    "Calib_index": pl.Int64,
+}
+_MESSAGE_SCHEMA = {
+    "timestamp": pl.Float64,
+    "message": pl.String,
+    "Line_number": pl.Int64,
+    "Eyes_recorded": pl.String,
+    "Rate_recorded": pl.Float64,
+    "Calib_index": pl.Int64,
+}
+_SAMPLE_SCHEMA = {
+    "tSample": pl.Float64,
+    "LX": pl.Float64,
+    "LY": pl.Float64,
+    "LPupil": pl.Float64,
+    "RX": pl.Float64,
+    "RY": pl.Float64,
+    "RPupil": pl.Float64,
+    "Line_number": pl.Int64,
+    "Eyes_recorded": pl.String,
+    "Rate_recorded": pl.Float64,
+    "Calib_index": pl.Int64,
+}
+_BLINK_SCHEMA = {
+    "eye": pl.String,
+    "tStart": pl.Float64,
+    "tEnd": pl.Float64,
+    "duration": pl.Float64,
+    "Line_number": pl.Int64,
+    "Eyes_recorded": pl.String,
+    "Rate_recorded": pl.Float64,
+    "Calib_index": pl.Int64,
+}
+_FIXATION_SCHEMA = {
+    "eye": pl.String,
+    "tStart": pl.Float64,
+    "tEnd": pl.Float64,
+    "duration": pl.Float64,
+    "xAvg": pl.Float64,
+    "yAvg": pl.Float64,
+    "pupilAvg": pl.Float64,
+    "Line_number": pl.Int64,
+    "Eyes_recorded": pl.String,
+    "Rate_recorded": pl.Float64,
+    "Calib_index": pl.Int64,
+}
+_SACCADE_SCHEMA = {
+    "eye": pl.String,
+    "tStart": pl.Float64,
+    "tEnd": pl.Float64,
+    "duration": pl.Float64,
+    "xStart": pl.Float64,
+    "yStart": pl.Float64,
+    "xEnd": pl.Float64,
+    "yEnd": pl.Float64,
+    "ampDeg": pl.Float64,
+    "vPeak": pl.Float64,
+    "Line_number": pl.Int64,
+    "Eyes_recorded": pl.String,
+    "Rate_recorded": pl.Float64,
+    "Calib_index": pl.Int64,
+}
 
 
+def _frame_from_records(
+    records: list[dict[str, Any]], schema: Mapping[str, pl.DataType]
+) -> pl.DataFrame:
+    if not records:
+        return pl.DataFrame(schema=schema)
+    return pl.DataFrame(records, schema=schema, strict=False)
 
 
-def process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs):
-    recording_files = [
-        file
-        for file in eye_tracking_data_path.iterdir()
-        if file.suffix.lower() in {'.edf', '.asc'}
-    ]
-    edf_stems = {
-        file.stem.lower()
-        for file in recording_files
-        if file.suffix.lower() == '.edf'
+def _numeric_token(token: str, *, context: str, allow_missing: bool = True) -> float | None:
+    if token in {".", "", "NA", "NaN", "nan"}:
+        if allow_missing:
+            return None
+        raise ValueError(f"Missing numeric value while parsing {context}.")
+    try:
+        value = float(token)
+    except (TypeError, ValueError, OverflowError) as exc:
+        if allow_missing:
+            return None
+        raise ValueError(f"Invalid numeric value {token!r} while parsing {context}.") from exc
+    if np.isfinite(value):
+        return value
+    if allow_missing:
+        return None
+    raise ValueError(f"Non-finite numeric value {token!r} while parsing {context}.")
+
+
+def _required_number(token: str, *, context: str) -> float:
+    value = _numeric_token(token, context=context, allow_missing=False)
+    assert value is not None
+    return value
+
+
+def _record_metadata(
+    *, line_number: int, eyes_recorded: str, rate_recorded: float, calib_index: int
+) -> dict[str, Any]:
+    return {
+        "Line_number": line_number,
+        "Eyes_recorded": eyes_recorded,
+        "Rate_recorded": rate_recorded,
+        "Calib_index": calib_index,
     }
-    recording_files = [
-        file
-        for file in recording_files
-        if file.suffix.lower() != '.asc' or file.stem.lower() not in edf_stems
-    ]
-    if len(recording_files) != 1:
-        print(
-            f"Expected one EyeLink EDF or ASC file in {eye_tracking_data_path}; "
-            f"found {len(recording_files)}. Skipping folder."
+
+
+def _extract_screen_resolution(calibration: pl.DataFrame) -> tuple[int, int]:
+    gaze_lines = calibration.filter(pl.col("line").str.contains("GAZE_COORDS"))
+    if gaze_lines.is_empty():
+        raise ValueError(
+            "EyeLink calibration data contain no GAZE_COORDS line; pass "
+            "screen_width and screen_height explicitly or verify the ASC export."
         )
+    line = gaze_lines.get_column("line")[0]
+    numbers = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", line)]
+    if len(numbers) < 2:
+        raise ValueError(f"Could not extract screen dimensions from calibration line: {line!r}.")
+    return int(numbers[-2]), int(numbers[-1])
+
+
+def _parse_sample_line(
+    line: str,
+    *,
+    eyes_recorded: str,
+    line_number: int,
+    rate_recorded: float,
+    calib_index: int,
+) -> dict[str, Any]:
+    tokens = line.split()
+    if not tokens:
+        raise ValueError(f"Empty EyeLink sample at ASC line {line_number}.")
+
+    row: dict[str, Any] = {column: None for column in _SAMPLE_SCHEMA}
+    row.update(
+        _record_metadata(
+            line_number=line_number,
+            eyes_recorded=eyes_recorded,
+            rate_recorded=rate_recorded,
+            calib_index=calib_index,
+        )
+    )
+    row["tSample"] = _required_number(tokens[0], context=f"sample line {line_number}")
+
+    if eyes_recorded == "LR":
+        if len(tokens) < 7:
+            raise ValueError(
+                f"Binocular EyeLink sample at ASC line {line_number} has fewer than 7 fields."
+            )
+        for column, token in zip(
+            ("LX", "LY", "LPupil", "RX", "RY", "RPupil"), tokens[1:7]
+        ):
+            row[column] = _numeric_token(token, context=f"sample line {line_number}")
+    elif eyes_recorded in {"L", "R"}:
+        if len(tokens) < 4:
+            raise ValueError(
+                f"Monocular EyeLink sample at ASC line {line_number} has fewer than 4 fields."
+            )
+        prefix = eyes_recorded
+        for column, token in zip(
+            (f"{prefix}X", f"{prefix}Y", f"{prefix}Pupil"), tokens[1:4]
+        ):
+            row[column] = _numeric_token(token, context=f"sample line {line_number}")
+    else:
+        raise ValueError(
+            f"EyeLink sample at ASC line {line_number} has unknown recorded-eye mode "
+            f"{eyes_recorded!r}."
+        )
+    return row
+
+
+def _parse_message_line(
+    line: str,
+    *,
+    line_number: int,
+    eyes_recorded: str,
+    rate_recorded: float,
+    calib_index: int,
+) -> dict[str, Any]:
+    payload = line[4:] if line.startswith("MSG ") else line
+    timestamp_text, separator, message = payload.partition(" ")
+    if not separator or not message:
+        raise ValueError(f"Malformed EyeLink MSG record at ASC line {line_number}: {line!r}.")
+    return {
+        "timestamp": _required_number(timestamp_text, context=f"MSG line {line_number}"),
+        "message": message,
+        **_record_metadata(
+            line_number=line_number,
+            eyes_recorded=eyes_recorded,
+            rate_recorded=rate_recorded,
+            calib_index=calib_index,
+        ),
+    }
+
+
+def _parse_event_line(
+    line: str,
+    *,
+    line_number: int,
+    eyes_recorded: str,
+    rate_recorded: float,
+    calib_index: int,
+    event_type: str,
+) -> dict[str, Any]:
+    tokens = line.split()
+    expected = {"EBLINK": 5, "EFIX": 8, "ESACC": 11}[event_type]
+    if len(tokens) < expected:
+        raise ValueError(
+            f"Malformed EyeLink {event_type} record at ASC line {line_number}: {line!r}."
+        )
+    metadata = _record_metadata(
+        line_number=line_number,
+        eyes_recorded=eyes_recorded,
+        rate_recorded=rate_recorded,
+        calib_index=calib_index,
+    )
+    if event_type == "EBLINK":
+        return {
+            "eye": tokens[1],
+            "tStart": _required_number(tokens[2], context=f"EBLINK line {line_number}"),
+            "tEnd": _required_number(tokens[3], context=f"EBLINK line {line_number}"),
+            "duration": _required_number(tokens[4], context=f"EBLINK line {line_number}"),
+            **metadata,
+        }
+    if event_type == "EFIX":
+        values = [
+            _numeric_token(token, context=f"EFIX line {line_number}")
+            for token in tokens[2:8]
+        ]
+        return {
+            "eye": tokens[1],
+            **dict(
+                zip(
+                    ("tStart", "tEnd", "duration", "xAvg", "yAvg", "pupilAvg"),
+                    values,
+                )
+            ),
+            **metadata,
+        }
+    values = [
+        _numeric_token(token, context=f"ESACC line {line_number}")
+        for token in tokens[2:11]
+    ]
+    return {
+        "eye": tokens[1],
+        **dict(
+            zip(
+                (
+                    "tStart",
+                    "tEnd",
+                    "duration",
+                    "xStart",
+                    "yStart",
+                    "xEnd",
+                    "yEnd",
+                    "ampDeg",
+                    "vPeak",
+                ),
+                values,
+            )
+        ),
+        **metadata,
+    }
+
+
+def _parse_ascii_tables(
+    ascii_file_path: Path,
+    *,
+    msg_keywords: Sequence[str] | None,
+) -> tuple[
+    pl.DataFrame,
+    pl.DataFrame,
+    pl.DataFrame,
+    pl.DataFrame,
+    pl.DataFrame,
+    pl.DataFrame,
+    pl.DataFrame,
+    tuple[int, int],
+]:
+    """Stream one ASC file into typed Polars tables."""
+    header_records: list[dict[str, Any]] = []
+    calibration_records: list[dict[str, Any]] = []
+    message_records: list[dict[str, Any]] = []
+    sample_records: list[dict[str, Any]] = []
+    fixation_records: list[dict[str, Any]] = []
+    saccade_records: list[dict[str, Any]] = []
+    blink_records: list[dict[str, Any]] = []
+
+    calibration_flag = False
+    start_flag = False
+    recorded_eye = ""
+    rate_recorded = 0.0
+    calib_index = 0
+    keywords = (
+        (msg_keywords,)
+        if isinstance(msg_keywords, str)
+        else tuple(msg_keywords or ())
+    )
+
+    with Path(ascii_file_path).open("r", encoding="utf-8", errors="replace") as stream:
+        for line_number, raw_line in enumerate(stream):
+            line = raw_line.strip().replace("\t", " ")
+            tokens = line.split()
+            first_token = tokens[0] if tokens else ""
+
+            if "!MODE RECORD" in line and tokens:
+                recorded_eye = tokens[-1]
+            rate_match = _RATE_PATTERN.search(line)
+            if rate_match:
+                rate_recorded = float(rate_match.group(1))
+
+            if len(line) < 2:
+                continue
+            if line.startswith("*"):
+                header_records.append({"line": line, "Line_number": line_number})
+                continue
+            if "!CAL" in line and not calibration_flag:
+                calibration_flag = True
+                calib_index += 1
+                calibration_records.append(
+                    {"line": line, "Line_number": line_number, "Calib_index": calib_index}
+                )
+                continue
+            if "!MODE RECORD" in line and calibration_flag:
+                calibration_flag = False
+                start_flag = True
+                continue
+            if calibration_flag and not (
+                first_token == "MSG" and keywords and any(keyword in line for keyword in keywords)
+            ):
+                calibration_records.append(
+                    {"line": line, "Line_number": line_number, "Calib_index": calib_index}
+                )
+                continue
+            if not start_flag:
+                continue
+
+            common = {
+                "line_number": line_number,
+                "eyes_recorded": recorded_eye,
+                "rate_recorded": rate_recorded,
+                "calib_index": calib_index,
+            }
+            if first_token == "MSG" and keywords and any(keyword in line for keyword in keywords):
+                message_records.append(_parse_message_line(line, **common))
+            elif first_token == "ESACC":
+                saccade_records.append(_parse_event_line(line, event_type="ESACC", **common))
+            elif first_token == "EFIX":
+                fixation_records.append(_parse_event_line(line, event_type="EFIX", **common))
+            elif first_token == "EBLINK":
+                blink_records.append(_parse_event_line(line, event_type="EBLINK", **common))
+            elif first_token and (first_token[0].isdigit() or first_token.startswith("-")):
+                sample_records.append(_parse_sample_line(line, **common))
+
+    headers = _frame_from_records(header_records, _HEADER_SCHEMA)
+    calibrations = _frame_from_records(calibration_records, _CALIBRATION_SCHEMA)
+    messages = _frame_from_records(message_records, _MESSAGE_SCHEMA)
+    samples = _frame_from_records(sample_records, _SAMPLE_SCHEMA)
+    fixations = _frame_from_records(fixation_records, _FIXATION_SCHEMA).filter(
+        pl.all_horizontal(
+            [
+                pl.col(column).is_not_null()
+                for column in ("tStart", "tEnd", "duration", "xAvg", "yAvg")
+            ]
+        )
+    )
+    saccades = _frame_from_records(saccade_records, _SACCADE_SCHEMA).filter(
+        pl.all_horizontal(
+            [
+                pl.col(column).is_not_null()
+                for column in (
+                    "tStart",
+                    "tEnd",
+                    "duration",
+                    "xStart",
+                    "yStart",
+                    "xEnd",
+                    "yEnd",
+                    "ampDeg",
+                    "vPeak",
+                )
+            ]
+        )
+    )
+    blinks = _frame_from_records(blink_records, _BLINK_SCHEMA)
+
+    if samples.is_empty():
+        raise ValueError(f"EyeLink ASC file {ascii_file_path} contains no calibrated samples.")
+    screen_resolution = _extract_screen_resolution(calibrations)
+    headers = pl.concat(
+        [
+            headers,
+            pl.DataFrame(
+                {
+                    "line": [f"** SCREEN SIZE: {screen_resolution[0]} {screen_resolution[1]}"],
+                    "Line_number": [-1],
+                },
+                schema=_HEADER_SCHEMA,
+            ),
+        ],
+        how="vertical",
+    )
+    return (
+        headers,
+        calibrations,
+        messages,
+        samples,
+        fixations,
+        saccades,
+        blinks,
+        screen_resolution,
+    )
+
+
+def _keep_eye_polars(
+    eye: str,
+    samples: pl.DataFrame,
+    fixations: pl.DataFrame,
+    blinks: pl.DataFrame,
+    saccades: pl.DataFrame,
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    if eye not in {"L", "R"}:
+        raise ValueError(f"Best eye must be 'L' or 'R', got {eye!r}.")
+    prefix = eye
+    required_sample_columns = [
+        "tSample",
+        f"{prefix}X",
+        f"{prefix}Y",
+        f"{prefix}Pupil",
+        "Line_number",
+        "Eyes_recorded",
+        "Rate_recorded",
+        "Calib_index",
+    ]
+    missing = [column for column in required_sample_columns if column not in samples.columns]
+    if missing:
+        raise ValueError(f"Cannot retain EyeLink eye {eye}; sample columns are missing: {missing}.")
+
+    selected_samples = samples.select(required_sample_columns).rename(
+        {f"{prefix}X": "X", f"{prefix}Y": "Y", f"{prefix}Pupil": "Pupil"}
+    )
+
+    def select_events(frame: pl.DataFrame) -> pl.DataFrame:
+        if frame.is_empty():
+            return frame
+        if "eye" not in frame.columns:
+            raise ValueError("EyeLink event table has no 'eye' column for best-eye filtering.")
+        selected = frame.filter(pl.col("eye") == eye)
+        if {"xAvg", "yAvg"}.issubset(selected.columns):
+            required = ("tStart", "tEnd", "duration", "xAvg", "yAvg")
+        elif {"xStart", "yStart", "xEnd", "yEnd"}.issubset(selected.columns):
+            required = (
+                "tStart",
+                "tEnd",
+                "duration",
+                "xStart",
+                "yStart",
+                "xEnd",
+                "yEnd",
+            )
+        else:
+            required = ("tStart", "tEnd", "duration")
+        return selected.filter(
+            pl.all_horizontal(
+                [pl.col(column).is_not_null() for column in required]
+            )
+        )
+
+    return (
+        selected_samples,
+        select_events(fixations),
+        select_events(blinks),
+        select_events(saccades),
+    )
+
+
+def _find_best_eye_from_lines(lines: Sequence[str]) -> str:
+    """Apply the historical EyeLink calibration scoring rules to ordered lines."""
+    normalized_lines = [str(line) for line in lines]
+    validation_positions = [
+        index
+        for index, line in enumerate(normalized_lines)
+        if "CAL VALIDATION" in line
+    ]
+    if not validation_positions:
+        return "M"
+
+    last_position = validation_positions[-1]
+    last_message = normalized_lines[last_position]
+    previous_message = (
+        normalized_lines[last_position - 1] if last_position > 0 else None
+    )
+
+    def is_validation(message: str | None) -> bool:
+        return message is not None and "CAL VALIDATION" in message
+
+    def is_aborted(message: str | None) -> bool:
+        return message is not None and "ABORTED" in message
+
+    def named_eye(message: str) -> str:
+        # Preserve the legacy fallback: anything not explicitly left is right.
+        return "L" if ("LEFT" in message or "L ABORTED" in message) else "R"
+
+    def validation_error(message: str) -> float:
+        tokens = message.split()
+        try:
+            error_index = tokens.index("ERROR")
+            value = float(tokens[error_index + 1])
+        except (ValueError, IndexError) as exc:
+            raise ValueError(
+                "Could not parse EyeLink calibration ERROR value from "
+                f"validation record: {message!r}."
+            ) from exc
+        if not np.isfinite(value):
+            raise ValueError(
+                f"EyeLink calibration ERROR value must be finite, got {value!r}."
+            )
+        return value
+
+    if is_aborted(last_message):
+        if not is_validation(previous_message) or is_aborted(previous_message):
+            return named_eye(last_message)
+        return named_eye(previous_message)
+
+    if not is_validation(previous_message) or is_aborted(previous_message):
+        return named_eye(last_message)
+
+    assert previous_message is not None
+    left_message = last_message if "LEFT" in last_message else previous_message
+    right_message = last_message if "RIGHT" in last_message else previous_message
+    left_error = validation_error(left_message)
+    right_error = validation_error(right_message)
+    return "L" if left_error < right_error else "R"
+
+
+def _find_best_eye_polars(calibration: pl.DataFrame) -> str:
+    """Return the historical EyeLink best-eye choice for one calibration.
+
+    Parameters
+    ----------
+    calibration
+        Polars table containing at least the ``line`` column. ``Line_number``
+        is used to restore ASC order when available.
+
+    Returns
+    -------
+    str
+        ``"L"`` or ``"R"`` for the selected eye, or ``"M"`` when no
+        validation record is available. Tied validation errors select the
+        right eye to preserve the historical behavior.
+    """
+    if "line" not in calibration.columns:
+        raise ValueError("EyeLink calibration table must contain a 'line' column.")
+    if calibration.is_empty():
+        return "M"
+
+    ordered = calibration
+    if "Line_number" in ordered.columns:
+        ordered = ordered.sort("Line_number")
+    return _find_best_eye_from_lines(ordered.get_column("line").to_list())
+
+
+def _apply_best_eye(
+    calibrations: pl.DataFrame,
+    samples: pl.DataFrame,
+    fixations: pl.DataFrame,
+    blinks: pl.DataFrame,
+    saccades: pl.DataFrame,
+    *,
+    session_folder_path: Path,
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    """Score and retain the best EyeLink eye using Polars only."""
+    if "Calib_index" not in calibrations.columns:
+        raise ValueError("EyeLink calibration table must contain 'Calib_index'.")
+
+    calibration_indexes = sorted(calibrations.get_column("Calib_index").unique().to_list())
+    best_eyes = [
+        _find_best_eye_polars(
+            calibrations.filter(pl.col("Calib_index") == calibration_index)
+        )
+        for calibration_index in calibration_indexes
+    ]
+
+    if not best_eyes or best_eyes[0] == "M":
+        logger.warning(
+            "The first calibration validation for subject %s in session %s is missing; "
+            "best-eye filtering was not applied.",
+            session_folder_path.parent.name,
+            session_folder_path.name,
+        )
+        return samples, fixations, blinks, saccades
+
+    for index in range(1, len(best_eyes)):
+        if best_eyes[index] == "M":
+            logger.warning(
+                "Calibration validation %s is missing for subject %s in session %s; "
+                "using previous best eye %s.",
+                calibration_indexes[index],
+                session_folder_path.parent.name,
+                session_folder_path.name,
+                best_eyes[index - 1],
+            )
+            best_eyes[index] = best_eyes[index - 1]
+
+    def calibration_rows(
+        frame: pl.DataFrame, calibration_index: int
+    ) -> pl.DataFrame:
+        if "Calib_index" in frame.columns:
+            return frame.filter(pl.col("Calib_index") == calibration_index)
+        if frame.is_empty():
+            return frame
+        raise ValueError(
+            "EyeLink event table must contain 'Calib_index' for best-eye "
+            "filtering."
+        )
+
+    pieces = [
+        _keep_eye_polars(
+            best_eye,
+            samples.filter(pl.col("Calib_index") == calibration_index),
+            calibration_rows(fixations, calibration_index),
+            calibration_rows(blinks, calibration_index),
+            calibration_rows(saccades, calibration_index),
+        )
+        for calibration_index, best_eye in zip(calibration_indexes, best_eyes)
+    ]
+    return tuple(
+        pl.concat([piece[position] for piece in pieces], how="vertical_relaxed")
+        for position in range(4)
+    )  # type: ignore[return-value]
+
+
+def _detection_registry() -> dict[str, type]:
+    """Load built-in detector classes without importing dataset orchestration."""
+    from pyxations.methods.eyemovement.REMoDNaV import RemodnavDetection
+    from pyxations.methods.eyemovement.engbert import EngbertDetection
+
+    return {"remodnav": RemodnavDetection, "engbert": EngbertDetection}
+
+
+def _segmentation_step(options: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    prefer_durations = bool(options.get("prefer_durations", False))
+    have_explicit_times = "start_times" in options and "end_times" in options
+    have_durations = "start_msgs" in options and "durations" in options
+    have_message_times = "start_msgs" in options and "end_msgs" in options
+
+    if not (have_explicit_times or have_durations or have_message_times):
+        raise ValueError(
+            "Provide one of: (start_times & end_times), (start_msgs & durations), "
+            "or (start_msgs & end_msgs)."
+        )
+
+    if have_explicit_times:
+        method_name = "split_all_into_trials"
+    elif have_durations and (prefer_durations or not have_message_times):
+        method_name = "split_all_into_trials_by_durations"
+    else:
+        method_name = "split_all_into_trials_by_msgs"
+
+    method = getattr(PreProcessing, method_name)
+    allowed = set(inspect.signature(method).parameters) - {"self"}
+    parameters = {
+        key: value
+        for key, value in options.items()
+        if key in _SEGMENTATION_KEYS and key in allowed
+    }
+    return method_name, parameters
+
+
+def process_session(
+    eye_tracking_data_path: Path,
+    detection_algorithm: str,
+    session_folder_path: Path,
+    force_best_eye: bool,
+    keep_ascii: bool,
+    overwrite: bool,
+    exp_format: str,
+    **kwargs: Any,
+) -> None:
+    edf_files = sorted(
+        file for file in Path(eye_tracking_data_path).iterdir() if file.suffix.lower() == ".edf"
+    )
+    if not edf_files:
+        raise FileNotFoundError(f"No EyeLink EDF file found in {eye_tracking_data_path}.")
+    if len(edf_files) > 1:
+        logger.warning("More than one EDF file found in %s; skipping folder.", eye_tracking_data_path)
         return
-    edf_file_path = recording_files[0]
-    (session_folder_path / 'eyelink_events').mkdir(parents=True, exist_ok=True)
 
-       
-    msg_keywords = kwargs.pop('msg_keywords', None)
-    
-    EyelinkParse(session_folder_path, exp_format).parse(edf_file_path, detection_algorithm, msg_keywords, force_best_eye,
-                         keep_ascii, overwrite, **kwargs)
+    Path(session_folder_path).mkdir(parents=True, exist_ok=True)
+    (Path(session_folder_path) / "eyelink_events").mkdir(parents=True, exist_ok=True)
+    msg_keywords = kwargs.pop("msg_keywords", None)
+    EyelinkParse(session_folder_path, exp_format).parse(
+        edf_files[0],
+        detection_algorithm,
+        msg_keywords,
+        force_best_eye,
+        keep_ascii,
+        overwrite,
+        **kwargs,
+    )
 
-def convert_edf_to_ascii(edf_file_path, output_dir):
-    """
-    Convert an EDF file to ASCII format using edf2asc.
 
-    Args:
-        edf_file_path (str): Path to the input EDF file.
-        output_dir (str): Directory to save the ASCII file. If None, the ASCII file will be saved in the same directory as the input EDF file.
-
-    Returns:
-        str: Path to the generated ASCII file.
-    """
-    if edf_file_path.suffix.lower() == ".asc":
-        ascii_file_path = output_dir / edf_file_path.name
-        if edf_file_path.resolve() != ascii_file_path.resolve():
-            shutil.copy2(edf_file_path, ascii_file_path)
-        return ascii_file_path
-
-    # Check if edf2asc is installed
+def convert_edf_to_ascii(edf_file_path: Path, output_dir: Path) -> Path:
+    """Convert an EDF file to ASCII with EyeLink's ``edf2asc`` utility."""
     if not shutil.which("edf2asc"):
-        raise FileNotFoundError("edf2asc not found. Please make sure EyeLink software is installed and accessible in the system PATH.")
-
-    # Set output directory
+        raise FileNotFoundError(
+            "edf2asc not found. Install EyeLink software and ensure edf2asc is on PATH."
+        )
     if output_dir is None:
         raise ValueError("Output directory must be specified.")
 
-    # Generate output file path
-    edf_file_name = edf_file_path.name
-    ascii_file_name = Path(edf_file_name).with_suffix('.asc')
-    ascii_file_path = output_dir / ascii_file_name
-
-    # Run edf2asc command with the -failsafe flag, only run it if the file does not already exist
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ascii_file_path = output_dir / Path(edf_file_path).with_suffix(".asc").name
     if not ascii_file_path.exists():
-        subprocess.run(["edf2asc", "-failsafe", edf_file_path, ascii_file_path])
-
+        subprocess.run(
+            ["edf2asc", "-failsafe", str(edf_file_path), str(ascii_file_path)],
+            check=True,
+        )
     return ascii_file_path
 
 
 class EyelinkParse(BidsParse):
-    
-    def parse(self, edf_file_path, detection_algorithm, msg_keywords, force_best_eye, keep_ascii, overwrite, **kwargs):
-        from pyxations.bids_formatting import find_besteye, EYE_MOVEMENT_DETECTION_DICT, keep_eye
-        from pyxations.pre_processing import PreProcessing
-        self.detection_algorithm = detection_algorithm
-        
-        #detection_algorithm = 'eyelink'
-        # Convert EDF to ASCII (only if necessary)
-        ascii_file_path = convert_edf_to_ascii(edf_file_path, self.session_folder_path)
-    
-        # Check if all files exist, to avoid unnecessary reprocessing
-        existing_files = all([
-            (self.session_folder_path / file_name).exists()
-            for file_name in ['header.hdf5', 'msg.hdf5', 'calib.hdf5', 'samples.hdf5']
-        ])
-        if existing_files and not overwrite:
-            return
-    
-        # Reading ASCII in chunks to reduce memory usage
-        with open(ascii_file_path, 'r') as f:
-            lines = (line.strip() for line in f)  # Generator to save memory
-    
-            # Pre-allocate variables
-            line_data = []
-            line_types = []
-            eyes_recorded = []
-            rates_recorded = []
-            calib_indexes = []
-    
-            # Initialize flags
-            calibration_flag = False
-            start_flag = False
-            recorded_eye = ''
-            rate_recorded = 0.0
-            calib_index = 0
-    
-            # Process the file line by line
-            for line in lines:
-                if len(line)<2:
-                    line_type = 'EMPTY'
-                elif line.startswith('*'):
-                    line_type = 'HEADER'
-                # If there is a !CAL in the line, it is a calibration line
-                elif '!CAL' in line and not calibration_flag:
-                    line_type = 'Calibration'
-                    calibration_flag = True
-                    calib_index += 1    
-                elif '!MODE RECORD' in line and calibration_flag:
-                    calibration_flag = False
-                    start_flag = True
-                elif calibration_flag and not(line.split()[0] == 'MSG' and msg_keywords and any(keyword in line for keyword in msg_keywords)):
-                    # The failsafe is in place because some messages might kick off after the calibration is done.
-                    # This will only take into account the messages, not the samples.
-                    line_type = 'Calibration'
-                elif not start_flag: # Data before the first successful calibration is discarded. 
-                    # After the first successul calibration, EVERY sample is taken into account.
-                    line_type = 'Non_calibrated_samples'
-                elif line.split()[0] == 'MSG' and msg_keywords and any(keyword in line for keyword in msg_keywords):
-                    line_type = 'MSG'
-                elif line.split()[0] == 'ESACC':
-                    line_type = 'ESACC'
-                elif line.split()[0] == 'EFIX':
-                    line_type = 'EFIX'
-                elif line.split()[0] == 'EBLINK':
-                    line_type = 'EBLINK'
-                elif line.split()[0][0].isdigit() or line.split()[0].startswith('-'):
-                    line_type = 'SAMPLE'
-                else:
-                    line_type = 'OTHER'
-                if '!MODE RECORD' in line:
-                    recorded_eye = line.split()[-1]            
-                if 'RATE' in line and 'TRACKING' in line:
-                    rate_recorded = float(line.split('RATE')[-1].split('TRACKING')[0])
-    
-                # Store relevant information
-                line_data.append(line.replace('\n', '').replace('\t', ' '))
-                line_types.append(line_type)
-                eyes_recorded.append(recorded_eye)
-                rates_recorded.append(rate_recorded)
-                calib_indexes.append(calib_index)
-        
-        # Convert to DataFrame (in one step to save memory)
-        df = pd.DataFrame({
-            'line': line_data,
-            'Line_type': line_types,
-            'Eyes_recorded': eyes_recorded,
-            'Rate_recorded': rates_recorded,
-            'Calib_index': calib_indexes
-        })
-        # Process DataFrame columns (vectorized operations)
-    
-        df['Line_number'] = np.arange(len(df))
-    
-        
-        # Separate lines into different types
-        dfHeader = df[df['Line_type'] == 'HEADER'][['line', 'Line_number']].reset_index(drop=True)
-        dfCalib = df[df['Line_type'] == 'Calibration'][['line', 'Line_number', 'Calib_index']].reset_index(drop=True)
-        dfMsg = df[df['Line_type'] == 'MSG'][['line', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].reset_index(drop=True)
-    
-        # Process samples and events only for required lines
-        dfSamples = df[df['Line_type'] == 'SAMPLE'][['line', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].reset_index(drop=True)
-        dfFix = df[df['Line_type'] == 'EFIX'][['line', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].reset_index(drop=True)
-        dfSacc = df[df['Line_type'] == 'ESACC'][['line', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].reset_index(drop=True)
-        dfBlink = df[df['Line_type'] == 'EBLINK'][['line', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].reset_index(drop=True)
-        del df, line_data, line_types, eyes_recorded, rates_recorded, calib_indexes # Free up memory
-        # Optimized screen resolution extraction from dfCalib
-        gaze_coords_row = dfCalib.loc[dfCalib['line'].str.contains('GAZE_COORDS'), 'line'].values[0]
-        screen_res = [str(int(float(res))) for res in gaze_coords_row.split()[5:7]]
-        dfHeader.loc[len(dfHeader.index)] = ["** SCREEN SIZE: " + " ".join(screen_res), -1]
-    
-        # Screen size extraction optimization
-        if 'screen_height' not in kwargs or 'screen_width' not in kwargs:
-            screen_size = dfHeader['line'].iloc[-1].split()
-            kwargs['screen_width'], kwargs['screen_height'] = int(screen_size[-2]), int(screen_size[-1])
-    
-        # Optimized processing of dfMsg to extract timestamp and message
-        if not dfMsg.empty:
+    """Parse EyeLink EDF exports into Polars derivative tables."""
 
-            # Extracting timestamp and message in a single step
-            dfMsg[['timestamp', 'message']] = dfMsg['line'].str.replace('MSG ', '').str.split(n=1,expand=True).values
-            dfMsg.drop(columns=['line'], inplace=True)
-        
-            # Convert timestamp to numeric in one operation
-            dfMsg['timestamp'] = pd.to_numeric(dfMsg['timestamp'], errors='raise')
-            dfMsg = dfMsg[['timestamp', 'message', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
-    
-        # Optimized blink data extraction and conversion
-        dfBlink['line'] = dfBlink['line'].str.replace('EBLINK ', '')
-        dfBlink[['eye', 'tStart', 'tEnd', 'duration']] = dfBlink['line'].str.split(expand=True)
-        dfBlink.drop(columns=['line'], inplace=True)
-        dfBlink = dfBlink[['eye', 'tStart', 'tEnd', 'duration', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
-        dfBlink[['tStart', 'tEnd', 'duration']] = dfBlink[['tStart', 'tEnd', 'duration']].apply(pd.to_numeric, errors='raise')
-    
-        if not dfSamples[dfSamples['Eyes_recorded'] == 'LR'].empty:
-            dfSamples.loc[dfSamples[dfSamples['Eyes_recorded'] == 'LR'].index, ['tSample', 'LX', 'LY', 'LPupil', 'RX', 'RY', 'RPupil']] = dfSamples[dfSamples['Eyes_recorded'] == 'LR']['line'].str.split(expand=True)[[0, 1, 2, 3, 4, 5, 6]].apply(pd.to_numeric, errors='coerce').values
-    
-        for eye, cols in zip(['R', 'L'], [['RX', 'RY', 'RPupil'], ['LX', 'LY', 'LPupil']]):
-            if not dfSamples[dfSamples['Eyes_recorded'] == eye].empty:
-                dfSamples.loc[dfSamples[dfSamples['Eyes_recorded'] == eye].index, ['tSample'] + cols] = dfSamples[dfSamples['Eyes_recorded'] == eye]['line'].str.split(expand=True)[[0] + list(range(1, len(cols) + 1))].apply(pd.to_numeric, errors='coerce').values
-    
-        dfSamples.drop(columns=['line'], inplace=True)
-    
-        dfSamples = dfSamples[['tSample'] + [col for col in ['LX', 'LY','LPupil','RX', 'RY', 'RPupil'] if col in dfSamples.columns] + ['Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
-        if detection_algorithm == 'eyelink':
-            # Optimized fixation and saccade processing
-            dfFix['line'] = dfFix['line'].str.replace('EFIX ', '')
-            dfFix[['eye', 'tStart', 'tEnd', 'duration', 'xAvg', 'yAvg', 'pupilAvg']] = dfFix['line'].str.split(expand=True)
-            dfFix.drop(columns=['line'], inplace=True)
-            dfFix[['xAvg', 'yAvg', 'pupilAvg', 'tStart', 'tEnd', 'duration']] = dfFix[['xAvg', 'yAvg', 'pupilAvg', 'tStart', 'tEnd', 'duration']].apply(pd.to_numeric, errors='coerce')
-            dfFix.dropna(inplace=True)
-            dfFix = dfFix[['eye', 'tStart', 'tEnd', 'duration', 'xAvg', 'yAvg', 'pupilAvg', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
-    
-            dfSacc['line'] = dfSacc['line'].str.replace('ESACC ', '')
-            dfSacc[['eye', 'tStart', 'tEnd', 'duration', 'xStart', 'yStart', 'xEnd', 'yEnd', 'ampDeg', 'vPeak']] = dfSacc['line'].str.split(expand=True)
-            dfSacc.drop(columns=['line'], inplace=True)
-            dfSacc[['xStart', 'yStart', 'xEnd', 'yEnd', 'duration', 'ampDeg', 'vPeak', 'tStart', 'tEnd']] = dfSacc[['xStart', 'yStart', 'xEnd', 'yEnd', 'duration', 'ampDeg', 'vPeak', 'tStart', 'tEnd']].apply(pd.to_numeric, errors='coerce')
-            dfSacc.dropna(inplace=True)
-            dfSacc = dfSacc[['eye', 'tStart', 'tEnd', 'duration', 'xStart', 'yStart', 'xEnd', 'yEnd', 'ampDeg', 'vPeak', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']]
-    
+    def parse(
+        self,
+        edf_file_path: Path,
+        detection_algorithm: str,
+        msg_keywords: Sequence[str] | None,
+        force_best_eye: bool,
+        keep_ascii: bool,
+        overwrite: bool,
+        **kwargs: Any,
+    ) -> pl.DataFrame:
+        ascii_file_path = convert_edf_to_ascii(Path(edf_file_path), self.session_folder_path)
+        extension = self.export_method.extension()
+        events_path = self.session_folder_path / f"{detection_algorithm}_events"
+        expected_outputs = (
+            self.session_folder_path / f"header{extension}",
+            self.session_folder_path / f"calib{extension}",
+            self.session_folder_path / f"samples{extension}",
+            events_path / f"fix{extension}",
+            events_path / f"sacc{extension}",
+            events_path / f"blink{extension}",
+        )
+        if not overwrite and all(output.exists() for output in expected_outputs):
+            return pl.DataFrame()
+
+        (
+            headers,
+            calibrations,
+            messages,
+            samples,
+            vendor_fixations,
+            vendor_saccades,
+            blinks,
+            screen_resolution,
+        ) = _parse_ascii_tables(ascii_file_path, msg_keywords=msg_keywords)
+
+        raw_screen_width = kwargs.get("screen_width")
+        raw_screen_height = kwargs.get("screen_height")
+        screen_width = int(screen_resolution[0] if raw_screen_width is None else raw_screen_width)
+        screen_height = int(screen_resolution[1] if raw_screen_height is None else raw_screen_height)
+
+        if detection_algorithm == "eyelink":
+            fixations, saccades = vendor_fixations, vendor_saccades
         else:
-            eye_movement_detector = EYE_MOVEMENT_DETECTION_DICT[detection_algorithm](session_folder_path=self.session_folder_path,samples=dfSamples)
-            dfFix, dfSacc = eye_movement_detector.detect_eye_movements(**{arg:kwargs[arg] for arg in kwargs if arg in inspect.signature(eye_movement_detector.detect_eye_movements).parameters.keys()})
-    
-        # Optimization for selecting best eye
+            detection_registry = _detection_registry()
+            try:
+                detector_class = detection_registry[detection_algorithm]
+            except KeyError as exc:
+                available = ["eyelink", *sorted(detection_registry)]
+                raise ValueError(
+                    f"Unknown detection algorithm {detection_algorithm!r}. "
+                    f"Available algorithms: {available}."
+                ) from exc
+            detector = detector_class(
+                session_folder_path=self.session_folder_path,
+                samples=samples,
+            )
+            detector_parameters = {
+                key: value
+                for key, value in kwargs.items()
+                if key in inspect.signature(detector.detect_eye_movements).parameters
+            }
+            fixations, saccades = detector.detect_eye_movements(**detector_parameters)
+            if not isinstance(fixations, pl.DataFrame) or not isinstance(saccades, pl.DataFrame):
+                raise TypeError(
+                    "EyeLink detectors must return Polars DataFrames when given Polars samples."
+                )
+
         if force_best_eye:
-            calib_indexes = dfCalib['Calib_index'].unique()
-            best_eyes = dfCalib.groupby('Calib_index').apply(find_besteye).values
-            if best_eyes[0] == 'M':
-                # Print a warning if the first calibration is missing, and tell the user it did not compute the best eye
-                print(f'Warning: The first calibration validation for subject {self.session_folder_path.parent.name} in session {self.session_folder_path.name} is missing. The best eye was not computed.')
-
-            else:   
-                # Replace the 'M' values with the previous value that is not 'M'
-                for i in range(1, len(best_eyes)):
-                    if best_eyes[i] == 'M':
-                        # Print a warning if the calibration is missing, and tell the user it will use the previous value
-                        print(f'Warning: A calibration validation for subject {self.session_folder_path.parent.name} in session {self.session_folder_path.name} is missing. Using the previous value: {best_eyes[i - 1]}')
-                        best_eyes[i] = best_eyes[i - 1]
-                dfslist = [keep_eye(best_eyes[i], dfSamples[dfSamples['Calib_index'] == ci], dfFix[dfFix['Calib_index'] == ci], dfBlink[dfBlink['Calib_index'] == ci], dfSacc[dfSacc['Calib_index'] == ci]) for i, ci in enumerate(calib_indexes)]
-                dfSamples, dfFix, dfBlink, dfSacc = [pd.concat([dfslist[i][j] for i in range(len(best_eyes))]) for j in range(4)]
-                del dfslist
-    
-    
-        
-        pre_processing = PreProcessing(dfSamples, dfFix, dfSacc, dfBlink, dfMsg, self.session_folder_path)
-
-        # --- 0) Set session metadata once (so bad_samples can infer width/height) ---
-        if isinstance(screen_res, (tuple, list)) and len(screen_res) == 2:
-            sw, sh = screen_res
-            pre_processing.set_metadata(screen_width=sw, screen_height=sh)
-        else:
-            # Fallback if screen_res not provided as (w, h)
-            sw = kwargs.get("screen_width")
-            sh = kwargs.get("screen_height")
-            if sw and sh:
-                pre_processing.set_metadata(screen_width=sw, screen_height=sh)
-
-        prefer_durations = kwargs.get("prefer_durations", False)
-
-        have_explicit_times = ("start_times" in kwargs) and ("end_times" in kwargs)
-        have_durations     = ("start_msgs" in kwargs) and ("durations" in kwargs)
-        have_message_times = ("start_msgs" in kwargs) and ("end_msgs" in kwargs)
-
-        if not (have_explicit_times or have_durations or have_message_times):
-            raise ValueError(
-                "Provide one of: "
-                "(start_times & end_times) or (start_msgs & durations) or (start_msgs & end_msgs)."
+            samples, fixations, blinks, saccades = _apply_best_eye(
+                calibrations,
+                samples,
+                fixations,
+                blinks,
+                saccades,
+                session_folder_path=self.session_folder_path,
             )
 
-        # Choose function name by priority (or preference)
-        if have_explicit_times:
-            seg_func_name = "split_all_into_trials"
-        elif have_durations and (prefer_durations or not have_message_times):
-            seg_func_name = "split_all_into_trials_by_durations"
-        else:
-            seg_func_name = "split_all_into_trials_by_msgs"
+        preprocessing = PreProcessing(
+            samples,
+            fixations,
+            saccades,
+            blinks,
+            messages,
+            self.session_folder_path,
+            metadata=SessionMetadata(
+                coords_unit="px",
+                time_unit="ms",
+                pupil_unit="arbitrary",
+                screen_width=screen_width,
+                screen_height=screen_height,
+            ),
+        )
 
-        seg_func = getattr(pre_processing, seg_func_name)
-        seg_params = {}
-
-        # --- 2) Collect allowed params for the chosen segmentation function ---
-        seg_sig = inspect.signature(seg_func).parameters
-        # Super-set of possible keys across the three APIs:
-        candidate_keys = {
-            # common
-            "trial_labels",
-            # explicit-time API
-            "start_times", "end_times", "allow_open_last", "require_nonoverlap",
-            # message-based APIs
-            "start_msgs", "end_msgs",
-            # durations API
-            "durations",
-            # message matching extras (only used by *_by_msgs / *_by_durations)
-            "case_insensitive", "use_regex", "return_match_token",
+        bad_parameters = {
+            key: kwargs[key]
+            for key in ("screen_height", "screen_width", "mark_nan_as_bad", "inclusive_bounds")
+            if key in kwargs
         }
-        for k in candidate_keys:
-            if (k in kwargs) and (k in seg_sig):
-                seg_params[k] = kwargs[k]
-
-        # --- 2) bad_samples params (optional) ---
-        bad_params = {}
-        bad_sig = inspect.signature(pre_processing.bad_samples).parameters
-        for k in ("screen_height", "screen_width", "mark_nan_as_bad", "inclusive_bounds"):
-            if k in kwargs and k in bad_sig:
-                bad_params[k] = kwargs[k]
-        # If screen sizes weren’t passed, they’ll be taken from the metadata set above.
-
-        # --- 3) saccades_direction params (optional) ---
-        dir_params = {}
-        dir_sig = inspect.signature(pre_processing.saccades_direction).parameters
-        if "tol_deg" in kwargs and "tol_deg" in dir_sig:
-            dir_params["tol_deg"] = kwargs["tol_deg"]
-
-        # --- 4) Run as a declarative recipe (also saves provenance JSONs) ---
-        recipe = {
-            "bad_samples": bad_params,               # can be {} if you rely on metadata defaults
-            seg_func_name: seg_params,
-            "saccades_direction": dir_params,        # {} okay (uses default tol_deg=15)
-        }
-        pre_processing.process(recipe)
+        segmentation_method, segmentation_parameters = _segmentation_step(kwargs)
+        direction_parameters = {"tol_deg": kwargs["tol_deg"]} if "tol_deg" in kwargs else {}
+        preprocessing.process(
+            {
+                "bad_samples": bad_parameters,
+                segmentation_method: segmentation_parameters,
+                "saccades_direction": direction_parameters,
+            }
+        )
 
         if not keep_ascii:
             ascii_file_path.unlink(missing_ok=True)
-    
+
+        self.detection_algorithm = detection_algorithm
         self.store_dataframes(
-            pre_processing.samples,
-            dfCalib=dfCalib,
-            dfFix=pre_processing.fixations,
-            dfSacc=pre_processing.saccades,
-            dfHeader=dfHeader,
-            dfBlink=pre_processing.blinks,
-            dfMsg=dfMsg,
+            preprocessing.samples,
+            dfCalib=calibrations,
+            dfFix=preprocessing.fixations,
+            dfSacc=preprocessing.saccades,
+            dfHeader=headers,
+            dfBlink=preprocessing.blinks,
+            dfMsg=preprocessing.user_messages,
         )
+        return preprocessing.samples

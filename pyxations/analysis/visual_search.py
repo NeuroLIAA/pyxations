@@ -1,9 +1,8 @@
 from pathlib import Path
 import polars as pl
 from pyxations.visualization.visualization import Visualization
-from pyxations.export import BIDS_EXPORT, FEATHER_EXPORT
+from pyxations.export import BIDS_EXPORT
 import ast
-import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 from pyxations.analysis.generic import Experiment, Subject, Session, Trial, _find_fixation_cutoff, STIMULI_FOLDER, ITEMS_FOLDER
@@ -11,8 +10,312 @@ from pyxations.analysis.generic import Experiment, Subject, Session, Trial, _fin
 def _as(obj, typ):
     if isinstance(obj, typ): return obj
     return ast.literal_eval(obj)
+
+
+def _plot_grouped_mean_with_se(
+    ax,
+    data: pl.DataFrame,
+    *,
+    x: str,
+    y: str,
+    group: str,
+) -> None:
+    """Plot grouped means with standard-error bands using Polars and Matplotlib.
+
+    Category and group order follow their first appearance in ``data``. This
+    intentionally preserves the ordering produced by the existing visual-search
+    plotting methods.
+    """
+    if data.is_empty():
+        return
+
+    x_order = data.get_column(x).unique(maintain_order=True).to_list()
+    group_order = data.get_column(group).unique(maintain_order=True).to_list()
+    x_positions = {value: position for position, value in enumerate(x_order)}
+
+    summary = (
+        data.group_by([group, x], maintain_order=True)
+        .agg(
+            pl.col(y).mean().alias("mean"),
+            pl.col(y).std(ddof=1).alias("std"),
+            pl.len().alias("n"),
+        )
+        .with_columns(
+            (pl.col("std") / pl.col("n").sqrt()).alias("se")
+        )
+    )
+
+    for group_value in group_order:
+        group_data = summary.filter(pl.col(group) == group_value)
+        group_summary = {
+            row[x]: (row["mean"], row["se"])
+            for row in group_data.iter_rows(named=True)
+        }
+        present_categories = [value for value in x_order if value in group_summary]
+        positions = np.asarray(
+            [x_positions[value] for value in present_categories],
+            dtype=float,
+        )
+        means = np.asarray(
+            [group_summary[value][0] for value in present_categories],
+            dtype=float,
+        )
+        standard_errors = np.asarray(
+            [
+                np.nan if group_summary[value][1] is None else group_summary[value][1]
+                for value in present_categories
+            ],
+            dtype=float,
+        )
+
+        line, = ax.plot(positions, means, label=str(group_value))
+        valid_error = np.isfinite(standard_errors)
+        if valid_error.any():
+            ax.fill_between(
+                positions[valid_error],
+                means[valid_error] - standard_errors[valid_error],
+                means[valid_error] + standard_errors[valid_error],
+                alpha=0.2,
+                color=line.get_color(),
+            )
+
+    ax.set_xticks(np.arange(len(x_order)))
+    ax.set_xticklabels([str(value) for value in x_order])
+    ax.legend(title=group)
+
+
+def _plot_cumulative_mean_with_se(
+    ax,
+    data: pl.DataFrame,
+    *,
+    max_fixations: int,
+    values_column: str = "cumulative_correct",
+) -> None:
+    """Plot cumulative mean performance with standard-error bands.
+
+    The input column is expected to contain one cumulative-performance sequence
+    per trial or participant. Sequences are trimmed to ``max_fixations`` and
+    shorter sequences are padded with missing values so they do not distort
+    later fixation estimates.
+    """
+    if data.is_empty() or max_fixations <= 0:
+        return
+
+    sequences = []
+    for values in data.get_column(values_column).to_list():
+        if values is None:
+            continue
+        sequence = np.asarray(values, dtype=float).reshape(-1)[:max_fixations]
+        if sequence.size == 0:
+            continue
+        padded = np.full(max_fixations, np.nan, dtype=float)
+        padded[: sequence.size] = sequence
+        sequences.append(padded)
+
+    if not sequences:
+        return
+
+    matrix = np.vstack(sequences)
+    valid_counts = np.sum(np.isfinite(matrix), axis=0)
+    means = np.divide(
+        np.nansum(matrix, axis=0),
+        valid_counts,
+        out=np.full(max_fixations, np.nan, dtype=float),
+        where=valid_counts > 0,
+    )
+
+    standard_errors = np.full(max_fixations, np.nan, dtype=float)
+    for index in np.flatnonzero(valid_counts > 1):
+        standard_errors[index] = (
+            np.nanstd(matrix[:, index], ddof=1) / np.sqrt(valid_counts[index])
+        )
+
+    fixation_numbers = np.arange(1, max_fixations + 1, dtype=float)
+    ax.plot(fixation_numbers, means, color="black")
+
+    valid_error = np.isfinite(standard_errors) & np.isfinite(means)
+    if valid_error.any():
+        ax.fill_between(
+            fixation_numbers[valid_error],
+            means[valid_error] - standard_errors[valid_error],
+            means[valid_error] + standard_errors[valid_error],
+            color="black",
+            alpha=0.2,
+        )
+
+
+def _plot_speed_accuracy_tradeoff(
+    data: pl.DataFrame,
+    *,
+    entity_column: str,
+    title: str,
+) -> None:
+    """Plot speed-accuracy points, paired lines, and marginal histograms."""
+    if data.is_empty():
+        return
+
+    memory_set_sizes = data.get_column("memory_set_size").unique().sort().to_list()
+    target_presence_values = (
+        data.get_column("target_present").unique(maintain_order=True).to_list()
+    )
+    maximum_rt = data.get_column("rt").max()
+
+    n_rows = len(memory_set_sizes)
+    fig = plt.figure(figsize=(6, 1 + 6 * n_rows))
+    grid = fig.add_gridspec(
+        2 * n_rows,
+        2,
+        width_ratios=(4, 1),
+        height_ratios=[1, 4] * n_rows,
+        left=0.1,
+        right=0.9,
+        bottom=0.07,
+        top=0.85,
+        wspace=0.05,
+        hspace=0.05,
+    )
+
+    for row_index, memory_set_size in enumerate(memory_set_sizes):
+        subset = data.filter(pl.col("memory_set_size") == memory_set_size)
+        top_row = 2 * row_index
+        bottom_row = top_row + 1
+
+        ax = fig.add_subplot(grid[bottom_row, 0])
+        ax_hist_x = fig.add_subplot(grid[top_row, 0], sharex=ax)
+        ax_hist_y = fig.add_subplot(grid[bottom_row, 1], sharey=ax)
+
+        for target_present in target_presence_values:
+            group_data = subset.filter(
+                pl.col("target_present") == target_present
+            )
+            if group_data.is_empty():
+                continue
+            ax.scatter(
+                group_data.get_column("accuracy").to_list(),
+                group_data.get_column("rt").to_list(),
+                label=str(target_present),
+            )
+
+        for entity_value in subset.get_column(entity_column).unique().to_list():
+            entity_data = subset.filter(pl.col(entity_column) == entity_value)
+            absent = entity_data.filter(pl.col("target_present") == False)
+            present = entity_data.filter(pl.col("target_present") == True)
+            if absent.height != 1 or present.height != 1:
+                continue
+            ax.plot(
+                [absent.get_column("accuracy")[0], present.get_column("accuracy")[0]],
+                [absent.get_column("rt")[0], present.get_column("rt")[0]],
+                color="black",
+                alpha=0.3,
+                linewidth=0.5,
+                zorder=0,
+            )
+
+        ax_hist_x.hist(
+            subset.get_column("accuracy").to_list(),
+            bins=np.linspace(0, 1, 21),
+            color="gray",
+        )
+        ax_hist_y.hist(
+            subset.get_column("rt").to_list(),
+            bins=20,
+            orientation="horizontal",
+            color="gray",
+        )
+
+        ax_hist_x.tick_params(axis="x", labelbottom=False)
+        ax_hist_y.tick_params(axis="y", labelleft=False)
+        ax_hist_x.set_title(f"Memory Set Size {memory_set_size}")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, maximum_rt * 1.1)
+        ax.set_xlabel("Accuracy")
+        ax.set_ylabel("Mean RT (s)")
+        ax.legend(title="target_present")
+
+    plt.suptitle(title, fontsize=14)
+    plt.show()
+    plt.close()
+
+
+def _plot_rt_bin_bars(
+    ax,
+    data: pl.DataFrame,
+    *,
+    value_column: str,
+    ylabel: str,
+    hue_column: str | None = None,
+    tick_stride: int = 3,
+) -> None:
+    """Plot RT-bin summaries using Polars and Matplotlib.
+
+    RT bins are treated as ordered categories, matching Seaborn's previous
+    categorical-bar behavior. When ``hue_column`` is provided, bars are grouped
+    side by side and missing combinations are represented by zero-height bars.
+    """
+    if data.is_empty():
+        return
+
+    data = data.filter(pl.col("rt_bin").is_not_null())
+    if data.is_empty():
+        return
+
+    rt_bins = data.get_column("rt_bin").unique().sort().to_list()
+    positions = np.arange(len(rt_bins), dtype=float)
+
+    if hue_column is None:
+        values_by_bin = {
+            row["rt_bin"]: row[value_column]
+            for row in data.select(["rt_bin", value_column]).iter_rows(named=True)
+        }
+        heights = [values_by_bin.get(rt_bin, 0) for rt_bin in rt_bins]
+        ax.bar(positions, heights)
+    else:
+        hue_values = (
+            data.get_column(hue_column).unique(maintain_order=True).to_list()
+        )
+        bar_width = 0.8 / max(len(hue_values), 1)
+
+        for hue_index, hue_value in enumerate(hue_values):
+            hue_data = data.filter(pl.col(hue_column) == hue_value)
+            values_by_bin = {
+                row["rt_bin"]: row[value_column]
+                for row in hue_data.select(["rt_bin", value_column]).iter_rows(
+                    named=True
+                )
+            }
+            heights = [values_by_bin.get(rt_bin, 0) for rt_bin in rt_bins]
+            offset = (hue_index - (len(hue_values) - 1) / 2) * bar_width
+            ax.bar(
+                positions + offset,
+                heights,
+                width=bar_width,
+                label=str(hue_value),
+            )
+
+        ax.legend(title=hue_column)
+
+    tick_positions = np.arange(0, len(rt_bins), max(tick_stride, 1))
+    tick_labels = [f"{rt_bins[index]:g}" for index in tick_positions]
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(tick_labels)
+    ax.set_xlabel("RT Bins (s)")
+    ax.set_ylabel(ylabel)
+
+
 class VisualSearchExperiment(Experiment):
-    def __init__(self, dataset_path: str,search_phase_name: str,memorization_phase_name: str, excluded_subjects: list = [], excluded_sessions: dict = {}, excluded_trials: dict = {}, export_format = BIDS_EXPORT):
+    def __init__(
+        self,
+        dataset_path: str,
+        search_phase_name: str,
+        memorization_phase_name: str,
+        excluded_subjects: list | None = None,
+        excluded_sessions: dict | None = None,
+        excluded_trials: dict | None = None,
+        export_format=BIDS_EXPORT,
+    ):
+        excluded_subjects = excluded_subjects or []
+        excluded_sessions = excluded_sessions or {}
+        excluded_trials = excluded_trials or {}
         self.dataset_path = Path(dataset_path)
         self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
         self.metadata = pl.read_csv(self.dataset_path / "participants.tsv", separator="\t", 
@@ -33,42 +336,44 @@ class VisualSearchExperiment(Experiment):
         return accuracy
     
     def plot_accuracy_by_subject(self):
-        
         correct_responses = self.search_rts()
-        # Sort by the sum of correct responses of each subject
         correct_responses_aux = (
             correct_responses
             .group_by(["subject_id", "memory_set_size", "target_present"])
             .agg(pl.col("correct_response").mean().alias("correct_response_mean"))
-        ).select(["subject_id", "memory_set_size", "target_present", "correct_response_mean"])
-        # Merge the correct_responses with the correct_responses_aux
-        correct_responses = correct_responses.join(
-            correct_responses_aux,
-            on=["subject_id", "memory_set_size", "target_present"],
-            how="left"
-        ).sort(by=["memory_set_size", "target_present","correct_response_mean"])
+            .select(["subject_id", "memory_set_size", "target_present", "correct_response_mean"])
+        )
+        correct_responses = (
+            correct_responses
+            .join(
+                correct_responses_aux,
+                on=["subject_id", "memory_set_size", "target_present"],
+                how="left",
+            )
+            .with_columns(pl.col("target_present").cast(pl.Boolean))
+            .sort(by=["memory_set_size", "target_present", "correct_response_mean"])
+        )
 
-        correct_responses = correct_responses.to_pandas()
-        # target present to bool
-        correct_responses["target_present"] = correct_responses["target_present"].astype(bool)
-        # There should be an ax for each memory set size
-
-        mem_set_sizes = correct_responses["memory_set_size"].unique()
-        mem_set_sizes.sort()
-
-        width_size = max(0.25 * len(correct_responses["subject_id"].unique()),10)
+        mem_set_sizes = correct_responses.get_column("memory_set_size").unique().sort().to_list()
+        width_size = max(0.25 * correct_responses.get_column("subject_id").n_unique(), 10)
 
         n_rows = len(mem_set_sizes)
-        fig, axs = plt.subplots(n_rows, 1, figsize=(width_size, 5 * n_rows),sharey=True)
+        fig, axs = plt.subplots(n_rows, 1, figsize=(width_size, 5 * n_rows), sharey=True)
 
         if n_rows == 1:
             axs = np.array([axs])
 
-        for i, row in enumerate(mem_set_sizes):
-            data = correct_responses[(correct_responses["memory_set_size"] == row)]
-            sns.lineplot(x='subject_id',y='correct_response',data=data,hue='target_present',errorbar='se',ax=axs[i],estimator='mean')
-            axs[i].set_title(f"Memory Set Size {row}")
-            axs[i].tick_params(axis='x', rotation=90)
+        for i, memory_set_size in enumerate(mem_set_sizes):
+            data = correct_responses.filter(pl.col("memory_set_size") == memory_set_size)
+            _plot_grouped_mean_with_se(
+                axs[i],
+                data,
+                x="subject_id",
+                y="correct_response",
+                group="target_present",
+            )
+            axs[i].set_title(f"Memory Set Size {memory_set_size}")
+            axs[i].tick_params(axis="x", rotation=90)
             axs[i].set_xlabel("Subject ID")
             axs[i].set_ylabel("Accuracy")
 
@@ -77,40 +382,44 @@ class VisualSearchExperiment(Experiment):
         plt.close()
     
     def plot_accuracy_by_stimulus(self):
-        # Convert to pandas for Seaborn
         correct_responses = self.search_rts()
         correct_responses_aux = (
             correct_responses
             .group_by(["stimulus", "memory_set_size", "target_present"])
             .agg(pl.col("correct_response").mean().alias("correct_response_mean"))
-        ).select(["stimulus", "memory_set_size", "target_present", "correct_response_mean"])
+            .select(["stimulus", "memory_set_size", "target_present", "correct_response_mean"])
+        )
+        correct_responses = (
+            correct_responses
+            .join(
+                correct_responses_aux,
+                on=["stimulus", "memory_set_size", "target_present"],
+                how="left",
+            )
+            .with_columns(pl.col("target_present").cast(pl.Boolean))
+            .sort(by=["memory_set_size", "target_present", "correct_response_mean"])
+        )
 
-        # Merge the correct_responses with the correct_responses_aux
-        correct_responses = correct_responses.join(
-            correct_responses_aux,
-            on=["stimulus", "memory_set_size", "target_present"],
-            how="left"
-        ).to_pandas().sort_values(by=["memory_set_size", "target_present", "correct_response_mean"])
-
-        # Convert target_present to bool (in case it's int 0/1)
-        correct_responses["target_present"] = correct_responses["target_present"].astype(bool)
-
-        # One subplot per memory set size
-        mem_set_sizes = sorted(correct_responses["memory_set_size"].unique())
+        mem_set_sizes = correct_responses.get_column("memory_set_size").unique().sort().to_list()
         n_rows = len(mem_set_sizes)
-
-        width_size = max(0.25 * len(correct_responses["stimulus"].unique()),10)
+        width_size = max(0.25 * correct_responses.get_column("stimulus").n_unique(), 10)
 
         fig, axs = plt.subplots(n_rows, 1, figsize=(width_size, 5 * n_rows), sharey=True)
 
         if n_rows == 1:
             axs = np.array([axs])
 
-        for i, mem_size in enumerate(mem_set_sizes):
-            data = correct_responses[correct_responses["memory_set_size"] == mem_size]
-            sns.lineplot(x='stimulus',y='correct_response',data=data,hue='target_present',errorbar='se',ax=axs[i],estimator='mean')
-            axs[i].set_title(f"Memory Set Size {mem_size}")
-            axs[i].tick_params(axis='x', rotation=90)
+        for i, memory_set_size in enumerate(mem_set_sizes):
+            data = correct_responses.filter(pl.col("memory_set_size") == memory_set_size)
+            _plot_grouped_mean_with_se(
+                axs[i],
+                data,
+                x="stimulus",
+                y="correct_response",
+                group="target_present",
+            )
+            axs[i].set_title(f"Memory Set Size {memory_set_size}")
+            axs[i].tick_params(axis="x", rotation=90)
             axs[i].set_xlabel("Stimulus")
             axs[i].set_ylabel("Accuracy")
 
@@ -131,171 +440,44 @@ class VisualSearchExperiment(Experiment):
         return fixations
 
     def plot_speed_accuracy_tradeoff_by_subject(self):
-        # 1) Aggregate the data
         speed_accuracy = (
             self.search_rts()
             .group_by(["target_present", "memory_set_size", "subject_id"])
-            .agg([
+            .agg(
                 pl.col("rt").mean().alias("rt"),
-                pl.col("correct_response").mean().alias("accuracy")
-            ])
-            .with_columns([
-                pl.col("rt") / 1000,  # Convert to seconds
-                pl.col("target_present").cast(pl.Boolean)
-            ])
+                pl.col("correct_response").mean().alias("accuracy"),
+            )
+            .with_columns(
+                (pl.col("rt") / 1000).alias("rt"),
+                pl.col("target_present").cast(pl.Boolean),
+            )
             .sort("memory_set_size")
-        ).to_pandas()
-
-        # 2) Unique memory set sizes
-        mem_set_sizes = np.sort(speed_accuracy["memory_set_size"].unique())
-        n_rows = len(mem_set_sizes)
-
-        # 3) Prepare grid layout
-        fig = plt.figure(figsize=(6, 1 + 6 * n_rows))
-        gs = fig.add_gridspec(
-            2 * n_rows, 2,
-            width_ratios=(4, 1),
-            height_ratios=[1, 4] * n_rows,
-            left=0.1, right=0.9, bottom=0.07, top=0.85,
-            wspace=0.05, hspace=0.05
+        )
+        _plot_speed_accuracy_tradeoff(
+            speed_accuracy,
+            entity_column="subject_id",
+            title="Speed-Accuracy Tradeoff by Subject",
         )
 
-        # 4) Loop over memory set sizes
-        for i, mem_size in enumerate(mem_set_sizes):
-            data = speed_accuracy[speed_accuracy["memory_set_size"] == mem_size]
-
-            row_top = 2 * i
-            row_bottom = 2 * i + 1
-
-            ax = fig.add_subplot(gs[row_bottom, 0])
-            ax_histx = fig.add_subplot(gs[row_top, 0], sharex=ax)
-            ax_histy = fig.add_subplot(gs[row_bottom, 1], sharey=ax)
-
-            # (A) Scatter plot
-            sns.scatterplot(
-                x="accuracy",
-                y="rt",
-                data=data,
-                hue="target_present",
-                ax=ax,
-                palette="deep"
-            )
-
-            # (B) Connection lines per subject
-            for subj_id in data["subject_id"].unique():
-                subj_data = data[data["subject_id"] == subj_id]
-                if len(subj_data) != 2:
-                    continue
-                p0 = subj_data[subj_data["target_present"] == False]
-                p1 = subj_data[subj_data["target_present"] == True]
-                if not p0.empty and not p1.empty:
-                    ax.plot(
-                        [p0["accuracy"].values[0], p1["accuracy"].values[0]],
-                        [p0["rt"].values[0], p1["rt"].values[0]],
-                        color="black", alpha=0.3, linewidth=0.5, zorder=0
-                    )
-
-            # (C) Marginal histograms
-            ax_histx.hist(data["accuracy"], bins=np.linspace(0, 1, 21), color="gray")
-            ax_histy.hist(data["rt"], bins=20, orientation='horizontal', color="gray")
-
-            ax_histx.tick_params(axis="x", labelbottom=False)
-            ax_histy.tick_params(axis="y", labelleft=False)
-
-            ax_histx.set_title(f"Memory Set Size {mem_size}")
-            ax.set_xlim(0, 1)
-            ax.set_ylim(0, speed_accuracy["rt"].max() * 1.1)
-            ax.set_xlabel("Accuracy")
-            ax.set_ylabel("Mean RT (s)")
-
-        plt.suptitle("Speed-Accuracy Tradeoff by Subject", fontsize=14)
-        plt.show()
-        plt.close()
-
     def plot_speed_accuracy_tradeoff_by_stimulus(self):
-        # 1) Aggregate the data
         speed_accuracy = (
             self.search_rts()
             .group_by(["target_present", "memory_set_size", "stimulus"])
-            .agg([
+            .agg(
                 pl.col("rt").mean().alias("rt"),
-                pl.col("correct_response").mean().alias("accuracy")
-            ])
-            .with_columns([
-                (pl.col("rt") / 1000).alias("rt"),  # convert ms → s
-                pl.col("target_present").cast(pl.Boolean)
-            ])
-            .sort("memory_set_size")
-            .to_pandas()
-        )
-
-        # 2) Unique memory set sizes
-        mem_set_sizes = np.sort(speed_accuracy["memory_set_size"].unique())
-        n_rows = len(mem_set_sizes)
-
-        # 3) Prepare grid layout
-        fig = plt.figure(figsize=(6, 1 + 6 * n_rows))
-        gs = fig.add_gridspec(
-            2 * n_rows, 2,
-            width_ratios=(4, 1),
-            height_ratios=[1, 4] * n_rows,
-            left=0.1, right=0.9, bottom=0.07, top=0.85,
-            wspace=0.05, hspace=0.05
-        )
-
-        # 4) Loop over memory set sizes
-        for i, mem_size in enumerate(mem_set_sizes):
-            data = speed_accuracy[speed_accuracy["memory_set_size"] == mem_size]
-
-            row_top = 2 * i
-            row_bottom = 2 * i + 1
-
-            ax = fig.add_subplot(gs[row_bottom, 0])
-            ax_histx = fig.add_subplot(gs[row_top, 0], sharex=ax)
-            ax_histy = fig.add_subplot(gs[row_bottom, 1], sharey=ax)
-
-            # (A) Main scatter plot
-            sns.scatterplot(
-                x="accuracy",
-                y="rt",
-                data=data,
-                hue="target_present",
-                ax=ax,
-                palette="deep"
+                pl.col("correct_response").mean().alias("accuracy"),
             )
-
-            # (B) Connect stimulus points (False → True)
-            for stim in data["stimulus"].unique():
-                stim_data = data[data["stimulus"] == stim]
-                if len(stim_data) != 2:
-                    continue
-                p0 = stim_data[stim_data["target_present"] == False]
-                p1 = stim_data[stim_data["target_present"] == True]
-                if not p0.empty and not p1.empty:
-                    ax.plot(
-                        [p0["accuracy"].values[0], p1["accuracy"].values[0]],
-                        [p0["rt"].values[0], p1["rt"].values[0]],
-                        color="black", alpha=0.3, linewidth=0.5, zorder=0
-                    )
-
-            # (C) Marginal histograms
-            ax_histx.hist(data["accuracy"], bins=np.linspace(0, 1, 21), color="gray")
-            ax_histy.hist(data["rt"], bins=20, orientation='horizontal', color="gray")
-
-            ax_histx.tick_params(axis="x", labelbottom=False)
-            ax_histy.tick_params(axis="y", labelleft=False)
-
-            # (D) Titles, limits, labels
-            ax_histx.set_title(f"Memory Set Size {mem_size}")
-            ax.set_xlim(0, 1)
-            ax.set_ylim(0, speed_accuracy["rt"].max() * 1.1)
-            ax.set_xlabel("Accuracy")
-            ax.set_ylabel("Mean RT (s)")
-
-        # 5) Final touch
-        plt.suptitle("Speed-Accuracy Tradeoff by Stimulus", fontsize=14)
-        plt.show()
-        plt.close()
+            .with_columns(
+                (pl.col("rt") / 1000).alias("rt"),
+                pl.col("target_present").cast(pl.Boolean),
+            )
+            .sort("memory_set_size")
+        )
+        _plot_speed_accuracy_tradeoff(
+            speed_accuracy,
+            entity_column="stimulus",
+            title="Speed-Accuracy Tradeoff by Stimulus",
+        )
 
     def remove_non_answered_trials(self, print_flag=True):
         amount_trials_before_removal = self.search_rts().shape[0]
@@ -433,65 +615,65 @@ class VisualSearchExperiment(Experiment):
     def plot_cumulative_performance(self, group_cutoffs=None):
         if group_cutoffs is None:
             group_cutoffs = self.find_fixation_cutoff()
-        cumulative_performance = self.cumulative_correct_trials_by_fixation(group_cutoffs).join(
+
+        cumulative_performance = self.cumulative_correct_trials_by_fixation(
+            group_cutoffs
+        ).join(
             group_cutoffs,
             on=["target_present", "memory_set_size"],
-            how="left"
+            how="left",
         )
 
-        tp_ta = cumulative_performance.select(pl.col("target_present")).unique().to_series()
-        tp_ta.sort()
-        mem_set_sizes = cumulative_performance.select(pl.col("memory_set_size")).unique().to_series()
-        mem_set_sizes.sort()
+        target_presence_values = (
+            cumulative_performance
+            .select("target_present")
+            .unique()
+            .to_series()
+            .to_list()
+        )
+        memory_set_sizes = (
+            cumulative_performance
+            .select("memory_set_size")
+            .unique()
+            .to_series()
+            .to_list()
+        )
 
-        # Convert to pandas for Seaborn
-        cumulative_performance = cumulative_performance.to_pandas()
-
-        n_cols = len(tp_ta)
-        n_rows = len(mem_set_sizes)
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 5 * n_rows),sharey=True)
+        n_cols = len(target_presence_values)
+        n_rows = len(memory_set_sizes)
+        fig, axs = plt.subplots(
+            n_rows,
+            n_cols,
+            figsize=(6 * n_cols, 5 * n_rows),
+            sharey=True,
+        )
         fig.suptitle("Cumulative Performance")
-        if n_cols == 1:
-            axs = np.array([axs])
+        axs = np.asarray(axs, dtype=object).reshape(n_rows, n_cols)
 
-        if n_rows == 1:
-            axs = np.array([axs])
-
-        # For each fixation number (i.e. first "max_fixations" columns), we need the mean and the standard error
-        # The X axis will be the fixation number, the Y axis will be the accuracy
-        # The area around the mean will be the standard error
-        
-        for i, row in enumerate(mem_set_sizes):
-            for j, col in enumerate(tp_ta):
-                # Get the max fix for the current group, groups_cutoff is in polars
-
-                data = cumulative_performance[(cumulative_performance["memory_set_size"] == row) & (cumulative_performance["target_present"] == col)]
-                max_fix = int(data["fix_cutoff"].iloc[0])
-
-                # 1. Trim every array to the same length (optional but handy)
-                trimmed = data["cumulative_correct"].apply(lambda arr: arr[:max_fix])
-
-                # 2. Turn the Series-of-lists into long form
-                exploded = trimmed.explode().reset_index(drop=True).to_frame("cumulative_correct")
-
-                # 3. Add a 1-based fixation index
-                exploded["fixation_number"] = (np.tile(np.arange(1, max_fix + 1), len(data))  # repeat 1..max_fix for every original row
-    )
-                sns.lineplot(
-                    x="fixation_number",
-                    y="cumulative_correct",
-                    data=exploded,
-                    ax=axs[i, j],
-                    errorbar='se',
-                    estimator='mean',
-                    color="black"
+        for row_index, memory_set_size in enumerate(memory_set_sizes):
+            for col_index, target_present in enumerate(target_presence_values):
+                data = cumulative_performance.filter(
+                    (pl.col("memory_set_size") == memory_set_size)
+                    & (pl.col("target_present") == target_present)
                 )
-                axs[i, j].set_title(f"Memory Set Size {int(row)}, Target Present {bool(col)}")
-                # Ticks every 5 fixations
-                axs[i, j].set_xticks(range(0, max_fix, 5))
-                axs[i, j].set_xticklabels(range(1, max_fix+1, 5))
-                axs[i, j].set_xlabel("Fixation Number")
-                axs[i, j].set_ylabel("Accuracy")
+                if data.is_empty():
+                    continue
+
+                max_fixations = int(data.get_column("fix_cutoff")[0])
+                ax = axs[row_index, col_index]
+                _plot_cumulative_mean_with_se(
+                    ax,
+                    data,
+                    max_fixations=max_fixations,
+                )
+                ax.set_title(
+                    f"Memory Set Size {int(memory_set_size)}, "
+                    f"Target Present {bool(target_present)}"
+                )
+                ax.set_xticks(range(0, max_fixations, 5))
+                ax.set_xticklabels(range(1, max_fixations + 1, 5))
+                ax.set_xlabel("Fixation Number")
+                ax.set_ylabel("Accuracy")
 
         plt.ylim(0, 1)
         plt.tight_layout()
@@ -523,165 +705,188 @@ class VisualSearchExperiment(Experiment):
 
 
     def plot_correct_trials_by_rt_bins(self, bin_end, bin_step):
-        # Get relevant trial info with binned RTs
         correct_trials_per_bin = (
             self.trials_by_rt_bins(bin_end, bin_step)
             .select(["rt_bin", "target_present", "memory_set_size", "correct_response"])
             .group_by(["rt_bin", "target_present", "memory_set_size"])
             .agg(pl.col("correct_response").sum().alias("correct_response"))
             .sort(["memory_set_size", "target_present", "rt_bin"])
-        ).to_pandas()
+        )
 
-        # Ensure sorted and unique values
-        tp_ta = sorted(correct_trials_per_bin["target_present"].unique())
-        mem_set_sizes = sorted(correct_trials_per_bin["memory_set_size"].unique())
+        tp_ta = sorted(
+            correct_trials_per_bin.get_column("target_present").unique().to_list()
+        )
+        mem_set_sizes = sorted(
+            correct_trials_per_bin.get_column("memory_set_size").unique().to_list()
+        )
 
         n_cols = len(tp_ta)
         n_rows = len(mem_set_sizes)
 
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 5 * n_rows), sharey=True, sharex=True)
+        fig, axs = plt.subplots(
+            n_rows,
+            n_cols,
+            figsize=(6 * n_cols, 5 * n_rows),
+            sharey=True,
+            sharex=True,
+        )
         fig.suptitle("Correct Trials by RT Bins")
-
-        # Normalize axis shape for consistent indexing
-        if n_cols == 1:
-            axs = np.expand_dims(axs, axis=1)
-        if n_rows == 1:
-            axs = np.expand_dims(axs, axis=0)
+        axs = np.asarray(axs, dtype=object).reshape(n_rows, n_cols)
 
         for i, mem_size in enumerate(mem_set_sizes):
             for j, tp in enumerate(tp_ta):
-                data = correct_trials_per_bin[
-                    (correct_trials_per_bin["memory_set_size"] == mem_size) &
-                    (correct_trials_per_bin["target_present"] == tp)
-                ]
-                sns.barplot(x="rt_bin", y="correct_response", data=data, ax=axs[i, j])
-                axs[i, j].set_title(f"Memory Set Size {mem_size}, Target Present {bool(tp)}")
-                axs[i, j].set_xlabel("RT Bins (s)")
-                axs[i, j].set_ylabel("Correct Trials")
-                axs[i, j].set_xticks(range(0, int(bin_end/bin_step)+3, 3))
+                data = correct_trials_per_bin.filter(
+                    (pl.col("memory_set_size") == mem_size)
+                    & (pl.col("target_present") == tp)
+                )
+                _plot_rt_bin_bars(
+                    axs[i, j],
+                    data,
+                    value_column="correct_response",
+                    ylabel="Correct Trials",
+                )
+                axs[i, j].set_title(
+                    f"Memory Set Size {mem_size}, Target Present {bool(tp)}"
+                )
 
         plt.tight_layout()
         plt.show()
         plt.close()
-        
+
     def plot_incorrect_trials_by_rt_bins(self, bin_end, bin_step):
-        # Get RT binned trial info
         incorrect_trials_per_bin = (
             self.trials_by_rt_bins(bin_end, bin_step)
             .select(["rt_bin", "target_present", "memory_set_size", "correct_response"])
-            .with_columns([
+            .with_columns(
                 (1 - pl.col("correct_response")).alias("incorrect_response")
-            ])
+            )
             .group_by(["rt_bin", "target_present", "memory_set_size"])
             .agg(pl.col("incorrect_response").sum().alias("incorrect_response"))
             .sort(["memory_set_size", "target_present", "rt_bin"])
-            .to_pandas()
         )
 
-        # Setup for plotting
-        tp_ta = sorted(incorrect_trials_per_bin["target_present"].unique())
-        mem_set_sizes = sorted(incorrect_trials_per_bin["memory_set_size"].unique())
+        tp_ta = sorted(
+            incorrect_trials_per_bin.get_column("target_present").unique().to_list()
+        )
+        mem_set_sizes = sorted(
+            incorrect_trials_per_bin.get_column("memory_set_size").unique().to_list()
+        )
 
         n_cols = len(tp_ta)
         n_rows = len(mem_set_sizes)
 
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 5 * n_rows), sharey=True, sharex=True)
+        fig, axs = plt.subplots(
+            n_rows,
+            n_cols,
+            figsize=(6 * n_cols, 5 * n_rows),
+            sharey=True,
+            sharex=True,
+        )
         fig.suptitle("Incorrect Trials by RT Bins")
-
-        # Normalize shape for subplots
-        if n_cols == 1:
-            axs = np.expand_dims(axs, axis=1)
-        if n_rows == 1:
-            axs = np.expand_dims(axs, axis=0)
+        axs = np.asarray(axs, dtype=object).reshape(n_rows, n_cols)
 
         for i, mem_size in enumerate(mem_set_sizes):
             for j, tp in enumerate(tp_ta):
-                data = incorrect_trials_per_bin[
-                    (incorrect_trials_per_bin["memory_set_size"] == mem_size) &
-                    (incorrect_trials_per_bin["target_present"] == tp)
-                ]
-                sns.barplot(x="rt_bin", y="incorrect_response", data=data, ax=axs[i, j])
-                axs[i, j].set_title(f"Memory Set Size {mem_size}, Target Present {bool(tp)}")
-                axs[i, j].set_xlabel("RT Bins (s)")
-                axs[i, j].set_ylabel("Incorrect Trials")
-                axs[i, j].set_xticks(range(0, int(bin_end/bin_step)+3, 3))
+                data = incorrect_trials_per_bin.filter(
+                    (pl.col("memory_set_size") == mem_size)
+                    & (pl.col("target_present") == tp)
+                )
+                _plot_rt_bin_bars(
+                    axs[i, j],
+                    data,
+                    value_column="incorrect_response",
+                    ylabel="Incorrect Trials",
+                )
+                axs[i, j].set_title(
+                    f"Memory Set Size {mem_size}, Target Present {bool(tp)}"
+                )
 
         plt.tight_layout()
         plt.show()
         plt.close()
-    
+
     def plot_probability_of_deciding_by_rt_bin(self, bin_end, bin_step):
-        # Get RT-binned trials
-        trials = (
-            self.trials_by_rt_bins(bin_end, bin_step)
-            .select(["rt_bin", "target_present", "memory_set_size", "correct_response"])
+        trials = self.trials_by_rt_bins(bin_end, bin_step).select(
+            ["rt_bin", "target_present", "memory_set_size", "correct_response"]
         )
 
-        # Unique labels
-        tp_ta = sorted(trials["target_present"].unique().to_list())
-        mem_set_sizes = sorted(trials["memory_set_size"].unique().to_list())
+        tp_ta = sorted(trials.get_column("target_present").unique().to_list())
+        mem_set_sizes = sorted(
+            trials.get_column("memory_set_size").unique().to_list()
+        )
 
         n_cols = len(tp_ta)
         n_rows = len(mem_set_sizes)
 
-        # Count occurrences per bin
         grouped = (
-            trials
-            .group_by(["rt_bin", "target_present", "correct_response", "memory_set_size"])
-            .agg(pl.count().alias("count"))
+            trials.group_by(
+                ["rt_bin", "target_present", "correct_response", "memory_set_size"]
+            )
+            .agg(pl.len().alias("count"))
             .sort(["correct_response", "target_present", "memory_set_size", "rt_bin"])
         )
 
-        # Compute totals per (correctness, target, memory)
-        totals = (
-            grouped
-            .group_by(["correct_response", "target_present", "memory_set_size"])
-            .agg(pl.col("count").sum().alias("total_per_group"))
-        )
+        totals = grouped.group_by(
+            ["correct_response", "target_present", "memory_set_size"]
+        ).agg(pl.col("count").sum().alias("total_per_group"))
 
-        # Merge total counts back
         grouped = grouped.join(
             totals,
             on=["correct_response", "target_present", "memory_set_size"],
-            how="left"
+            how="left",
         )
 
-        # Compute cumulative sums within groups
         grouped = (
-            grouped
-            .with_columns([
-                pl.col("count").cum_sum().over(["correct_response", "target_present", "memory_set_size"]).alias("cumsum"),
-            ])
-            .with_columns([
-                (pl.col("total_per_group") - pl.col("cumsum") + pl.col("count")).alias("total_per_bin"),
-                (pl.col("count") / (pl.col("total_per_group") - pl.col("cumsum") + pl.col("count"))).alias("count_normalized"),
-                pl.col("correct_response").cast(pl.Boolean)
-            ])
+            grouped.with_columns(
+                pl.col("count")
+                .cum_sum()
+                .over(["correct_response", "target_present", "memory_set_size"])
+                .alias("cumsum")
+            )
+            .with_columns(
+                (
+                    pl.col("total_per_group")
+                    - pl.col("cumsum")
+                    + pl.col("count")
+                ).alias("total_per_bin"),
+                (
+                    pl.col("count")
+                    / (
+                        pl.col("total_per_group")
+                        - pl.col("cumsum")
+                        + pl.col("count")
+                    )
+                ).alias("count_normalized"),
+                pl.col("correct_response").cast(pl.Boolean),
+            )
         )
 
-        # Convert to pandas for seaborn
-        grouped_pd = grouped.to_pandas()
-
-        # Plot setup
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 5 * n_rows), sharey=True, sharex=True)
+        fig, axs = plt.subplots(
+            n_rows,
+            n_cols,
+            figsize=(6 * n_cols, 5 * n_rows),
+            sharey=True,
+            sharex=True,
+        )
         fig.suptitle("Probability of Deciding by RT Bins")
-
-        if n_cols == 1:
-            axs = np.expand_dims(axs, axis=1)
-        if n_rows == 1:
-            axs = np.expand_dims(axs, axis=0)
+        axs = np.asarray(axs, dtype=object).reshape(n_rows, n_cols)
 
         for i, mem_size in enumerate(mem_set_sizes):
             for j, tp in enumerate(tp_ta):
-                data = grouped_pd[
-                    (grouped_pd["memory_set_size"] == mem_size) &
-                    (grouped_pd["target_present"] == tp)
-                ]
-                sns.barplot(x="rt_bin", y="count_normalized", hue="correct_response", data=data, ax=axs[i, j])
-                axs[i, j].set_title(f"Memory Set Size {mem_size}, Target Present {bool(tp)}")
-                axs[i, j].set_xlabel("RT Bins (s)")
-                axs[i, j].set_ylabel("Probability of Deciding")
-                axs[i, j].set_xticks(range(0, int(bin_end/bin_step)+3, 3))
+                data = grouped.filter(
+                    (pl.col("memory_set_size") == mem_size)
+                    & (pl.col("target_present") == tp)
+                )
+                _plot_rt_bin_bars(
+                    axs[i, j],
+                    data,
+                    value_column="count_normalized",
+                    ylabel="Probability of Deciding",
+                    hue_column="correct_response",
+                )
+                axs[i, j].set_title(
+                    f"Memory Set Size {mem_size}, Target Present {bool(tp)}"
+                )
 
         plt.tight_layout()
         plt.show()
@@ -690,7 +895,7 @@ class VisualSearchExperiment(Experiment):
 
 class VisualSearchSubject(Subject):
     def __init__(self, subject_id: str, old_subject_id: str, experiment: VisualSearchExperiment, search_phase_name, memorization_phase_name,
-                 excluded_sessions: list = [], excluded_trials: dict = {}, export_format = BIDS_EXPORT):
+                 excluded_sessions: list | None = None, excluded_trials: dict | None = None, export_format=BIDS_EXPORT):
         super().__init__(subject_id, old_subject_id, experiment, excluded_sessions, excluded_trials, export_format)
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
@@ -850,7 +1055,7 @@ class VisualSearchSession(Session):
         search_phase_name: str,
         memorization_phase_name: str,
         excluded_trials: list = None,
-        export_format = BIDS_EXPORT
+        export_format=BIDS_EXPORT,
     ):
         excluded_trials = [] if excluded_trials is None else excluded_trials
         super().__init__(session_id, subject, excluded_trials, export_format)
@@ -874,12 +1079,12 @@ class VisualSearchSession(Session):
                 separator="\t",
                 null_values="n/a",
                 schema_overrides={
-                "trial_number": pl.Int32,
-                "stimulus": pl.Utf8,
-                "target_present": pl.Int32,
-                "target": pl.Utf8,
-                "correct_response": pl.Int32,
-                "was_answered": pl.Int32
+                    "trial_number": pl.Int32,
+                    "stimulus": pl.Utf8,
+                    "target_present": pl.Int32,
+                    "target": pl.Utf8,
+                    "correct_response": pl.Int32,
+                    "was_answered": pl.Int32,
                 },
             )
             for path in behavior_files
@@ -1066,7 +1271,20 @@ class VisualSearchSession(Session):
 
 class VisualSearchTrial(Trial):
 
-    def __init__(self, trial_number, session, samples, fix, sacc, blink, events_path, behavior_data, search_phase_name, memorization_phase_name, prefiltered=False):
+    def __init__(
+        self,
+        trial_number,
+        session,
+        samples,
+        fix,
+        sacc,
+        blink,
+        events_path,
+        behavior_data,
+        search_phase_name,
+        memorization_phase_name,
+        prefiltered=False,
+    ):
         super().__init__(
             trial_number,
             session,
@@ -1084,17 +1302,13 @@ class VisualSearchTrial(Trial):
             else behavior_data.filter(pl.col("trial_number") == trial_number)
         )
 
-        self._target_present = bool(
-            trial_data.select("target_present").item()
-        )
+        self._target_present = bool(trial_data.select("target_present").item())
         self._target = trial_data.select("target").item()
         
         if self._target_present:
             self._target_location = _as(trial_data.select("target_location").item(), tuple)
 
-        self._correct_response = bool(
-            trial_data.select("correct_response").item()
-        )
+        self._correct_response = bool(trial_data.select("correct_response").item())
         self._stimulus = trial_data.select("stimulus").item()
         self._stimulus_coords = _as(trial_data.select("stimulus_coords").item(), tuple)
 
@@ -1102,9 +1316,7 @@ class VisualSearchTrial(Trial):
         self._memory_set_locations = _as(trial_data.select("memory_set_locations").item(), list)
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
-        self._was_answered = bool(
-            trial_data.select("was_answered").item()
-        )
+        self._was_answered = trial_data.select("was_answered").item()
 
     @property
     def target(self):

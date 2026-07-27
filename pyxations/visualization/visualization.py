@@ -486,14 +486,15 @@ class Visualization():
         """
         try:
             import cv2
-            from matplotlib.animation import FuncAnimation
-            import matplotlib as mpl
-            mpl.rcParams['animation.embed_limit'] = 100
-        except ImportError as e:
+        except ImportError as exc:
             raise ImportError(
-                f"Missing required dependency for animation: {e}. "
-                "Please install cv2 (opencv-python)."
-            )
+                "OpenCV video support is optional. Install it with "
+                "`pip install 'pyxations[video]'`."
+            ) from exc
+
+        from matplotlib.animation import FuncAnimation
+        import matplotlib as mpl
+        mpl.rcParams['animation.embed_limit'] = 100
 
         # Validate output_format
         valid_formats = ["html", "mp4", "gif", "matplotlib"]
