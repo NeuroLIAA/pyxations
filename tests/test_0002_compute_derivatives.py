@@ -77,7 +77,22 @@ def test_generic_analysis_hierarchy_uses_generated_bids(generated_datasets):
     assert trial.trial_number == 0
     assert not trial.samples().is_empty()
     assert not trial.fixations().is_empty()
+    assert not trial.blinks().is_empty()
+    assert not trial.pupil_samples().is_empty()
+    assert {"LPupil", "RPupil"}.issubset(trial.pupil_samples().columns)
     assert set(experiment.samples()["subject_id"].unique()) == {"0001"}
+    assert set(experiment.blinks()["subject_id"].unique()) == {"0001"}
+    assert set(experiment.pupil_samples()["subject_id"].unique()) == {"0001"}
+
+
+def test_pupil_accessor_does_not_invent_webcam_measurements(
+    generated_datasets,
+):
+    case = generated_datasets["webgazer"]
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+
+    assert experiment.pupil_samples().is_empty()
 
 
 def test_visual_search_hierarchy_uses_bids_events(generated_datasets):

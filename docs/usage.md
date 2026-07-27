@@ -137,15 +137,27 @@ for subject_id, subject in exp.subjects.items():
     for session_id, session in subject.sessions.items():
         fixations = session.fixations()   # polars.DataFrame
         saccades  = session.saccades()    # polars.DataFrame
+        blinks    = session.blinks()      # polars.DataFrame
         samples   = session.samples()     # polars.DataFrame (raw gaze)
+        pupil     = session.pupil_samples()  # rows with pupil measurements
 
 # Access a specific trial
 trial = exp.get_trial(subject_id="0001", session_id="second", trial_number=0)
 trial.fixations()
 trial.saccades()
+trial.blinks()
+trial.pupil_samples()
 ```
 
 `exp.subjects` and `subject.sessions` are dicts keyed by ID strings (`"0001"`, …). Tables are returned as **polars** DataFrames.
+
+The same `blinks()` and `pupil_samples()` accessors are available at the
+experiment, subject, session, and trial levels. `pupil_samples()` preserves
+the source tracker's pupil columns and units; consult the recording's BIDS
+JSON sidecar to determine whether the values represent diameter or area and
+which units were reported. Pyxations exposes these measurements for analysis
+but does not currently implement a complete pupillometry preprocessing
+pipeline (for example, deblinking, interpolation, or baseline correction).
 
 For visual-search paradigms, `VisualSearchExperiment` adds helpers for target/distractor analyses.
 

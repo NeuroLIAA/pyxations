@@ -221,8 +221,20 @@ class Experiment:
     def saccades(self):
         return pl.concat([subject.saccades() for subject in self.subjects.values()])
 
+    def blinks(self):
+        """Return blink events from every included subject."""
+
+        return pl.concat([subject.blinks() for subject in self.subjects.values()])
+
     def samples(self):
         return pl.concat([subject.samples() for subject in self.subjects.values()])
+
+    def pupil_samples(self):
+        """Return sample rows containing recorded pupil-size values."""
+
+        return pl.concat(
+            [subject.pupil_samples() for subject in self.subjects.values()]
+        )
     
     def remove_subject(self, subject_id):
         if subject_id in self.subjects:
@@ -481,10 +493,24 @@ class Subject:
             (pl.lit(self.subject_id)).alias("subject_id"),])
         return df
 
+    def blinks(self):
+        """Return blink events from every included session."""
+
+        return pl.concat(
+            [session.blinks() for session in self.sessions.values()]
+        ).with_columns(pl.lit(self.subject_id).alias("subject_id"))
+
     def samples(self):
         df = pl.concat([session.samples() for session in self.sessions.values()]).with_columns([
             (pl.lit(self.subject_id)).alias("subject_id"),])
         return df
+
+    def pupil_samples(self):
+        """Return sample rows containing recorded pupil-size values."""
+
+        return pl.concat(
+            [session.pupil_samples() for session in self.sessions.values()]
+        ).with_columns(pl.lit(self.subject_id).alias("subject_id"))
 
     def calib_data(self):
         calib_data = [session.calib_data() for session in self.sessions.values()]
@@ -779,12 +805,25 @@ class Session():
         df = pl.concat([trial.saccades() for trial in self.trials.values()]).with_columns([
             (pl.lit(self.session_id)).alias("session_id"),])
         return df
-        
+
+    def blinks(self):
+        """Return blink events from every included trial."""
+
+        return pl.concat(
+            [trial.blinks() for trial in self.trials.values()]
+        ).with_columns(pl.lit(self.session_id).alias("session_id"))
 
     def samples(self):
         df = pl.concat([trial.samples() for trial in self.trials.values()]).with_columns([
             (pl.lit(self.session_id)).alias("session_id"),])
         return df
+
+    def pupil_samples(self):
+        """Return sample rows containing recorded pupil-size values."""
+
+        return pl.concat(
+            [trial.pupil_samples() for trial in self.trials.values()]
+        ).with_columns(pl.lit(self.session_id).alias("session_id"))
 
     def remove_trial(self, trial_number):
         if self._trials and trial_number in self._trials:
@@ -879,10 +918,47 @@ class Trial:
 
     def saccades(self):
         return self._sacc
-    
 
     def samples(self):
         return self._samples
+
+    def blinks(self):
+        """Return blink events reported or detected for this trial."""
+
+        if self._blink is None:
+            return pl.DataFrame(
+                schema={
+                    "tStart": pl.Float64,
+                    "tEnd": pl.Float64,
+                    "duration": pl.Float64,
+                }
+            )
+        return self._blink
+
+    def pupil_samples(self):
+        """Return sample rows containing recorded pupil-size values.
+
+        Pupil values retain the source tracker's units and original Pyxations
+        column names (``Pupil``, ``LPupil``, or ``RPupil``). Consult the BIDS
+        JSON sidecar for the measurement units and whether the tracker reports
+        pupil diameter or area.
+        """
+
+        pupil_columns = [
+            column
+            for column in ("Pupil", "LPupil", "RPupil", "pupil_size")
+            if column in self._samples.columns
+        ]
+        if not pupil_columns:
+            return self._samples.head(0)
+
+        has_pupil_value = pl.any_horizontal(
+            [
+                pl.col(column).is_not_null() & ~pl.col(column).is_nan()
+                for column in pupil_columns
+            ]
+        )
+        return self._samples.filter(has_pupil_value)
 
     def __repr__(self):
         return f"Trial = '{self.trial_number}', " + self.session.__repr__()
