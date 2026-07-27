@@ -4,7 +4,7 @@ This page runs the full Pyxations pipeline on the small dataset bundled with the
 
 ## 0. Get the example dataset
 
-Clone the repository (or download the `example_dataset/` folder from GitHub):
+Clone the repository; the example dataset ships under `tests/data/eyelink_dataset/`:
 
 ```bash
 git clone https://github.com/NeuroLIAA/pyxations.git
@@ -19,7 +19,7 @@ The example dataset is already BIDS-formatted: four subjects (`sub-0001` … `su
 import pyxations as pyx
 
 pyx.compute_derivatives_for_dataset(
-    bids_dataset_folder="example_dataset",
+    bids_dataset_folder="tests/data/eyelink_dataset",
     dataset_format="eyelink",
     detection_algorithm="remodnav",
     msg_keywords=["begin", "end", "press"],
@@ -29,9 +29,7 @@ pyx.compute_derivatives_for_dataset(
 )
 ```
 
-This creates a sibling folder `example_dataset_derivatives/` containing parsed events, samples and per-trial tables for each subject/session.
-
-A pre-computed copy of the same derivatives ships in the repo (`example_dataset_derivatives/`), so you can also skip this step and jump straight to loading.
+This creates a sibling folder `tests/data/eyelink_dataset_derivatives/` containing parsed events, samples and per-trial tables for each subject/session.
 
 ## 2. Load and inspect
 
@@ -40,7 +38,7 @@ A pre-computed copy of the same derivatives ships in the repo (`example_dataset_
 ```python
 from pyxations import Experiment
 
-exp = Experiment(dataset_path="example_dataset")
+exp = Experiment(dataset_path="tests/data/eyelink_dataset")
 exp.load_data("remodnav")
 
 print(list(exp.subjects.keys()))   # ['0001', '0002', '0003', '0004']
@@ -61,7 +59,7 @@ Tables come back as **polars** DataFrames.
 trial.plot_scanpath(screen_height=1080, screen_width=1920)
 ```
 
-The plot is saved under `example_dataset_derivatives/sub-0001/ses-second/remodnav_events/plots/`.
+The plot is saved under `tests/data/eyelink_dataset_derivatives/sub-0001/ses-second/remodnav_events/plots/`.
 
 ## Where to go next
 

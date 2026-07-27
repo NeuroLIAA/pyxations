@@ -135,4 +135,4 @@ The repository includes runnable notebooks under [`notebooks/`](https://github.c
 - `webgazer_example.ipynb`: webcam-based recordings.
 - `driving_animation.ipynb`: visualization on a continuous task.
 
-A small `example_dataset/` is also included to reproduce the tutorial end-to-end.
+A small `tests/data/eyelink_dataset/` is also included to reproduce the tutorial end-to-end.

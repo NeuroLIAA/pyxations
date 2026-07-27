@@ -11,7 +11,7 @@ data_folder = os.path.join(current_path.parent, 'data')
 class TestDatasetToBids(unittest.TestCase):
     def test_dataset_to_bids(self):
         files_folder_path = os.path.join(data_folder,"example_files")
-        bids_dataset_folder = pyx.dataset_to_bids(data_folder,files_folder_path,"example_dataset")
+        bids_dataset_folder = pyx.dataset_to_bids(data_folder,files_folder_path,"eyelink_dataset")
         #bids_dataset_folder = pyx.dataset_to_bids(current_folder,files_folder_path,"antisacadas_dataset", format_name='eyelink')
         self.assertTrue(os.path.exists(bids_dataset_folder))
         self.assertTrue(os.path.exists(os.path.join(bids_dataset_folder, "sub-0001")))

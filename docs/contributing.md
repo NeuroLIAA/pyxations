@@ -51,7 +51,7 @@ mkdocs serve
 - `tests/`: pytest suite.
 - `docs/`: MkDocs sources for this site.
 - `notebooks/`: runnable end-to-end examples.
-- `example_dataset/`, `example_dataset_derivatives/`: small bundled dataset used by the quickstart.
+- `tests/data/eyelink_dataset/`: small bundled dataset used by the quickstart.
 
 ## Coding style
 

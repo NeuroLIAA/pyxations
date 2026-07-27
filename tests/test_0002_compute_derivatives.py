@@ -11,8 +11,8 @@ data_folder = os.path.join(current_path.parent, 'data')
 
 class TestComputeDerivatives(unittest.TestCase):
     def test_compute_derivatives_eyelink(self):
-        bids_dataset_folder = os.path.join(data_folder,"example_dataset")
-        derivatives_path = os.path.join(data_folder, "example_dataset_derivatives")
+        bids_dataset_folder = os.path.join(data_folder,"eyelink_dataset")
+        derivatives_path = os.path.join(data_folder, "eyelink_dataset_derivatives")
         
         # Remove the target directory to ensure a clean test environment.
         if os.path.exists(derivatives_path):
@@ -32,8 +32,8 @@ class TestComputeDerivatives(unittest.TestCase):
 
 
     def test_compute_derivatives_eyelink_remodnav(self):
-        bids_dataset_folder = os.path.join(data_folder,"example_dataset")
-        derivatives_path = os.path.join(data_folder, "example_dataset_derivatives")
+        bids_dataset_folder = os.path.join(data_folder,"eyelink_dataset")
+        derivatives_path = os.path.join(data_folder, "eyelink_dataset_derivatives")
         
         # Remove the target directory to ensure a clean test environment.
         if os.path.exists(derivatives_path):
@@ -51,9 +51,9 @@ class TestComputeDerivatives(unittest.TestCase):
             max_pso_dur=0, min_fix_dur=0, sac_max_vel=999, savgol_length= 0.195
         )
         self.assertTrue(os.path.exists(derivatives_path))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001", "ses-second")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001", "ses-second", "samples.feather")))
+        self.assertTrue(os.path.exists(os.path.join(data_folder, "eyelink_dataset_derivatives", "sub-0001")))
+        self.assertTrue(os.path.exists(os.path.join(data_folder, "eyelink_dataset_derivatives", "sub-0001", "ses-second")))
+        self.assertTrue(os.path.exists(os.path.join(data_folder, "eyelink_dataset_derivatives", "sub-0001", "ses-second", "samples.feather")))
 
 
     def test_compute_derivatives_webgazer(self):
@@ -117,7 +117,7 @@ class TestComputeDerivatives(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(data_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A", "remodnav_events", "blink.hdf5")))
 
     def test_compute_derivatives_feather_format(self):
-        bids_dataset_folder = os.path.join(data_folder,"example_dataset")
+        bids_dataset_folder = os.path.join(data_folder,"eyelink_dataset")
         msg_keywords = ["begin","end","press"]
         start_msgs = {'search':['beginning_of_stimuli']}
         end_msgs = {'search':['end_of_stimuli']}
@@ -127,7 +127,7 @@ class TestComputeDerivatives(unittest.TestCase):
                                         msg_keywords=msg_keywords,start_msgs=start_msgs, 
                                         end_msgs=end_msgs, overwrite=True, export_format=FEATHER_EXPORT)
 
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001", "ses-second", "samples.feather")))
+        self.assertTrue(os.path.exists(os.path.join(data_folder, "eyelink_dataset_derivatives", "sub-0001", "ses-second", "samples.feather")))
 
     def test_compute_derivatives_webgazer_feather(self):
         data_folder = os.path.join(current_path.parent, 'data')

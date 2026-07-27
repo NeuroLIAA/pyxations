@@ -1,6 +1,5 @@
-# Ignore all derivatives
-example_dataset_derivatives/
-example_dataset/
+# Ignore all generated derivatives (regenerated from committed datasets by the test suite)
+tests/data/*_derivatives/
 *.pyc
 
 
@@ -8,7 +7,7 @@ example_dataset/
 .idea/
 
 # Ignore virtual environment folder
-.venv/
+.venv*/
 vend/
 env/
 .pytest_cache/
