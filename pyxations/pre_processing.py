@@ -414,7 +414,7 @@ class PreProcessing:
                 valid_w = np.logical_and.reduce([d[c].gt(0) & d[c].lt(W) for c in xcols]) if xcols else True
                 valid_h = np.logical_and.reduce([d[c].gt(0) & d[c].lt(H) for c in ycols]) if ycols else True
 
-            bad = ~(valid_w & valid_h)
+            bad = np.logical_not(valid_w & valid_h)
             if mark_nan_as_bad:
                 bad |= d[coord_cols].isna().any(axis=1)
 

@@ -80,7 +80,7 @@ def test_generic_analysis_hierarchy_uses_generated_bids(generated_datasets):
     assert set(experiment.samples()["subject_id"].unique()) == {"0001"}
 
 
-def test_visual_search_hierarchy_uses_source_behavior(generated_datasets):
+def test_visual_search_hierarchy_uses_bids_events(generated_datasets):
     case = generated_datasets["eyelink"]
     experiment = VisualSearchExperiment(
         case["raw"],

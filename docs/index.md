@@ -43,14 +43,15 @@ See [Usage](usage.md) for an end-to-end walkthrough.
 ## Features
 
 - **Validated BIDS conversion**: write per-eye physiological recordings from
-  EyeLink, Tobii, GazePoint, and WebGazer data and retain vendor originals in
-  `sourcedata/`.
+  EyeLink, Tobii, GazePoint, and WebGazer data, normalize tracker/behavioral
+  events, and retain a verbatim archival copy under `sourcedata/`.
 - **EDF parsing**: extract headers, messages, calibration, events and raw samples from EyeLink EDF files (via `edf2asc`).
 - **Multi-vendor support**: input formats for EyeLink, Tobii, Gazepoint and WebGazer.
 - **Trial segmentation**: split continuous recordings using start/end messages, fixed durations or explicit timestamps.
 - **Eye movement detection**: fixations and saccades with REMoDNaV, Engbert–Kliegl and other algorithms.
 - **Saccade direction classification**: right / left / up / down based on start–end coordinates.
-- **Derivatives pipeline**: reproducible per-subject derivatives stored next to the BIDS dataset.
+- **Derivatives pipeline**: reproducible per-subject derivatives computed from
+  raw BIDS without re-reading vendor files.
 - **Visualization**: plots for samples, events and per-trial inspection.
 
 ## Where to go next

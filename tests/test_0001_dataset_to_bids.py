@@ -1,4 +1,5 @@
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -25,9 +26,11 @@ def _write_eyelink(folder: Path) -> None:
                 "** VERSION: EYELINK II 1",
                 "SAMPLES GAZE LEFT RIGHT RATE 1000.00 TRACKING CR FILTER 2",
                 "!MODE RECORD CR 1000 2 1 LR",
+                "MSG 1000 beginning_of_stimuli",
                 "1000 100.0 200.0 500.0 110.0 210.0 510.0",
                 "1001 101.0 201.0 501.0 111.0 211.0 511.0",
                 "1002 102.0 202.0 502.0 112.0 212.0 512.0",
+                "EFIX L 1000 1002 2 101.0 201.0 501.0",
             ]
         )
         + "\n",
@@ -120,17 +123,12 @@ def test_dataset_to_bids_writes_standardized_recordings(
 
     assert (dataset / "dataset_description.json").is_file()
     assert (dataset / "participants.tsv").is_file()
-    assert (
-        dataset / "sourcedata" / "sub-0001" / "ses-A" / "ET"
-    ).is_dir()
-    if format_name == "webgazer":
-        assert (
-            dataset
-            / "sourcedata"
-            / "sub-0001"
-            / "ses-A"
-            / "behavioral"
-        ).is_dir()
+    source_files = sorted(
+        path.name
+        for path in (dataset / "sourcedata").iterdir()
+        if path.is_file()
+    )
+    assert len(source_files) == 1
     physio = list(
         (dataset / "sub-0001" / "ses-A" / "beh").glob("*_physio.tsv.gz")
     )
@@ -139,6 +137,12 @@ def test_dataset_to_bids_writes_standardized_recordings(
     )
     assert len(physio) == eye_count
     assert len(sidecars) == eye_count
+    if format_name == "eyelink":
+        assert len(list(
+            (dataset / "sub-0001" / "ses-A" / "beh").glob(
+                "*_physioevents.tsv.gz"
+            )
+        )) == 1
 
     participants = pd.read_csv(dataset / "participants.tsv", sep="\t")
     assert participants.loc[0, "participant_id"] == "sub-0001"
@@ -160,23 +164,61 @@ def test_dataset_to_bids_writes_standardized_recordings(
 
 
 @pytest.mark.parametrize("format_name", ["gaze", "webgazer"])
-def test_dataset_to_bids_separates_behavioral_only_csv(tmp_path, format_name):
-    dataset = _make_dataset(tmp_path, format_name, include_behavior=True)
-
-    behavioral = (
-        dataset
-        / "sourcedata"
-        / "sub-0001"
-        / "ses-A"
-        / "behavioral"
-        / "s01_A_task-look_behavior.csv"
+def test_dataset_to_bids_preserves_source_folder_verbatim(tmp_path, format_name):
+    source = tmp_path / f"{format_name}-source"
+    source.mkdir()
+    WRITERS[format_name](source)
+    behavioral = source / "behavioral"
+    behavioral.mkdir()
+    pd.DataFrame(
+        {
+            "participant": ["s01"],
+            "trial_type": ["target"],
+            "response_time": [0.42],
+        }
+    ).to_csv(
+        behavioral / "s01_A_task-look_behavior.csv",
+        index=False,
     )
-    et = dataset / "sourcedata" / "sub-0001" / "ses-A" / "ET"
-    assert behavioral.is_file()
-    assert not (et / behavioral.name).exists()
+    documentation = source / "documentation"
+    documentation.mkdir()
+    (documentation / "notes.txt").write_text(
+        "Source-layout preservation test.\n",
+        encoding="utf-8",
+    )
+    dataset = dataset_to_bids(
+        tmp_path,
+        source,
+        f"{format_name}-dataset",
+        format_name=format_name,
+        authors=["Pyxations test suite"],
+    )
+    archived = dataset / "sourcedata"
+    source_paths = sorted(
+        path.relative_to(source) for path in source.rglob("*") if path.is_file()
+    )
+    archived_paths = sorted(
+        path.relative_to(archived)
+        for path in archived.rglob("*")
+        if path.is_file()
+    )
+    assert archived_paths == source_paths
+    for relative_path in source_paths:
+        assert (archived / relative_path).read_bytes() == (
+            source / relative_path
+        ).read_bytes()
+
+    event_file = next(
+        (dataset / "sub-0001" / "ses-A" / "beh").glob("*_events.tsv")
+    )
+    events = pd.read_csv(event_file, sep="\t")
+    assert (
+        "behavioral/s01_A_task-look_behavior.csv"
+        in set(events["source_file"])
+    )
 
 
-def test_derivatives_are_computed_from_raw_bids_sourcedata(tmp_path, monkeypatch):
+def test_derivatives_are_scheduled_from_raw_bids_session(tmp_path, monkeypatch):
     dataset = _make_dataset(tmp_path, "gaze", include_behavior=True)
     calls = []
 
@@ -214,8 +256,25 @@ def test_derivatives_are_computed_from_raw_bids_sourcedata(tmp_path, monkeypatch
 
     assert derivatives == dataset.with_name(f"{dataset.name}_derivatives")
     assert len(calls) == 1
-    assert calls[0][0][0] == (
-        dataset / "sourcedata" / "sub-0001" / "ses-A" / "ET"
+    assert calls[0][0][0] == dataset / "sub-0001" / "ses-A"
+
+
+def test_derivatives_do_not_require_sourcedata(tmp_path):
+    dataset = _make_dataset(tmp_path, "eyelink")
+    shutil.rmtree(dataset / "sourcedata")
+
+    derivatives = compute_derivatives_for_dataset(
+        dataset,
+        "eyelink",
+        detection_algorithm="eyelink",
+        num_processes=1,
+        overwrite=True,
+    )
+
+    assert list(
+        (
+            derivatives / "sub-0001" / "ses-A" / "beh"
+        ).glob("*_physio.tsv.gz")
     )
 
 

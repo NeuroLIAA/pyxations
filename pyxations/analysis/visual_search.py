@@ -16,7 +16,7 @@ class VisualSearchExperiment(Experiment):
         self.dataset_path = Path(dataset_path)
         self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
         self.metadata = pl.read_csv(self.dataset_path / "participants.tsv", separator="\t", 
-                                    dtypes={"subject_id": pl.Utf8, "old_subject_id": pl.Utf8})
+                                    schema_overrides={"subject_id": pl.Utf8, "old_subject_id": pl.Utf8})
         self.subjects = { subject_id:
             VisualSearchSubject(subject_id, old_subject_id, self, search_phase_name, memorization_phase_name,
                      excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}),export_format)
@@ -861,41 +861,83 @@ class VisualSearchSession(Session):
 
 
     def load_behavior_data(self):
-        # Get the name of the only csv file in the behavior path
-        behavior_path = self.session_source_path / "behavioral"
-
-        behavior_files = list(behavior_path.glob("*.csv"))
-        
-        if len(behavior_files) != 1:
+        behavior_path = self.session_dataset_path / "beh"
+        behavior_files = sorted(behavior_path.glob("*_events.tsv"))
+        if not behavior_files:
             raise ValueError(
-                f"There should only be one CSV file in the behavior path for session {self.session_id} "
-                f"of subject {self.subject.subject_id}. Found files: {[file.name for file in behavior_files]}"
+                f"No BIDS events.tsv file was found for session "
+                f"{self.session_id} of subject {self.subject().subject_id}."
             )
-
-        # Load the CSV file
-        name = behavior_files[0].name
-        self.behavior_data = pl.read_csv(
-            behavior_path / name,
-            dtypes={
+        tables = [
+            pl.read_csv(
+                path,
+                separator="\t",
+                null_values="n/a",
+                schema_overrides={
                 "trial_number": pl.Int32,
                 "stimulus": pl.Utf8,
                 "target_present": pl.Int32,
                 "target": pl.Utf8,
                 "correct_response": pl.Int32,
                 "was_answered": pl.Int32
-            }
+                },
+            )
+            for path in behavior_files
+        ]
+        self.behavior_data = (
+            pl.concat(tables, how="diagonal_relaxed")
+            if len(tables) > 1
+            else tables[0]
         )
 
         # Validate that all required columns are present
         missing_columns = set(self.BEH_COLUMNS) - set(self.behavior_data.columns)
         if missing_columns:
-            raise ValueError(f"Missing columns in behavior data: {missing_columns} for session {self.session_id} of subject {self.subject.subject_id}")
+            raise ValueError(
+                f"Missing columns in BIDS events data: {missing_columns} "
+                f"for session {self.session_id} of subject "
+                f"{self.subject().subject_id}"
+            )
 
     def _init_trials(self,samples,fix,sacc,blink,events_path):
-        self._trials = {trial:
-            VisualSearchTrial(trial, self, samples, fix, sacc, blink, events_path, self.behavior_data,self._search_phase_name,self._memorization_phase_name)
-            for trial in samples["trial_number"].unique() 
-            if trial != -1 and trial not in self.excluded_trials and trial in self.behavior_data.select(pl.col("trial_number")).to_series().to_list()
+        def partition(frame):
+            if frame is None:
+                return {}
+            return {
+                group["trial_number"][0]: group
+                for group in frame.partition_by(
+                    "trial_number", maintain_order=True
+                )
+            }
+
+        sample_trials = partition(samples)
+        fixation_trials = partition(fix)
+        saccade_trials = partition(sacc)
+        blink_trials = partition(blink)
+        behavior_trials = partition(self.behavior_data)
+        empty_fix = fix.head(0)
+        empty_sacc = sacc.head(0)
+        empty_blink = blink.head(0) if blink is not None else None
+        self._trials = {
+            trial: VisualSearchTrial(
+                trial,
+                self,
+                sample_rows,
+                fixation_trials.get(trial, empty_fix),
+                saccade_trials.get(trial, empty_sacc),
+                blink_trials.get(trial, empty_blink),
+                events_path,
+                behavior_trials[trial],
+                self._search_phase_name,
+                self._memorization_phase_name,
+                prefiltered=True,
+            )
+            for trial, sample_rows in sample_trials.items()
+            if (
+                trial != -1
+                and trial not in self.excluded_trials
+                and trial in behavior_trials
+            )
         }
     
     def load_data(self, detection_algorithm: str):
@@ -1024,10 +1066,23 @@ class VisualSearchSession(Session):
 
 class VisualSearchTrial(Trial):
 
-    def __init__(self, trial_number, session, samples, fix, sacc, blink, events_path, behavior_data, search_phase_name, memorization_phase_name):
-        super().__init__(trial_number, session, samples, fix, sacc, blink, events_path)
+    def __init__(self, trial_number, session, samples, fix, sacc, blink, events_path, behavior_data, search_phase_name, memorization_phase_name, prefiltered=False):
+        super().__init__(
+            trial_number,
+            session,
+            samples,
+            fix,
+            sacc,
+            blink,
+            events_path,
+            prefiltered=prefiltered,
+        )
 
-        trial_data = behavior_data.filter(pl.col("trial_number") == trial_number)
+        trial_data = (
+            behavior_data
+            if prefiltered
+            else behavior_data.filter(pl.col("trial_number") == trial_number)
+        )
 
         self._target_present = bool(
             trial_data.select("target_present").item()

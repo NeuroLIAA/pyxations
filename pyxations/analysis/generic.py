@@ -502,15 +502,9 @@ class Session():
         self.excluded_trials = excluded_trials
         self.session_dataset_path = self.subject().subject_dataset_path / f"ses-{self.session_id}"
         bids_root = self.subject().experiment().dataset_path
-        sourcedata_path = (
-            bids_root
-            / "sourcedata"
-            / f"sub-{self.subject().subject_id}"
-            / f"ses-{self.session_id}"
-        )
-        self.session_source_path = (
-            sourcedata_path if sourcedata_path.exists() else self.session_dataset_path
-        )
+        # Kept as a compatibility alias. Runtime analysis consumes normalized
+        # BIDS data and never depends on the archival sourcedata directory.
+        self.session_source_path = self.session_dataset_path
         self.session_derivatives_path = self.subject().subject_derivatives_path / f"ses-{self.session_id}"
         self._trials = None  # Lazy load trials
         self.export_format = export_format
@@ -630,7 +624,12 @@ class Session():
                 calibration = bundle["calib"]
                 self._calib_data = (
                     _parse_validations(calibration)
-                    if calibration is not None and not calibration.is_empty()
+                    if (
+                        calibration is not None
+                        and not calibration.is_empty()
+                        and "line" in calibration.columns
+                        and "Calib_index" in calibration.columns
+                    )
                     else None
                 )
                 events_path = (
@@ -703,11 +702,41 @@ class Session():
             (pl.lit(self.session_id)).alias("session_id")]), calib_indexes
 
     def _init_trials(self,samples,fix,sacc,blink,events_path):
-        cosas = [trial for trial in samples.select("trial_number").to_series().unique() if trial != -1 and trial not in self.excluded_trials]
-        self._trials = {trial:
-            Trial(trial, self, samples, fix, sacc, blink, events_path)
-            for trial in cosas
-        } 
+        def partition(frame):
+            if frame is None:
+                return {}
+            return {
+                group["trial_number"][0]: group
+                for group in frame.partition_by(
+                    "trial_number", maintain_order=True
+                )
+            }
+
+        sample_trials = partition(samples)
+        fixation_trials = partition(fix)
+        saccade_trials = partition(sacc)
+        blink_trials = partition(blink)
+        empty_fix = fix.head(0)
+        empty_sacc = sacc.head(0)
+        empty_blink = blink.head(0) if blink is not None else None
+        trial_numbers = [
+            trial
+            for trial in sample_trials
+            if trial != -1 and trial not in self.excluded_trials
+        ]
+        self._trials = {
+            trial: Trial(
+                trial,
+                self,
+                sample_trials[trial],
+                fixation_trials.get(trial, empty_fix),
+                saccade_trials.get(trial, empty_sacc),
+                blink_trials.get(trial, empty_blink),
+                events_path,
+                prefiltered=True,
+            )
+            for trial in trial_numbers
+        }
 
     def plot_scanpaths(self,screen_height,screen_width, display: bool = False):
         for trial in self.trials.values():
@@ -769,20 +798,48 @@ class Session():
 class Trial:
 
     def __init__(self, trial_number: int, session: Session, samples: pl.DataFrame, fix: pl.DataFrame, 
-                sacc: pl.DataFrame, blink: pl.DataFrame, events_path: Path):
+                sacc: pl.DataFrame, blink: pl.DataFrame, events_path: Path,
+                prefiltered: bool = False):
         self.trial_number = trial_number
         self.session = session
 
         # Filter per trial
         # If "Calib_index" is a column in samples, set self._calib_index to the value of that column
         
-        self._calib_index = samples.filter(pl.col("trial_number") == trial_number).select("Calib_index").to_series()[0] if "Calib_index" in samples.columns else None
-        
+        sample_rows = (
+            samples
+            if prefiltered
+            else samples.filter(pl.col("trial_number") == trial_number)
+        )
+        fix_rows = (
+            fix
+            if prefiltered
+            else fix.filter(pl.col("trial_number") == trial_number)
+        )
+        sacc_rows = (
+            sacc
+            if prefiltered
+            else sacc.filter(pl.col("trial_number") == trial_number)
+        )
+        blink_rows = (
+            blink
+            if prefiltered or blink is None
+            else blink.filter(pl.col("trial_number") == trial_number)
+        )
+        self._calib_index = (
+            sample_rows["Calib_index"][0]
+            if "Calib_index" in sample_rows.columns
+            else None
+        )
 
-        self._samples = samples.filter(pl.col("trial_number") == trial_number).drop("Calib_index",strict=False)
-        self._fix = fix.filter(pl.col("trial_number") == trial_number).drop("Calib_index",strict=False)
-        self._sacc = sacc.filter(pl.col("trial_number") == trial_number).drop("Calib_index",strict=False)
-        self._blink = blink.filter(pl.col("trial_number") == trial_number).drop("Calib_index",strict=False) if blink is not None else None
+        self._samples = sample_rows.drop("Calib_index", strict=False)
+        self._fix = fix_rows.drop("Calib_index", strict=False)
+        self._sacc = sacc_rows.drop("Calib_index", strict=False)
+        self._blink = (
+            blink_rows.drop("Calib_index", strict=False)
+            if blink_rows is not None
+            else None
+        )
 
         # Get the start time
         start_time = self._samples.select("tSample").to_series()[0]

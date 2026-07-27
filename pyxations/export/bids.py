@@ -669,15 +669,14 @@ class BIDSDerivativeExport:
         return event_path, event_json
 
     @staticmethod
-    def _read_table(path: Path, metadata: Mapping) -> pd.DataFrame:
+    def _read_table(path: Path, metadata: Mapping) -> pl.DataFrame:
         columns = list(metadata["Columns"])
-        return pd.read_csv(
+        return pl.read_csv(
             path,
-            sep="\t",
-            header=None,
-            names=columns,
-            na_values=["n/a"],
-            keep_default_na=True,
+            separator="\t",
+            has_header=False,
+            new_columns=columns,
+            null_values=["n/a"],
         )
 
     def read_derivatives(
@@ -705,14 +704,16 @@ class BIDSDerivativeExport:
         samples_bids = self._read_table(physio_path, physio_metadata)
         sample_mapping = physio_metadata.get("PyxationsColumnMap", {})
         sample_columns = [
-            column for column in sample_mapping if column in samples_bids
+            column
+            for column in sample_mapping
+            if column in samples_bids.columns
         ]
-        samples = samples_bids.loc[:, sample_columns].rename(
-            columns={column: sample_mapping[column] for column in sample_columns}
+        samples = samples_bids.select(sample_columns).rename(
+            {column: sample_mapping[column] for column in sample_columns}
         )
 
         output: dict[str, pl.DataFrame | None] = {
-            "samples": pl.from_pandas(samples),
+            "samples": samples,
             "fix": pl.DataFrame(),
             "sacc": pl.DataFrame(),
             "blink": pl.DataFrame(),
@@ -737,24 +738,33 @@ class BIDSDerivativeExport:
         table_columns = event_metadata.get("PyxationsTableColumns", {})
         for table_name in ("fix", "sacc", "blink", "msg"):
             original_columns = list(table_columns.get(table_name, []))
-            rows = events.loc[events["pyxations_table"] == table_name]
+            rows = events.filter(pl.col("pyxations_table") == table_name)
             bids_columns = [
                 bids_column
                 for bids_column, original in event_mapping.items()
-                if original in original_columns and bids_column in rows
+                if original in original_columns
+                and bids_column in rows.columns
             ]
-            if rows.empty:
+            if rows.is_empty():
                 output[table_name] = pl.DataFrame(
                     {column: [] for column in original_columns}
                 )
                 continue
-            reconstructed = rows.loc[:, bids_columns].rename(
-                columns={
+            reconstructed = rows.select(bids_columns).rename(
+                {
                     column: event_mapping[column] for column in bids_columns
                 }
             )
-            reconstructed = reconstructed.reindex(columns=original_columns)
-            output[table_name] = pl.from_pandas(
-                reconstructed.reset_index(drop=True)
+            missing_columns = [
+                column
+                for column in original_columns
+                if column not in reconstructed.columns
+            ]
+            if missing_columns:
+                reconstructed = reconstructed.with_columns(
+                    [pl.lit(None).alias(column) for column in missing_columns]
+                )
+            output[table_name] = reconstructed.select(
+                original_columns
             )
         return output

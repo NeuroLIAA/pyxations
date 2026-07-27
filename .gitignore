@@ -12,6 +12,7 @@ vend/
 env/
 .pytest_cache/
 .migration-*/
+.bids-first-*/
 
 *.log
 *pyxations.egg-info

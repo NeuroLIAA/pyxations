@@ -16,12 +16,11 @@ physiological format in BIDS 1.11.1:
 │       └── beh/
 │           ├── sub-0001_ses-<session>_task-<task>_recording-eye1_physio.tsv.gz
 │           ├── sub-0001_ses-<session>_task-<task>_recording-eye1_physio.json
+│           ├── sub-0001_ses-<session>_task-<task>_recording-eye1_physioevents.tsv.gz
+│           ├── sub-0001_ses-<session>_task-<task>_events.tsv
 │           └── ...           # one recording per tracked eye
 ├── sourcedata/
-│   └── sub-0001/
-│       └── ses-<session>/
-│           ├── ET/           # original vendor data
-│           └── behavioral/   # original logs, when present
+│   └── ...                   # byte-for-byte copy of the input folder
 └── ...
 ```
 
@@ -31,9 +30,12 @@ Key points:
 - **Sessions come from the filename**. The next underscore-separated token after the subject ID becomes the session label. Use `session_substrings=N` if your session ID spans several tokens (e.g. `sub_2024-05-12_morning`).
 - **Standardized samples live under `beh/`**. Each eye is represented by a
   headerless `physio.tsv.gz` table and its JSON metadata sidecar.
-- **Original files live under `sourcedata/`**. Pyxations continues to use these
-  vendor files when computing derivatives, without mixing non-BIDS filenames
-  into the raw BIDS subject directories.
+- **Raw events also live under `beh/`**. Tracker messages and reported
+  fixations, saccades, and blinks use `physioevents.tsv.gz`; behavioral trial
+  tables use BIDS `events.tsv`.
+- **Original files live under `sourcedata/` only for provenance**. The complete
+  input tree is copied verbatim. Derivative computation and analysis read the
+  normalized raw BIDS files and continue to work if `sourcedata/` is absent.
 - **Validation is executable**. The test suite runs the official BIDS Validator
   against generated datasets for every supported input format.
 
@@ -85,13 +87,17 @@ Pyxations ships two pluggable eye-movement detectors. Pick one with `detection_a
 - **`remodnav`**: wraps the [REMoDNaV](https://github.com/psychoinformatics-de/remodnav) package.
 - **`engbert`**: Python port of the `detecteyemovements.m` routine from the [EYE-EEG toolbox](https://github.com/olafdimigen/eye-eeg/blob/master/detecteyemovements.m).
 
-When the source is EyeLink, the tracker's own event reports are also written under `eyelink_events/`, so you can compare any algorithm's output against EyeLink's parser without re-running anything.
+When the source is EyeLink, the tracker's own event reports are retained in the
+raw BIDS `physioevents.tsv.gz`, so they can be selected as the derivative event
+source or compared with another detector without reading the ASC/EDF again.
 
 See [`pyxations.methods.eyemovement`](api_reference.md#methodseyemovement) for each algorithm's parameters and references.
 
 ## Supported input formats
 
-`dataset_format=` selects the parser used to read raw recordings. Currently wired in:
+`dataset_format=` identifies the source format and its normalized BIDS event
+semantics. Derivative computation itself reads the raw BIDS dataset. Currently
+supported:
 
 - `eyelink`: EDF files; requires `edf2asc` (see [Requirements](requirements.md)).
 - `tobii`: Tobii native exports.

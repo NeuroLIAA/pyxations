@@ -34,12 +34,11 @@ path/to/output/my_experiment/
 │   └── ses-<session>/
 │       └── beh/
 │           ├── sub-0001_ses-<session>_task-<task>_recording-eye1_physio.tsv.gz
-│           └── sub-0001_ses-<session>_task-<task>_recording-eye1_physio.json
+│           ├── sub-0001_ses-<session>_task-<task>_recording-eye1_physio.json
+│           ├── sub-0001_ses-<session>_task-<task>_recording-eye1_physioevents.tsv.gz
+│           └── sub-0001_ses-<session>_task-<task>_events.tsv
 └── sourcedata/
-    └── sub-0001/
-        └── ses-<session>/
-            ├── ET/            # original vendor recording
-            └── behavioral/    # original behavioral files, when present
+    └── ...                    # verbatim copy of path/to/raw/files
 └── ...
 ```
 
@@ -51,8 +50,10 @@ underscore-separated tokens.
 
 Pyxations writes one headerless `physio.tsv.gz` recording per eye and a JSON
 sidecar containing the sample columns, eye, sampling frequency, coordinate
-description, and pupil units. The original files are retained under
-`sourcedata/` for derivative processing and provenance.
+description, and pupil units. Tracker events are normalized to
+`physioevents.tsv.gz`, and behavioral tables to `events.tsv`. The original
+input tree is retained byte-for-byte under `sourcedata/` for provenance only;
+derivative processing does not read it.
 
 To validate an output dataset locally, install the official BIDS Validator or
 Deno and run:
@@ -71,6 +72,11 @@ messages, detected fixations, saccades and blinks, split into trials. They are
 stored in a sibling `*_derivatives/` folder next to the raw BIDS dataset,
 preserving its subject/session layout. Both folders are checked with the
 official BIDS Validator.
+
+The derivative step starts from raw BIDS `physio`, `physioevents`, and
+`events` files. This keeps conversion work out of repeated analyses and means
+the dataset remains fully processable after its archival `sourcedata/` copy is
+removed.
 
 BIDS `physio.tsv.gz`/JSON and `physioevents.tsv.gz`/JSON files are the canonical
 default. The sidecars preserve preprocessing provenance and reversible mappings

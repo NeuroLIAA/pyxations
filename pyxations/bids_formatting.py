@@ -1,17 +1,17 @@
 from pathlib import Path
+import inspect
+import re
 import shutil
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
 from pyxations.methods.eyemovement.REMoDNaV import RemodnavDetection
 from pyxations.methods.eyemovement.engbert import EngbertDetection
 
-import pyxations.formats.eyelink.parse as eyelink_parser 
-import pyxations.formats.webgazer.parse as webgazer_parser
-import pyxations.formats.tobii.parse as tobii_parser
-import pyxations.formats.gazepoint.parse as gaze_parser
 from pyxations.export import BIDS_EXPORT
-from pyxations.bids import write_bids_dataset
+from pyxations.bids import read_raw_bids_session, write_bids_dataset
 from pyxations.export.bids import initialize_bids_derivative
+from pyxations.formats.generic import BidsParse
+from pyxations.pre_processing import PreProcessing
 
 EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection, 'engbert': EngbertDetection}
 
@@ -33,6 +33,279 @@ def _clean_bids_session_workfiles(session_folder_path, detection_algorithm):
             shutil.rmtree(directory)
     for ascii_file in session_folder_path.glob("*.asc"):
         ascii_file.unlink()
+
+
+def _segmentation_recipe(pre_processing, kwargs):
+    prefer_durations = kwargs.get("prefer_durations", False)
+    have_explicit_times = (
+        "start_times" in kwargs and "end_times" in kwargs
+    )
+    have_durations = "start_msgs" in kwargs and "durations" in kwargs
+    have_message_times = "start_msgs" in kwargs and "end_msgs" in kwargs
+    if not (have_explicit_times or have_durations or have_message_times):
+        return None
+    if have_explicit_times:
+        function_name = "split_all_into_trials"
+    elif have_durations and (prefer_durations or not have_message_times):
+        function_name = "split_all_into_trials_by_durations"
+    else:
+        function_name = "split_all_into_trials_by_msgs"
+    allowed = set(
+        inspect.signature(
+            getattr(pre_processing, function_name)
+        ).parameters
+    )
+    candidates = {
+        "trial_labels",
+        "start_times",
+        "end_times",
+        "allow_open_last",
+        "require_nonoverlap",
+        "start_msgs",
+        "end_msgs",
+        "durations",
+        "case_insensitive",
+        "use_regex",
+        "return_match_token",
+    }
+    parameters = {
+        key: value
+        for key, value in kwargs.items()
+        if key in candidates and key in allowed
+    }
+    return function_name, parameters
+
+
+def _assign_default_trials(pre_processing):
+    samples = pre_processing.samples
+    if "trial_number" not in samples:
+        samples["trial_number"] = 0
+    else:
+        samples["trial_number"] = (
+            pd.to_numeric(samples["trial_number"], errors="coerce")
+            .fillna(0)
+            .astype(int)
+        )
+    if "phase" not in samples:
+        samples["phase"] = ""
+    for table_name in ("fixations", "saccades", "blinks"):
+        table = getattr(pre_processing, table_name)
+        if table.empty:
+            if "trial_number" not in table:
+                table["trial_number"] = pd.Series(dtype="int64")
+            if "phase" not in table:
+                table["phase"] = pd.Series(dtype="object")
+            continue
+        table["trial_number"] = 0
+        table["phase"] = ""
+        for trial_number, group in samples.groupby("trial_number"):
+            start = group["tSample"].min()
+            end = group["tSample"].max()
+            mask = (table["tStart"] >= start) & (table["tEnd"] <= end)
+            table.loc[mask, "trial_number"] = int(trial_number)
+
+
+def _detect_from_bids(
+    raw,
+    *,
+    dataset_format,
+    detection_algorithm,
+    session_folder_path,
+    kwargs,
+):
+    samples = raw.samples.copy()
+    blinks = raw.blinks.copy()
+    if detection_algorithm == "eyelink":
+        if dataset_format != "eyelink":
+            raise ValueError(
+                "The eyelink detector requires tracker-reported EyeLink events"
+            )
+        return (
+            samples,
+            raw.fixations.copy(),
+            raw.saccades.copy(),
+            blinks,
+        )
+
+    detector_type = EYE_MOVEMENT_DETECTION_DICT.get(detection_algorithm)
+    if detector_type is None:
+        raise ValueError(
+            f"Unknown eye-movement detector: {detection_algorithm}"
+        )
+    if dataset_format != "eyelink" and not {"X", "Y"}.issubset(samples):
+        eye_prefix = "L" if {"LX", "LY"}.issubset(samples) else "R"
+        samples["X"] = samples[f"{eye_prefix}X"]
+        samples["Y"] = samples[f"{eye_prefix}Y"]
+        pupil_column = f"{eye_prefix}Pupil"
+        if pupil_column in samples:
+            samples["Pupil"] = samples[pupil_column]
+        samples["eye"] = eye_prefix
+    detector = detector_type(
+        session_folder_path=session_folder_path,
+        samples=samples,
+    )
+    if detection_algorithm == "remodnav" and {"X", "Y"}.issubset(samples):
+        config = {
+            "webgazer": {"savgol_length": 0.195, "max_pso_dur": 0.1},
+            "gaze": {"savgol_length": 0.19, "max_pso_dur": 0.4},
+            "tobii": {"savgol_length": 0.195, "max_pso_dur": 0.3},
+        }.get(dataset_format, {})
+        detector_rate = {
+            "webgazer": 30.0,
+            "gaze": 60.0,
+            "tobii": 60.0,
+        }.get(dataset_format, raw.sampling_frequency)
+        fixations, saccades = detector.run_eye_movement_from_samples(
+            detector_rate,
+            config=config,
+        )
+    else:
+        detection_method = detector.detect_eye_movements
+        accepted = set(inspect.signature(detection_method).parameters)
+        detection_kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key in accepted
+        }
+        fixations, saccades = detection_method(**detection_kwargs)
+    return samples, fixations, saccades, blinks
+
+
+def process_bids_session(
+    raw_session_path,
+    dataset_format,
+    detection_algorithm,
+    session_folder_path,
+    force_best_eye,
+    keep_ascii,
+    overwrite,
+    exp_format,
+    **kwargs,
+):
+    """Compute derivatives from normalized raw BIDS tables only."""
+
+    raw = read_raw_bids_session(raw_session_path)
+    session_folder_path = Path(session_folder_path)
+    session_folder_path.mkdir(parents=True, exist_ok=True)
+
+    messages = raw.messages.copy()
+    message_keywords = kwargs.pop("msg_keywords", None)
+    if message_keywords and not messages.empty:
+        pattern = "|".join(
+            re.escape(keyword) for keyword in message_keywords
+        )
+        messages = messages.loc[
+            messages["message"].astype(str).str.contains(
+                pattern, case=False, regex=True, na=False
+            )
+        ].reset_index(drop=True)
+
+    samples, fixations, saccades, blinks = _detect_from_bids(
+        raw,
+        dataset_format=dataset_format,
+        detection_algorithm=detection_algorithm,
+        session_folder_path=session_folder_path,
+        kwargs=kwargs,
+    )
+
+    if (
+        force_best_eye
+        and not raw.calibration.empty
+        and "Calib_index" in raw.calibration
+        and "line" in raw.calibration
+        and raw.calibration["line"].astype(str).str.contains(
+            "CAL VALIDATION"
+        ).any()
+    ):
+        calibration_indexes = raw.calibration["Calib_index"].unique()
+        best_eyes = [
+            find_besteye(group)
+            for _, group in raw.calibration.groupby("Calib_index")
+        ]
+        selected = [
+            keep_eye(
+                best_eyes[index],
+                samples.loc[samples["Calib_index"] == calibration_index],
+                fixations.loc[
+                    fixations["Calib_index"] == calibration_index
+                ],
+                blinks.loc[blinks["Calib_index"] == calibration_index],
+                saccades.loc[
+                    saccades["Calib_index"] == calibration_index
+                ],
+            )
+            for index, calibration_index in enumerate(calibration_indexes)
+            if best_eyes[index] in {"L", "R"}
+        ]
+        if selected:
+            samples, fixations, blinks, saccades = [
+                pd.concat([frames[position] for frames in selected])
+                for position in range(4)
+            ]
+
+    pre_processing = PreProcessing(
+        samples,
+        fixations,
+        saccades,
+        blinks,
+        messages,
+        session_folder_path,
+    )
+    pre_processing.set_metadata(
+        screen_width=raw.screen_width or kwargs.get("screen_width"),
+        screen_height=raw.screen_height or kwargs.get("screen_height"),
+    )
+    segmentation = _segmentation_recipe(pre_processing, kwargs)
+    if segmentation:
+        name, parameters = segmentation
+        recipe = {name: parameters}
+        if dataset_format == "eyelink":
+            bad_parameters = {
+                key: kwargs[key]
+                for key in (
+                    "screen_height",
+                    "screen_width",
+                    "mark_nan_as_bad",
+                    "inclusive_bounds",
+                )
+                if key in kwargs
+            }
+            recipe = {
+                "bad_samples": bad_parameters,
+                name: parameters,
+                "saccades_direction": (
+                    {"tol_deg": kwargs["tol_deg"]}
+                    if "tol_deg" in kwargs
+                    else {}
+                ),
+            }
+        pre_processing.process(recipe)
+    else:
+        _assign_default_trials(pre_processing)
+
+    behavioral_columns = kwargs.get("behavioral_columns")
+    if behavioral_columns and not raw.behavioral_events.empty:
+        metadata = raw.behavioral_events.copy()
+        if "trial_number" in metadata:
+            pre_processing.add_trial_metadata(
+                metadata, behavioral_columns
+            )
+
+    parser = BidsParse(session_folder_path, exp_format)
+    parser.detection_algorithm = detection_algorithm
+    parser.store_dataframes(
+        pre_processing.samples,
+        dfCalib=raw.calibration,
+        dfFix=pre_processing.fixations,
+        dfSacc=pre_processing.saccades,
+        dfHeader=raw.header,
+        dfBlink=pre_processing.blinks,
+        dfMsg=pre_processing.user_messages,
+    )
+    if exp_format == BIDS_EXPORT:
+        _clean_bids_session_workfiles(
+            session_folder_path, detection_algorithm
+        )
 
 
 def find_besteye(df_cal):
@@ -121,7 +394,7 @@ def dataset_to_bids(
         authors=authors,
         overwrite=overwrite,
     )
-def process_session(eye_tracking_data_path, dataset_format, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs):
+def process_session(raw_session_path, dataset_format, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs):
     # For BIDS, algorithm-specific recording labels let multiple detector
     # outputs coexist in one derivative session.
     if not overwrite and session_folder_path.exists():
@@ -138,22 +411,19 @@ def process_session(eye_tracking_data_path, dataset_format, detection_algorithm,
         elif any(session_folder_path.iterdir()):
             return
     
-    if dataset_format == 'eyelink':
-        eyelink_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
-        
-    elif dataset_format == 'webgazer':
-        webgazer_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, exp_format, **kwargs)
-    elif dataset_format == 'tobii':
-        tobii_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, exp_format, **kwargs)
-    elif dataset_format == 'gaze':
-        gaze_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
-    else:
+    if dataset_format not in {"eyelink", "webgazer", "tobii", "gaze"}:
         raise ValueError(f"Dataset format {dataset_format} not found.")
-
-    if exp_format == BIDS_EXPORT:
-        _clean_bids_session_workfiles(
-            session_folder_path, detection_algorithm
-        )
+    process_bids_session(
+        raw_session_path,
+        dataset_format,
+        detection_algorithm,
+        session_folder_path,
+        force_best_eye,
+        keep_ascii,
+        overwrite,
+        exp_format,
+        **kwargs,
+    )
 
 
 def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detection_algorithm='remodnav', num_processes=4,
@@ -230,18 +500,9 @@ def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detecti
                     session_name
                 ]
 
-            source_session = (
-                bids_dataset_folder
-                / "sourcedata"
-                / subject.name
-                / session.name
-            )
-            if not source_session.exists():
-                source_session = session
-
             jobs.append(
                 (
-                    source_session / "ET",
+                    session,
                     dataset_format,
                     detection_algorithm,
                     derivatives_folder / subject.name / session.name,
