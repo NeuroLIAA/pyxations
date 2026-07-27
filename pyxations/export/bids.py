@@ -11,13 +11,12 @@ from pathlib import Path
 
 import polars as pl
 
-from pyxations.bids import BIDS_VERSION
+from pyxations.bids import BIDS_VERSION, bids_label
 from pyxations.tables import (
     SessionTables,
     frame_payload,
     payload_frame,
     read_tsv,
-    tabular_frame,
     write_tsv,
 )
 
@@ -27,11 +26,6 @@ def _write_json(path: Path, value: Mapping) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as stream:
         json.dump(value, stream, indent=2, ensure_ascii=False)
         stream.write("\n")
-
-
-def _bids_label(value: str, fallback: str) -> str:
-    label = re.sub(r"[^A-Za-z0-9]+", "", str(value))
-    return label or fallback
 
 
 def _column_label(value: str) -> str:
@@ -51,10 +45,7 @@ def _column_mapping(
         base = f"pyx_{_column_label(original)}"
         candidate = base
         index = 2
-        while (
-            candidate in bids_to_original
-            and bids_to_original[candidate] != original
-        ):
+        while candidate in bids_to_original and bids_to_original[candidate] != original:
             candidate = f"{base}_{index}"
             index += 1
         original_to_bids[original] = candidate
@@ -154,9 +145,7 @@ class BIDSDerivativeExport:
     def _roots(session_path: Path) -> tuple[Path, Path]:
         derivative_root = session_path.parents[1]
         suffix = "_derivatives"
-        raw_name = (
-            derivative_root.name.removesuffix(suffix)
-        )
+        raw_name = derivative_root.name.removesuffix(suffix)
         return derivative_root, derivative_root.with_name(raw_name)
 
     @staticmethod
@@ -166,9 +155,7 @@ class BIDSDerivativeExport:
         values = []
         for path in sorted(folder.glob("*_physio.json")):
             try:
-                values.append(
-                    (path, json.loads(path.read_text(encoding="utf-8")))
-                )
+                values.append((path, json.loads(path.read_text(encoding="utf-8"))))
             except (OSError, json.JSONDecodeError):
                 continue
         return values
@@ -252,9 +239,7 @@ class BIDSDerivativeExport:
         return sidecars[0][1] if sidecars else {}
 
     @staticmethod
-    def _time_scale(
-        frame: pl.DataFrame, time_column: str, metadata: dict
-    ) -> float:
+    def _time_scale(frame: pl.DataFrame, time_column: str, metadata: dict) -> float:
         if time_column == "t_acum":
             return 1_000.0
         if {"TIMETICK", "BPOGX"}.intersection(frame.columns):
@@ -286,7 +271,7 @@ class BIDSDerivativeExport:
         sample_frame = tables.samples
         sidecars = self._raw_sidecars(session_path)
         prefix = self._source_prefix(session_path, sidecars)
-        label = _bids_label(detection_algorithm.lower(), "pyxations")
+        label = bids_label(detection_algorithm.lower(), fallback="pyxations")
         base = f"{prefix}_recording-eye1{label}"
         destination = session_path / "beh"
 
@@ -295,65 +280,59 @@ class BIDSDerivativeExport:
         )
         time_column = self._time_column(sample_frame)
         source_metadata = self._source_metadata(sidecars, recorded_eye)
-        time_scale = self._time_scale(
-            sample_frame, time_column, source_metadata
-        )
+        time_scale = self._time_scale(sample_frame, time_column, source_metadata)
         raw_time = _numeric_series(sample_frame, time_column)
         finite_time = _finite_values(raw_time)
         if finite_time.is_empty():
             raise ValueError("Processed samples contain no valid timestamps")
         time_origin = float(finite_time[0])
 
-        original_to_bids, bids_to_original = _column_mapping(
-            sample_frame.columns
-        )
-        safe_samples = tabular_frame(sample_frame)
+        canonical_columns = {
+            "timestamp": time_column,
+            "x_coordinate": x_column,
+            "y_coordinate": y_column,
+        }
+        if pupil_column:
+            canonical_columns["pupil_size"] = pupil_column
+        auxiliary_columns = [
+            column
+            for column in sample_frame.columns
+            if column not in canonical_columns.values()
+        ]
+        original_to_bids, bids_to_original = _column_mapping(auxiliary_columns)
         expressions = [
             (
                 (pl.col(time_column).cast(pl.Float64, strict=False) - time_origin)
                 / time_scale
             ).alias("timestamp"),
-            pl.col(x_column)
-            .cast(pl.Float64, strict=False)
-            .alias("x_coordinate"),
-            pl.col(y_column)
-            .cast(pl.Float64, strict=False)
-            .alias("y_coordinate"),
+            pl.col(x_column).cast(pl.Float64, strict=False).alias("x_coordinate"),
+            pl.col(y_column).cast(pl.Float64, strict=False).alias("y_coordinate"),
         ]
         if pupil_column:
             expressions.append(
-                pl.col(pupil_column)
-                .cast(pl.Float64, strict=False)
-                .alias("pupil_size")
+                pl.col(pupil_column).cast(pl.Float64, strict=False).alias("pupil_size")
             )
         expressions.extend(
             pl.col(original).alias(bids_column)
             for original, bids_column in original_to_bids.items()
         )
         standardized = (
-            safe_samples.select(expressions)
-            .filter(pl.col("timestamp").is_not_null())
+            sample_frame.select(expressions)
+            .filter(pl.col("timestamp").is_not_null() & pl.col("timestamp").is_finite())
             .sort("timestamp", maintain_order=True)
         )
 
         sampling_frequency = source_metadata.get("SamplingFrequency")
         if sampling_frequency is None and "Rate_recorded" in sample_frame.columns:
-            rates = _finite_values(
-                _numeric_series(sample_frame, "Rate_recorded")
-            )
-            sampling_frequency = (
-                float(rates.median()) if not rates.is_empty() else None
-            )
+            rates = _finite_values(_numeric_series(sample_frame, "Rate_recorded"))
+            sampling_frequency = float(rates.median()) if not rates.is_empty() else None
         sampling_frequency = float(
-            sampling_frequency
-            or _infer_frequency(standardized.get_column("timestamp"))
+            sampling_frequency or _infer_frequency(standardized.get_column("timestamp"))
         )
 
         coordinate = source_metadata.get("x_coordinate", {})
         coordinate_unit = coordinate.get("Units", "arbitrary")
-        coordinate_system = source_metadata.get(
-            "SampleCoordinateSystem", "custom"
-        )
+        coordinate_system = source_metadata.get("SampleCoordinateSystem", "custom")
         coordinate_description = source_metadata.get(
             "SampleCoordinateSystemDescription",
             "Coordinate system retained from the processed source recording.",
@@ -384,6 +363,11 @@ class BIDSDerivativeExport:
                 "Units": coordinate_unit,
             },
             "PyxationsColumnMap": bids_to_original,
+            "PyxationsCanonicalColumnMap": canonical_columns,
+            "PyxationsSampleColumns": sample_frame.columns,
+            "PyxationsSampleSchema": {
+                column: str(dtype) for column, dtype in sample_frame.schema.items()
+            },
             "PyxationsTimeOrigin": time_origin,
             "PyxationsTimeScale": time_scale,
             "PyxationsDetectionAlgorithm": detection_algorithm,
@@ -395,9 +379,7 @@ class BIDSDerivativeExport:
             "PyxationsPreprocessingProvenance": self._read_auxiliary_json(
                 session_path, "preprocessing_provenance.json"
             ),
-            "PyxationsBehavioralEvents": frame_payload(
-                tables.behavioral_events
-            ),
+            "PyxationsBehavioralEvents": frame_payload(tables.behavioral_events),
         }
         if "pupil_size" in standardized.columns:
             pupil_metadata = source_metadata.get("pupil_size", {})
@@ -436,9 +418,7 @@ class BIDSDerivativeExport:
             },
             sample_time_origin=time_origin,
             sample_time_scale=time_scale,
-            sample_duration=float(
-                standardized.get_column("timestamp").max()
-            ),
+            sample_duration=float(standardized.get_column("timestamp").max()),
         )
         return physio_path, event_path
 
@@ -461,11 +441,7 @@ class BIDSDerivativeExport:
             score = (
                 float(
                     (
-                        (valid >= -1.0)
-                        & (
-                            valid
-                            <= max(sample_duration + 1.0, 1.0)
-                        )
+                        (valid >= -1.0) & (valid <= max(sample_duration + 1.0, 1.0))
                     ).mean()
                 )
                 if not valid.is_empty()
@@ -484,15 +460,9 @@ class BIDSDerivativeExport:
         sample_time_scale: float,
         sample_duration: float,
     ) -> tuple[Path | None, Path | None]:
-        all_columns = [
-            column for frame in tables.values() for column in frame.columns
-        ]
-        original_to_bids, bids_to_original = _column_mapping(
-            dict.fromkeys(all_columns)
-        )
-        table_columns = {
-            name: frame.columns for name, frame in tables.items()
-        }
+        all_columns = [column for frame in tables.values() for column in frame.columns]
+        original_to_bids, bids_to_original = _column_mapping(dict.fromkeys(all_columns))
+        table_columns = {name: frame.columns for name, frame in tables.items()}
         event_names = {
             "fix": "fixation",
             "sacc": "saccade",
@@ -504,7 +474,7 @@ class BIDSDerivativeExport:
         for table_name, original_frame in tables.items():
             if original_frame.is_empty():
                 continue
-            frame = tabular_frame(original_frame)
+            frame = original_frame
             onset_column = next(
                 (
                     column
@@ -531,21 +501,21 @@ class BIDSDerivativeExport:
             ).alias("onset")
             if "duration" in frame.columns:
                 duration = (
-                    pl.col("duration")
-                    .cast(pl.Float64, strict=False)
-                    .fill_null(0.0)
+                    pl.col("duration").cast(pl.Float64, strict=False).fill_null(0.0)
                     / scale
                 ).clip(lower_bound=0.0)
             elif "tEnd" in frame.columns and onset_column != "tEnd":
                 duration = (
                     (
-                        pl.col("tEnd").cast(pl.Float64, strict=False)
-                        - pl.col(onset_column).cast(
-                            pl.Float64, strict=False
+                        (
+                            pl.col("tEnd").cast(pl.Float64, strict=False)
+                            - pl.col(onset_column).cast(pl.Float64, strict=False)
                         )
+                        / scale
                     )
-                    / scale
-                ).fill_null(0.0).clip(lower_bound=0.0)
+                    .fill_null(0.0)
+                    .clip(lower_bound=0.0)
+                )
             else:
                 duration = pl.lit(0.0)
 
@@ -556,9 +526,7 @@ class BIDSDerivativeExport:
                     pl.lit(event_names[table_name]).alias("trial_type"),
                     pl.lit(table_name).alias("pyxations_table"),
                     *[
-                        pl.col(original).alias(
-                            original_to_bids[original]
-                        )
+                        pl.col(original).alias(original_to_bids[original])
                         for original in frame.columns
                     ],
                 )
@@ -612,9 +580,7 @@ class BIDSDerivativeExport:
         }
         for bids_column, original in bids_to_original.items():
             metadata[bids_column] = {
-                "Description": (
-                    f"Pyxations event column; original name: {original}."
-                )
+                "Description": (f"Pyxations event column; original name: {original}.")
             }
 
         event_path = destination / f"{base}_physioevents.tsv.gz"
@@ -642,36 +608,54 @@ class BIDSDerivativeExport:
         """Load BIDS derivatives into the canonical session table model."""
 
         session_path = Path(session_path)
-        label = _bids_label(detection_algorithm.lower(), "pyxations")
+        label = bids_label(detection_algorithm.lower(), fallback="pyxations")
         physio_files = sorted(
-            (session_path / "beh").glob(
-                f"*_recording-eye1{label}_physio.tsv.gz"
-            )
+            (session_path / "beh").glob(f"*_recording-eye1{label}_physio.tsv.gz")
         )
         if not physio_files:
             raise FileNotFoundError(
-                f"No BIDS derivatives for {detection_algorithm} in "
-                f"{session_path}"
+                f"No BIDS derivatives for {detection_algorithm} in {session_path}"
             )
         physio_path = physio_files[0]
         physio_metadata = json.loads(
-            physio_path.with_suffix("")
-            .with_suffix(".json")
-            .read_text(encoding="utf-8")
+            physio_path.with_suffix("").with_suffix(".json").read_text(encoding="utf-8")
         )
         samples_bids = self._read_table(physio_path, physio_metadata)
         sample_mapping = physio_metadata.get("PyxationsColumnMap", {})
-        sample_columns = [
-            column
-            for column in sample_mapping
-            if column in samples_bids.columns
+        auxiliary_columns = [
+            column for column in sample_mapping if column in samples_bids.columns
         ]
-        samples = samples_bids.select(sample_columns).rename(
-            {
-                column: sample_mapping[column]
-                for column in sample_columns
-            }
+        canonical_mapping = physio_metadata.get("PyxationsCanonicalColumnMap", {})
+        sample_schema = physio_metadata.get("PyxationsSampleSchema", {})
+        time_origin = float(physio_metadata.get("PyxationsTimeOrigin", 0.0))
+        time_scale = float(physio_metadata.get("PyxationsTimeScale", 1.0))
+
+        sample_expressions = []
+        for bids_column, original in canonical_mapping.items():
+            if bids_column not in samples_bids.columns:
+                continue
+            expression = pl.col(bids_column)
+            if bids_column == "timestamp":
+                expression = expression * time_scale + time_origin
+                if str(sample_schema.get(original, "")).startswith(("Int", "UInt")):
+                    expression = expression.round()
+            dtype = getattr(pl, str(sample_schema.get(original, "")), None)
+            if dtype is not None:
+                expression = expression.cast(dtype, strict=False)
+            sample_expressions.append(expression.alias(original))
+        sample_expressions.extend(
+            pl.col(column).alias(sample_mapping[column]) for column in auxiliary_columns
         )
+        samples = samples_bids.select(sample_expressions)
+        sample_columns = list(
+            physio_metadata.get("PyxationsSampleColumns", samples.columns)
+        )
+        missing = [column for column in sample_columns if column not in samples.columns]
+        if missing:
+            samples = samples.with_columns(
+                pl.lit(None).alias(column) for column in missing
+            )
+        samples = samples.select(sample_columns)
 
         output = {
             "fix": pl.DataFrame(),
@@ -680,9 +664,7 @@ class BIDSDerivativeExport:
             "msg": pl.DataFrame(),
         }
         event_path = physio_path.with_name(
-            physio_path.name.replace(
-                "_physio.tsv.gz", "_physioevents.tsv.gz"
-            )
+            physio_path.name.replace("_physio.tsv.gz", "_physioevents.tsv.gz")
         )
         if event_path.is_file():
             event_metadata = json.loads(
@@ -692,21 +674,14 @@ class BIDSDerivativeExport:
             )
             events = self._read_table(event_path, event_metadata)
             event_mapping = event_metadata.get("PyxationsColumnMap", {})
-            table_columns = event_metadata.get(
-                "PyxationsTableColumns", {}
-            )
+            table_columns = event_metadata.get("PyxationsTableColumns", {})
             for table_name in output:
-                original_columns = list(
-                    table_columns.get(table_name, [])
-                )
-                rows = events.filter(
-                    pl.col("pyxations_table") == table_name
-                )
+                original_columns = list(table_columns.get(table_name, []))
+                rows = events.filter(pl.col("pyxations_table") == table_name)
                 bids_columns = [
                     bids_column
                     for bids_column, original in event_mapping.items()
-                    if original in original_columns
-                    and bids_column in rows.columns
+                    if original in original_columns and bids_column in rows.columns
                 ]
                 if rows.is_empty():
                     output[table_name] = pl.DataFrame(
@@ -714,10 +689,7 @@ class BIDSDerivativeExport:
                     )
                     continue
                 reconstructed = rows.select(bids_columns).rename(
-                    {
-                        column: event_mapping[column]
-                        for column in bids_columns
-                    }
+                    {column: event_mapping[column] for column in bids_columns}
                 )
                 missing = [
                     column
@@ -728,9 +700,7 @@ class BIDSDerivativeExport:
                     reconstructed = reconstructed.with_columns(
                         pl.lit(None).alias(column) for column in missing
                     )
-                output[table_name] = reconstructed.select(
-                    original_columns
-                )
+                output[table_name] = reconstructed.select(original_columns)
 
         return SessionTables(
             samples=samples,
@@ -738,16 +708,10 @@ class BIDSDerivativeExport:
             saccades=output["sacc"],
             blinks=output["blink"],
             messages=output["msg"],
-            calibration=payload_frame(
-                physio_metadata.get("PyxationsCalibration")
-            ),
-            header=payload_frame(
-                physio_metadata.get("PyxationsHeader")
-            ),
+            calibration=payload_frame(physio_metadata.get("PyxationsCalibration")),
+            header=payload_frame(physio_metadata.get("PyxationsHeader")),
             behavioral_events=payload_frame(
                 physio_metadata.get("PyxationsBehavioralEvents")
             ),
-            sampling_frequency=float(
-                physio_metadata["SamplingFrequency"]
-            ),
+            sampling_frequency=float(physio_metadata["SamplingFrequency"]),
         )

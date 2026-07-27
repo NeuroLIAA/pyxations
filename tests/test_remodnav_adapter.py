@@ -42,9 +42,7 @@ def test_run_from_samples_does_not_mutate_config_or_invent_pupil(monkeypatch, tm
     config = {"eye": "Best"}
 
     detector = remodnav_module.RemodnavDetection(tmp_path, samples)
-    fixations, saccades = detector.run_eye_movement_from_samples(
-        100, config=config
-    )
+    fixations, saccades = detector.run_eye_movement_from_samples(100, config=config)
 
     assert config == {"eye": "Best"}
     assert isinstance(fixations, pl.DataFrame)

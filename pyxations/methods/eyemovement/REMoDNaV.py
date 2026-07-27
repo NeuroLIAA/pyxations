@@ -95,10 +95,7 @@ def _make_frame(
 ) -> pl.DataFrame:
     """Create an ordered Polars dataframe."""
     if not isinstance(template, pl.DataFrame):
-        raise TypeError(
-            "REMoDNaV expects a Polars DataFrame, "
-            f"got {type(template)!r}."
-        )
+        raise TypeError(f"REMoDNaV expects a Polars DataFrame, got {type(template)!r}.")
     ordered_rows = [{column: row.get(column) for column in columns} for row in rows]
     if ordered_rows:
         return pl.DataFrame(ordered_rows, strict=False).select(list(columns))
@@ -175,7 +172,9 @@ def _validate_constant(values: np.ndarray, name: str) -> Any:
         return bool(left == right)
 
     if not all(values_equal(value, first) for value in values):
-        raise ValueError(f"{name} must be constant within each continuous sample chunk.")
+        raise ValueError(
+            f"{name} must be constant within each continuous sample chunk."
+        )
     return first
 
 
@@ -217,9 +216,13 @@ class RemodnavDetection(EyeMovementDetection):
                 _make_frame(self.samples, [], _SACCADE_OUTPUT_COLUMNS),
             )
         if timestamps.size != sample_rates.size:
-            raise ValueError("tSample and Rate_recorded must contain the same number of rows.")
+            raise ValueError(
+                "tSample and Rate_recorded must contain the same number of rows."
+            )
         if not np.isfinite(sample_rates).all() or np.any(sample_rates <= 0):
-            raise ValueError("Rate_recorded values must be finite and greater than zero.")
+            raise ValueError(
+                "Rate_recorded values must be finite and greater than zero."
+            )
 
         # Preserve the existing discontinuity rule while applying the expected
         # interval from the preceding sample when the rate changes.
@@ -325,7 +328,9 @@ class RemodnavDetection(EyeMovementDetection):
         if sample_rate <= 0:
             raise ValueError("sample_rate must be greater than zero.")
         if screen_size <= 0 or screen_width <= 0 or screen_distance <= 0:
-            raise ValueError("Screen size, width, and viewing distance must be positive.")
+            raise ValueError(
+                "Screen size, width, and viewing distance must be positive."
+            )
 
         gaze_x = np.asarray(gazex_data, dtype=float).reshape(-1)
         gaze_y = np.asarray(gazey_data, dtype=float).reshape(-1)

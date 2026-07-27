@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-import tomllib
 
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 OPTIONAL_IMPORTS = {"cv2", "multimatch_gaze", "remodnav"}
@@ -55,12 +55,8 @@ def test_feature_dependencies_have_dedicated_extras():
     extras = _project_metadata()["optional-dependencies"]
 
     assert {_package_name(item) for item in extras["remodnav"]} == {"remodnav"}
-    assert {_package_name(item) for item in extras["multimatch"]} == {
-        "multimatch-gaze"
-    }
-    assert {_package_name(item) for item in extras["video"]} == {
-        "opencv-python"
-    }
+    assert {_package_name(item) for item in extras["multimatch"]} == {"multimatch-gaze"}
+    assert {_package_name(item) for item in extras["video"]} == {"opencv-python"}
 
 
 def test_all_extra_is_union_of_feature_extras():

@@ -5,7 +5,6 @@ import pytest
 
 from pyxations import compute_derivatives_for_dataset, dataset_to_bids
 
-
 matplotlib.use("Agg")
 
 

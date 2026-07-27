@@ -8,9 +8,7 @@ from pyxations.export.bids import BIDSDerivativeExport
 
 
 @pytest.mark.parametrize("format_name", ["eyelink", "webgazer", "tobii", "gaze"])
-def test_examples_generate_canonical_bids_derivatives(
-    generated_datasets, format_name
-):
+def test_examples_generate_canonical_bids_derivatives(generated_datasets, format_name):
     case = generated_datasets[format_name]
     derivatives = case["derivatives"]
     description = json.loads(
@@ -25,18 +23,12 @@ def test_examples_generate_canonical_bids_derivatives(
     assert not list(derivatives.rglob("*.feather"))
     assert not list(derivatives.rglob("*.hdf5"))
 
-    session = (
-        derivatives
-        / "sub-0001"
-        / f"ses-{case['session']}"
-    )
+    session = derivatives / "sub-0001" / f"ses-{case['session']}"
     assert {path.name for path in session.iterdir()} == {"beh"}
     assert len(list((session / "beh").glob("*_physio.tsv.gz"))) == 1
     assert len(list((session / "beh").glob("*_physioevents.tsv.gz"))) == 1
 
-    bundle = BIDSDerivativeExport().read_session(
-        session, case["algorithm"]
-    )
+    bundle = BIDSDerivativeExport().read_session(session, case["algorithm"])
     assert not bundle.samples.is_empty()
     assert {
         "samples",

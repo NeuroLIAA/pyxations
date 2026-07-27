@@ -64,7 +64,9 @@ def _column_to_numpy(
             raise ValueError(
                 f"Missing required sample column {name!r}. Available columns: {columns}"
             )
-        return np.full(len(frame), default, dtype=dtype if dtype is not None else object)
+        return np.full(
+            len(frame), default, dtype=dtype if dtype is not None else object
+        )
 
     values = frame[name]
     if hasattr(values, "to_numpy"):
@@ -86,8 +88,7 @@ def _make_frame(
     """Create an ordered Polars dataframe."""
     if not isinstance(template, pl.DataFrame):
         raise TypeError(
-            "EngbertDetection expects a Polars DataFrame, "
-            f"got {type(template)!r}."
+            f"EngbertDetection expects a Polars DataFrame, got {type(template)!r}."
         )
     ordered_rows = [{column: row.get(column) for column in columns} for row in rows]
     if ordered_rows:
@@ -291,7 +292,9 @@ def _split_into_chunks(
         sample_rates = np.full(timestamps.size, float(fallback_fs))
 
     if sample_rates.size != timestamps.size:
-        raise ValueError("Rate_recorded and tSample must contain the same number of rows.")
+        raise ValueError(
+            "Rate_recorded and tSample must contain the same number of rows."
+        )
     if not np.isfinite(sample_rates).all() or np.any(sample_rates <= 0):
         raise ValueError("Sampling rates must be finite and greater than zero.")
 
@@ -323,6 +326,50 @@ def _fallback_sigma(values: np.ndarray) -> float:
         return 1.0
     median = float(np.median(finite))
     return median if median > 0 else 1.0
+
+
+def _append_fixation_record(
+    records: list[dict[str, Any]],
+    start_index: int,
+    end_index: int,
+    *,
+    coordinates: np.ndarray,
+    pupil_values: np.ndarray | None,
+    chunk_start_ms: float,
+    sample_rate: float,
+    eye_label: str,
+    calibration: Any,
+    eyes_recorded: Any,
+    chunk_id: Any,
+) -> None:
+    """Append one fixation assembled from a continuous sample segment."""
+
+    if end_index < start_index:
+        return
+    segment = coordinates[start_index : end_index + 1]
+    if not np.isfinite(segment).all(axis=1).any():
+        return
+
+    pupil_average = (
+        _nanmean_or_nan(pupil_values[start_index : end_index + 1])
+        if pupil_values is not None
+        else float("nan")
+    )
+    records.append(
+        {
+            "tStart": chunk_start_ms + (start_index / sample_rate) * 1000.0,
+            "tEnd": chunk_start_ms + (end_index / sample_rate) * 1000.0,
+            "duration": (end_index - start_index + 1) / sample_rate * 1000.0,
+            "xAvg": _nanmean_or_nan(segment[:, 0]),
+            "yAvg": _nanmean_or_nan(segment[:, 1]),
+            "pupilAvg": pupil_average,
+            "eye": eye_label,
+            "Calib_index": calibration,
+            "Eyes_recorded": eyes_recorded,
+            "Rate_recorded": sample_rate,
+            "chunk": int(chunk_id),
+        }
+    )
 
 
 class EngbertDetection(EyeMovementDetection):
@@ -393,7 +440,9 @@ class EngbertDetection(EyeMovementDetection):
         )
 
         eye_columns = _available_eye_columns(columns)
-        coordinate_arrays: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray | None]] = {}
+        coordinate_arrays: dict[
+            str, tuple[np.ndarray, np.ndarray, np.ndarray | None]
+        ] = {}
         if eye_columns["has_L"]:
             coordinate_arrays["L"] = (
                 _column_to_numpy(self.samples, "LX", dtype=float),
@@ -476,9 +525,7 @@ class EngbertDetection(EyeMovementDetection):
                         vecvel(xy, sample_rate, smoothlevel=smoothlevel)
                     )
 
-            minimum_samples = max(
-                1, int(round(mindur_ms * sample_rate / 1000.0))
-            )
+            minimum_samples = max(1, round(mindur_ms * sample_rate / 1000.0))
 
             for eye_label, xy, pupil_values in streams:
                 valid_coordinates = np.isfinite(xy).all(axis=1)
@@ -505,42 +552,21 @@ class EngbertDetection(EyeMovementDetection):
                     sdy=sigma_y,
                 )
 
-                def append_fixation(start_index: int, end_index: int) -> None:
-                    if end_index < start_index:
-                        return
-                    segment = xy[start_index : end_index + 1]
-                    finite_segment = np.isfinite(segment).all(axis=1)
-                    if not finite_segment.any():
-                        return
-
-                    pupil_average = (
-                        _nanmean_or_nan(pupil_values[start_index : end_index + 1])
-                        if pupil_values is not None
-                        else float("nan")
-                    )
-                    fixation_records.append(
-                        {
-                            "tStart": chunk_start_ms
-                            + (start_index / sample_rate) * 1000.0,
-                            "tEnd": chunk_start_ms
-                            + (end_index / sample_rate) * 1000.0,
-                            "duration": (end_index - start_index + 1)
-                            / sample_rate
-                            * 1000.0,
-                            "xAvg": _nanmean_or_nan(segment[:, 0]),
-                            "yAvg": _nanmean_or_nan(segment[:, 1]),
-                            "pupilAvg": pupil_average,
-                            "eye": eye_label,
-                            "Calib_index": calib_value,
-                            "Eyes_recorded": eyes_value,
-                            "Rate_recorded": sample_rate,
-                            "chunk": int(chunk_id),
-                        }
-                    )
-
                 if saccades.size == 0:
                     valid_indices = np.flatnonzero(valid_coordinates)
-                    append_fixation(int(valid_indices[0]), int(valid_indices[-1]))
+                    _append_fixation_record(
+                        fixation_records,
+                        int(valid_indices[0]),
+                        int(valid_indices[-1]),
+                        coordinates=xy,
+                        pupil_values=pupil_values,
+                        chunk_start_ms=chunk_start_ms,
+                        sample_rate=sample_rate,
+                        eye_label=eye_label,
+                        calibration=calib_value,
+                        eyes_recorded=eyes_value,
+                        chunk_id=chunk_id,
+                    )
                     continue
 
                 onset_indices = saccades[:, 0].astype(int)
@@ -578,17 +604,50 @@ class EngbertDetection(EyeMovementDetection):
                 sorted_offsets = offset_indices[order]
 
                 if sorted_onsets[0] > 0:
-                    append_fixation(0, int(sorted_onsets[0] - 1))
+                    _append_fixation_record(
+                        fixation_records,
+                        0,
+                        int(sorted_onsets[0] - 1),
+                        coordinates=xy,
+                        pupil_values=pupil_values,
+                        chunk_start_ms=chunk_start_ms,
+                        sample_rate=sample_rate,
+                        eye_label=eye_label,
+                        calibration=calib_value,
+                        eyes_recorded=eyes_value,
+                        chunk_id=chunk_id,
+                    )
 
                 for event_index in range(len(sorted_onsets) - 1):
-                    append_fixation(
+                    _append_fixation_record(
+                        fixation_records,
                         int(sorted_offsets[event_index] + 1),
                         int(sorted_onsets[event_index + 1] - 1),
+                        coordinates=xy,
+                        pupil_values=pupil_values,
+                        chunk_start_ms=chunk_start_ms,
+                        sample_rate=sample_rate,
+                        eye_label=eye_label,
+                        calibration=calib_value,
+                        eyes_recorded=eyes_value,
+                        chunk_id=chunk_id,
                     )
 
                 last_offset = int(sorted_offsets[-1])
                 if last_offset < (indices.size - 1):
-                    append_fixation(last_offset + 1, indices.size - 1)
+                    _append_fixation_record(
+                        fixation_records,
+                        last_offset + 1,
+                        indices.size - 1,
+                        coordinates=xy,
+                        pupil_values=pupil_values,
+                        chunk_start_ms=chunk_start_ms,
+                        sample_rate=sample_rate,
+                        eye_label=eye_label,
+                        calibration=calib_value,
+                        eyes_recorded=eyes_value,
+                        chunk_id=chunk_id,
+                    )
 
         fixation_records.sort(key=lambda row: row["tEnd"])
         saccade_records.sort(key=lambda row: row["tEnd"])

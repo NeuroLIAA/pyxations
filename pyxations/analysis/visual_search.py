@@ -1,13 +1,27 @@
-from pathlib import Path
-import polars as pl
-from pyxations.visualization.visualization import Visualization
 import ast
+from typing import ClassVar
+
 import matplotlib.pyplot as plt
 import numpy as np
-from pyxations.analysis.generic import Experiment, Subject, Session, Trial, _find_fixation_cutoff, STIMULI_FOLDER, ITEMS_FOLDER
+import polars as pl
+
+from pyxations.analysis.generic import (
+    ITEMS_FOLDER,
+    STIMULI_FOLDER,
+    Experiment,
+    Session,
+    Subject,
+    Trial,
+    _find_fixation_cutoff,
+    _partition_trials,
+)
+from pyxations.tables import read_tsv
+from pyxations.visualization.visualization import Visualization
+
 
 def _as(obj, typ):
-    if isinstance(obj, typ): return obj
+    if isinstance(obj, typ):
+        return obj
     return ast.literal_eval(obj)
 
 
@@ -39,16 +53,13 @@ def _plot_grouped_mean_with_se(
             pl.col(y).std(ddof=1).alias("std"),
             pl.len().alias("n"),
         )
-        .with_columns(
-            (pl.col("std") / pl.col("n").sqrt()).alias("se")
-        )
+        .with_columns((pl.col("std") / pl.col("n").sqrt()).alias("se"))
     )
 
     for group_value in group_order:
         group_data = summary.filter(pl.col(group) == group_value)
         group_summary = {
-            row[x]: (row["mean"], row["se"])
-            for row in group_data.iter_rows(named=True)
+            row[x]: (row["mean"], row["se"]) for row in group_data.iter_rows(named=True)
         }
         present_categories = [value for value in x_order if value in group_summary]
         positions = np.asarray(
@@ -67,7 +78,7 @@ def _plot_grouped_mean_with_se(
             dtype=float,
         )
 
-        line, = ax.plot(positions, means, label=str(group_value))
+        (line,) = ax.plot(positions, means, label=str(group_value))
         valid_error = np.isfinite(standard_errors)
         if valid_error.any():
             ax.fill_between(
@@ -125,8 +136,8 @@ def _plot_cumulative_mean_with_se(
 
     standard_errors = np.full(max_fixations, np.nan, dtype=float)
     for index in np.flatnonzero(valid_counts > 1):
-        standard_errors[index] = (
-            np.nanstd(matrix[:, index], ddof=1) / np.sqrt(valid_counts[index])
+        standard_errors[index] = np.nanstd(matrix[:, index], ddof=1) / np.sqrt(
+            valid_counts[index]
         )
 
     fixation_numbers = np.arange(1, max_fixations + 1, dtype=float)
@@ -184,9 +195,7 @@ def _plot_speed_accuracy_tradeoff(
         ax_hist_y = fig.add_subplot(grid[bottom_row, 1], sharey=ax)
 
         for target_present in target_presence_values:
-            group_data = subset.filter(
-                pl.col("target_present") == target_present
-            )
+            group_data = subset.filter(pl.col("target_present") == target_present)
             if group_data.is_empty():
                 continue
             ax.scatter(
@@ -269,9 +278,7 @@ def _plot_rt_bin_bars(
         heights = [values_by_bin.get(rt_bin, 0) for rt_bin in rt_bins]
         ax.bar(positions, heights)
     else:
-        hue_values = (
-            data.get_column(hue_column).unique(maintain_order=True).to_list()
-        )
+        hue_values = data.get_column(hue_column).unique(maintain_order=True).to_list()
         bar_width = 0.8 / max(len(hue_values), 1)
 
         for hue_index, hue_value in enumerate(hue_values):
@@ -311,38 +318,55 @@ class VisualSearchExperiment(Experiment):
         excluded_sessions: dict | None = None,
         excluded_trials: dict | None = None,
     ):
-        excluded_subjects = excluded_subjects or []
-        excluded_sessions = excluded_sessions or {}
-        excluded_trials = excluded_trials or {}
-        self.dataset_path = Path(dataset_path)
-        self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
-        self.metadata = pl.read_csv(self.dataset_path / "participants.tsv", separator="\t", 
-                                    schema_overrides={"subject_id": pl.Utf8, "old_subject_id": pl.Utf8})
-        self.subjects = { subject_id:
-            VisualSearchSubject(subject_id, old_subject_id, self, search_phase_name, memorization_phase_name,
-                     excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}))
-            for subject_id, old_subject_id in zip(self.metadata["subject_id"], self.metadata["old_subject_id"])
-            if subject_id not in excluded_subjects and old_subject_id not in excluded_subjects
-        }
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
+        super().__init__(
+            dataset_path,
+            excluded_subjects,
+            excluded_sessions,
+            excluded_trials,
+        )
+
+    def _create_subject(
+        self,
+        subject_id: str,
+        old_subject_id: str,
+        excluded_sessions: list,
+        excluded_trials: dict,
+    ):
+        return VisualSearchSubject(
+            subject_id,
+            old_subject_id,
+            self,
+            self._search_phase_name,
+            self._memorization_phase_name,
+            excluded_sessions,
+            excluded_trials,
+        )
 
     def accuracy(self):
         accuracy = pl.concat([subject.accuracy() for subject in self.subjects.values()])
 
         return accuracy
-    
+
     def plot_accuracy_by_subject(self):
         correct_responses = self.search_rts()
         correct_responses_aux = (
-            correct_responses
-            .group_by(["subject_id", "memory_set_size", "target_present"])
+            correct_responses.group_by(
+                ["subject_id", "memory_set_size", "target_present"]
+            )
             .agg(pl.col("correct_response").mean().alias("correct_response_mean"))
-            .select(["subject_id", "memory_set_size", "target_present", "correct_response_mean"])
+            .select(
+                [
+                    "subject_id",
+                    "memory_set_size",
+                    "target_present",
+                    "correct_response_mean",
+                ]
+            )
         )
         correct_responses = (
-            correct_responses
-            .join(
+            correct_responses.join(
                 correct_responses_aux,
                 on=["subject_id", "memory_set_size", "target_present"],
                 how="left",
@@ -351,17 +375,23 @@ class VisualSearchExperiment(Experiment):
             .sort(by=["memory_set_size", "target_present", "correct_response_mean"])
         )
 
-        mem_set_sizes = correct_responses.get_column("memory_set_size").unique().sort().to_list()
-        width_size = max(0.25 * correct_responses.get_column("subject_id").n_unique(), 10)
+        mem_set_sizes = (
+            correct_responses.get_column("memory_set_size").unique().sort().to_list()
+        )
+        width_size = max(
+            0.25 * correct_responses.get_column("subject_id").n_unique(), 10
+        )
 
         n_rows = len(mem_set_sizes)
-        fig, axs = plt.subplots(n_rows, 1, figsize=(width_size, 5 * n_rows), sharey=True)
+        _, axs = plt.subplots(n_rows, 1, figsize=(width_size, 5 * n_rows), sharey=True)
 
         if n_rows == 1:
             axs = np.array([axs])
 
         for i, memory_set_size in enumerate(mem_set_sizes):
-            data = correct_responses.filter(pl.col("memory_set_size") == memory_set_size)
+            data = correct_responses.filter(
+                pl.col("memory_set_size") == memory_set_size
+            )
             _plot_grouped_mean_with_se(
                 axs[i],
                 data,
@@ -377,18 +407,25 @@ class VisualSearchExperiment(Experiment):
         plt.tight_layout()
         plt.show()
         plt.close()
-    
+
     def plot_accuracy_by_stimulus(self):
         correct_responses = self.search_rts()
         correct_responses_aux = (
-            correct_responses
-            .group_by(["stimulus", "memory_set_size", "target_present"])
+            correct_responses.group_by(
+                ["stimulus", "memory_set_size", "target_present"]
+            )
             .agg(pl.col("correct_response").mean().alias("correct_response_mean"))
-            .select(["stimulus", "memory_set_size", "target_present", "correct_response_mean"])
+            .select(
+                [
+                    "stimulus",
+                    "memory_set_size",
+                    "target_present",
+                    "correct_response_mean",
+                ]
+            )
         )
         correct_responses = (
-            correct_responses
-            .join(
+            correct_responses.join(
                 correct_responses_aux,
                 on=["stimulus", "memory_set_size", "target_present"],
                 how="left",
@@ -397,17 +434,21 @@ class VisualSearchExperiment(Experiment):
             .sort(by=["memory_set_size", "target_present", "correct_response_mean"])
         )
 
-        mem_set_sizes = correct_responses.get_column("memory_set_size").unique().sort().to_list()
+        mem_set_sizes = (
+            correct_responses.get_column("memory_set_size").unique().sort().to_list()
+        )
         n_rows = len(mem_set_sizes)
         width_size = max(0.25 * correct_responses.get_column("stimulus").n_unique(), 10)
 
-        fig, axs = plt.subplots(n_rows, 1, figsize=(width_size, 5 * n_rows), sharey=True)
+        _, axs = plt.subplots(n_rows, 1, figsize=(width_size, 5 * n_rows), sharey=True)
 
         if n_rows == 1:
             axs = np.array([axs])
 
         for i, memory_set_size in enumerate(mem_set_sizes):
-            data = correct_responses.filter(pl.col("memory_set_size") == memory_set_size)
+            data = correct_responses.filter(
+                pl.col("memory_set_size") == memory_set_size
+            )
             _plot_grouped_mean_with_se(
                 axs[i],
                 data,
@@ -427,7 +468,7 @@ class VisualSearchExperiment(Experiment):
     def search_rts(self):
         rts = self.rts().filter(pl.col("phase") == self._search_phase_name)
         return rts
-    
+
     def search_saccades(self):
         saccades = self.saccades().filter(pl.col("phase") == self._search_phase_name)
         return saccades
@@ -482,22 +523,26 @@ class VisualSearchExperiment(Experiment):
             subject.remove_non_answered_trials(False)
 
         if print_flag:
-            print(f"Removed {amount_trials_before_removal - self.search_rts().shape[0]} non answered trials")
+            print(
+                f"Removed {amount_trials_before_removal - self.search_rts().shape[0]} non answered trials"
+            )
 
     def remove_poor_accuracy_sessions(self, threshold=0.5, print_flag=True):
-        amount_sessions_total = sum([len(subject.sessions) for subject in self.subjects.values()])
+        amount_sessions_total = sum(
+            [len(subject.sessions) for subject in self.subjects.values()]
+        )
         for subject in list(self.subjects.keys()):
-            self.subjects[subject].remove_poor_accuracy_sessions(threshold,False)
+            self.subjects[subject].remove_poor_accuracy_sessions(threshold, False)
 
         if print_flag:
-            print(f"Removed {amount_sessions_total - sum([len(subject.sessions) for subject in self.subjects.values()])} sessions with poor accuracy")                
-
-
+            print(
+                f"Removed {amount_sessions_total - sum([len(subject.sessions) for subject in self.subjects.values()])} sessions with poor accuracy"
+            )
 
     def scanpaths_by_stimuli(self):
-        return pl.concat([subject.scanpaths_by_stimuli() for subject in self.subjects.values()])
-
-
+        return pl.concat(
+            [subject.scanpaths_by_stimuli() for subject in self.subjects.values()]
+        )
 
     def find_fixation_cutoff(self, percentile=1.0):
         # 1. Gather fixation counts
@@ -505,7 +550,7 @@ class VisualSearchExperiment(Experiment):
             {
                 "fix_count": trial.search_fixations().height,
                 "target_present": trial.target_present,
-                "memory_set_size": trial.memory_set_size
+                "memory_set_size": trial.memory_set_size,
             }
             for subject in self.subjects.values()
             for session in subject.sessions.values()
@@ -514,7 +559,9 @@ class VisualSearchExperiment(Experiment):
         fix_counts = pl.DataFrame(fix_counts)
 
         # 2. Get all unique group keys
-        group_keys = fix_counts.select(["target_present", "memory_set_size"]).unique().to_dicts()
+        group_keys = (
+            fix_counts.select(["target_present", "memory_set_size"]).unique().to_dicts()
+        )
 
         # 3. Compute cutoff per group
         rows = []
@@ -523,8 +570,8 @@ class VisualSearchExperiment(Experiment):
             mem_size = group["memory_set_size"]
 
             group_df = fix_counts.filter(
-                (pl.col("target_present") == tp) &
-                (pl.col("memory_set_size") == mem_size)
+                (pl.col("target_present") == tp)
+                & (pl.col("memory_set_size") == mem_size)
             )
 
             fix_counts_list = group_df["fix_count"].to_list()
@@ -535,25 +582,26 @@ class VisualSearchExperiment(Experiment):
             fix_cutoff = _find_fixation_cutoff(
                 fix_count_list=fix_counts_list,
                 threshold=threshold,
-                max_possible=max_possible
+                max_possible=max_possible,
             )
 
-            rows.append({
-                "target_present": tp,
-                "memory_set_size": mem_size,
-                "fix_cutoff": fix_cutoff
-            })
+            rows.append(
+                {
+                    "target_present": tp,
+                    "memory_set_size": mem_size,
+                    "fix_cutoff": fix_cutoff,
+                }
+            )
 
         return pl.DataFrame(rows)
 
-
-    def remove_trials_for_stimuli(self,stimuli,print_flag=True):
-        '''
+    def remove_trials_for_stimuli(self, stimuli, print_flag=True):
+        """
         Remove trials for stimuli that are in the list of stimuli.
         Parameters:
             - stimuli: list of stimuli to remove
             - print_flag: if True, print the number of trials removed
-        '''
+        """
         # Get the trials for the stimuli to remove
         amount_trials_removed = 0
         subj_keys = list(self.subjects.keys())
@@ -571,19 +619,23 @@ class VisualSearchExperiment(Experiment):
         if print_flag:
             print(f"Removed {amount_trials_removed} trials for stimuli {stimuli}")
 
-
-
-    def remove_trials_for_stimuli_with_poor_accuracy(self, threshold=0.5, print_flag=True):
-        '''For now this will be done without grouping by target_present'''
+    def remove_trials_for_stimuli_with_poor_accuracy(
+        self, threshold=0.5, print_flag=True
+    ):
+        """For now this will be done without grouping by target_present"""
         scanpaths_by_stimuli = self.scanpaths_by_stimuli()
         grouped = scanpaths_by_stimuli.group_by(["stimulus", "memory_set_size"])
-        poor_accuracy_stimuli = (
-                                grouped.agg(pl.col("correct_response").mean().alias("accuracy"))
-                                .filter(pl.col("accuracy") < threshold)
-                            )
+        poor_accuracy_stimuli = grouped.agg(
+            pl.col("correct_response").mean().alias("accuracy")
+        ).filter(pl.col("accuracy") < threshold)
         # Get the stimulus and memory set size of poor_accuracy_stimuli into a list of tuples
-        poor_accuracy_stimuli = poor_accuracy_stimuli.select(pl.col("stimulus"), pl.col("memory_set_size")).to_dicts()
-        poor_accuracy_stimuli = [(stimulus["stimulus"], stimulus["memory_set_size"]) for stimulus in poor_accuracy_stimuli]
+        poor_accuracy_stimuli = poor_accuracy_stimuli.select(
+            pl.col("stimulus"), pl.col("memory_set_size")
+        ).to_dicts()
+        poor_accuracy_stimuli = [
+            (stimulus["stimulus"], stimulus["memory_set_size"])
+            for stimulus in poor_accuracy_stimuli
+        ]
         amount_trials_removed = 0
         subj_keys = list(self.subjects.keys())
         for subject_key in subj_keys:
@@ -598,17 +650,22 @@ class VisualSearchExperiment(Experiment):
                         session.remove_trial(trial_key)
                         amount_trials_removed += 1
         if print_flag:
-            print(f"Removed {amount_trials_removed} trials from stimuli with less than {threshold} accuracy.")
-    
+            print(
+                f"Removed {amount_trials_removed} trials from stimuli with less than {threshold} accuracy."
+            )
+
     def cumulative_correct_trials_by_fixation(self, group_cutoffs=None):
         if group_cutoffs is None:
             group_cutoffs = self.find_fixation_cutoff()
-        cumulative_correct = pl.concat([subject.cumulative_correct_trials_by_fixation(group_cutoffs) for subject in self.subjects.values()])
+        cumulative_correct = pl.concat(
+            [
+                subject.cumulative_correct_trials_by_fixation(group_cutoffs)
+                for subject in self.subjects.values()
+            ]
+        )
 
         return cumulative_correct
 
-
-    
     def plot_cumulative_performance(self, group_cutoffs=None):
         if group_cutoffs is None:
             group_cutoffs = self.find_fixation_cutoff()
@@ -622,15 +679,13 @@ class VisualSearchExperiment(Experiment):
         )
 
         target_presence_values = (
-            cumulative_performance
-            .select("target_present")
+            cumulative_performance.select("target_present")
             .unique()
             .to_series()
             .to_list()
         )
         memory_set_sizes = (
-            cumulative_performance
-            .select("memory_set_size")
+            cumulative_performance.select("memory_set_size")
             .unique()
             .to_series()
             .to_list()
@@ -680,9 +735,7 @@ class VisualSearchExperiment(Experiment):
     def trials_by_rt_bins(self, bin_end, bin_step):
         # 1. Get and filter RTs
         rts = self.rts().filter(pl.col("phase") == self._search_phase_name)
-        rts = rts.with_columns([
-            (pl.col("rt") / 1000).alias("rt")
-        ])
+        rts = rts.with_columns([(pl.col("rt") / 1000).alias("rt")])
 
         # 2. Compute bin edges
         bin_edges = np.arange(0, bin_end + bin_step, bin_step)
@@ -691,15 +744,15 @@ class VisualSearchExperiment(Experiment):
         bin_indices = np.digitize(rts["rt"].to_numpy(), bin_edges, right=False)
 
         # 4. Convert to left edge values
-        rt_bin_labels = [bin_edges[i - 1] if i > 0 and i < len(bin_edges) else None for i in bin_indices]
+        rt_bin_labels = [
+            bin_edges[i - 1] if i > 0 and i < len(bin_edges) else None
+            for i in bin_indices
+        ]
 
         # 5. Assign back to the DataFrame
-        rts = rts.with_columns([
-            pl.Series("rt_bin", rt_bin_labels)
-        ])
+        rts = rts.with_columns([pl.Series("rt_bin", rt_bin_labels)])
 
         return rts
-
 
     def plot_correct_trials_by_rt_bins(self, bin_end, bin_step):
         correct_trials_per_bin = (
@@ -754,9 +807,7 @@ class VisualSearchExperiment(Experiment):
         incorrect_trials_per_bin = (
             self.trials_by_rt_bins(bin_end, bin_step)
             .select(["rt_bin", "target_present", "memory_set_size", "correct_response"])
-            .with_columns(
-                (1 - pl.col("correct_response")).alias("incorrect_response")
-            )
+            .with_columns((1 - pl.col("correct_response")).alias("incorrect_response"))
             .group_by(["rt_bin", "target_present", "memory_set_size"])
             .agg(pl.col("incorrect_response").sum().alias("incorrect_response"))
             .sort(["memory_set_size", "target_present", "rt_bin"])
@@ -808,9 +859,7 @@ class VisualSearchExperiment(Experiment):
         )
 
         tp_ta = sorted(trials.get_column("target_present").unique().to_list())
-        mem_set_sizes = sorted(
-            trials.get_column("memory_set_size").unique().to_list()
-        )
+        mem_set_sizes = sorted(trials.get_column("memory_set_size").unique().to_list())
 
         n_cols = len(tp_ta)
         n_rows = len(mem_set_sizes)
@@ -833,29 +882,20 @@ class VisualSearchExperiment(Experiment):
             how="left",
         )
 
-        grouped = (
-            grouped.with_columns(
+        grouped = grouped.with_columns(
+            pl.col("count")
+            .cum_sum()
+            .over(["correct_response", "target_present", "memory_set_size"])
+            .alias("cumsum")
+        ).with_columns(
+            (pl.col("total_per_group") - pl.col("cumsum") + pl.col("count")).alias(
+                "total_per_bin"
+            ),
+            (
                 pl.col("count")
-                .cum_sum()
-                .over(["correct_response", "target_present", "memory_set_size"])
-                .alias("cumsum")
-            )
-            .with_columns(
-                (
-                    pl.col("total_per_group")
-                    - pl.col("cumsum")
-                    + pl.col("count")
-                ).alias("total_per_bin"),
-                (
-                    pl.col("count")
-                    / (
-                        pl.col("total_per_group")
-                        - pl.col("cumsum")
-                        + pl.col("count")
-                    )
-                ).alias("count_normalized"),
-                pl.col("correct_response").cast(pl.Boolean),
-            )
+                / (pl.col("total_per_group") - pl.col("cumsum") + pl.col("count"))
+            ).alias("count_normalized"),
+            pl.col("correct_response").cast(pl.Boolean),
         )
 
         fig, axs = plt.subplots(
@@ -891,41 +931,53 @@ class VisualSearchExperiment(Experiment):
 
 
 class VisualSearchSubject(Subject):
-    def __init__(self, subject_id: str, old_subject_id: str, experiment: VisualSearchExperiment, search_phase_name, memorization_phase_name,
-                 excluded_sessions: list | None = None, excluded_trials: dict | None = None):
-        super().__init__(subject_id, old_subject_id, experiment, excluded_sessions, excluded_trials)
+    def __init__(
+        self,
+        subject_id: str,
+        old_subject_id: str,
+        experiment: VisualSearchExperiment,
+        search_phase_name,
+        memorization_phase_name,
+        excluded_sessions: list | None = None,
+        excluded_trials: dict | None = None,
+    ):
+        super().__init__(
+            subject_id, old_subject_id, experiment, excluded_sessions, excluded_trials
+        )
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
 
-    @property
-    def sessions(self):
-        if self._sessions is None:
-            self._sessions = { session_folder.name.split("-")[-1] :
-                VisualSearchSession(session_folder.name.split("-")[-1], self,self._search_phase_name, self._memorization_phase_name,
-                        self.excluded_trials.get(session_folder.name.split("-")[-1], {}))
-                for session_folder in self.subject_derivatives_path.glob("ses-*") 
-                if session_folder.name.split("-")[-1] not in self.excluded_sessions
-            }
-        return self._sessions
-    
+    def _create_session(self, session_id: str):
+        return VisualSearchSession(
+            session_id,
+            self,
+            self._search_phase_name,
+            self._memorization_phase_name,
+            self.excluded_trials.get(session_id, {}),
+        )
+
     def scanpaths_by_stimuli(self):
-        return pl.concat([session.scanpaths_by_stimuli() for session in self.sessions.values()])
-    
+        return pl.concat(
+            [session.scanpaths_by_stimuli() for session in self.sessions.values()]
+        )
+
     def search_rts(self):
         rts = self.rts().filter(pl.col("phase") == self._search_phase_name)
         return rts
-    
+
     def search_saccades(self):
         saccades = self.saccades().filter(pl.col("phase") == self._search_phase_name)
         return saccades
-    
+
     def search_fixations(self):
         fixations = self.fixations().filter(pl.col("phase") == self._search_phase_name)
         return fixations
-    
+
     def accuracy(self):
         # Accuracy should be grouped by target present and memory set size
-        correct_trials = self.search_rts()[["target_present", "correct_response", "memory_set_size"]]
+        correct_trials = self.search_rts()[
+            ["target_present", "correct_response", "memory_set_size"]
+        ]
         accuracy = correct_trials.group_by(["target_present", "memory_set_size"]).agg(
             pl.col("correct_response").mean().alias("accuracy")
         )
@@ -933,7 +985,7 @@ class VisualSearchSubject(Subject):
         accuracy = accuracy.with_columns(pl.lit(self.subject_id).alias("subject_id"))
 
         return accuracy
-    
+
     def remove_non_answered_trials(self, print_flag=True):
         # Remove non answered trials from all sessions
         amount_trials_before_removal = self.search_rts().height
@@ -941,9 +993,9 @@ class VisualSearchSubject(Subject):
             session.remove_non_answered_trials(False)
 
         if print_flag:
-            print(f"Removed {amount_trials_before_removal - self.search_rts().height} non answered trials from subject {self.subject_id}")
-
-
+            print(
+                f"Removed {amount_trials_before_removal - self.search_rts().height} non answered trials from subject {self.subject_id}"
+            )
 
     def find_fixation_cutoff(self, percentile=1.0):
         # 1. Gather fixation counts
@@ -951,7 +1003,7 @@ class VisualSearchSubject(Subject):
             {
                 "fix_count": trial.search_fixations().height,
                 "target_present": trial.target_present,
-                "memory_set_size": trial.memory_set_size
+                "memory_set_size": trial.memory_set_size,
             }
             for session in self.sessions.values()
             for trial in session.trials.values()
@@ -959,7 +1011,9 @@ class VisualSearchSubject(Subject):
         fix_counts = pl.DataFrame(fix_counts)
 
         # 2. Get all unique group keys
-        group_keys = fix_counts.select(["target_present", "memory_set_size"]).unique().to_dicts()
+        group_keys = (
+            fix_counts.select(["target_present", "memory_set_size"]).unique().to_dicts()
+        )
 
         # 3. Compute cutoff per group
         rows = []
@@ -968,8 +1022,8 @@ class VisualSearchSubject(Subject):
             mem_size = group["memory_set_size"]
 
             group_df = fix_counts.filter(
-                (pl.col("target_present") == tp) &
-                (pl.col("memory_set_size") == mem_size)
+                (pl.col("target_present") == tp)
+                & (pl.col("memory_set_size") == mem_size)
             )
 
             fix_counts_list = group_df["fix_count"].to_list()
@@ -980,14 +1034,16 @@ class VisualSearchSubject(Subject):
             fix_cutoff = _find_fixation_cutoff(
                 fix_count_list=fix_counts_list,
                 threshold=threshold,
-                max_possible=max_possible
+                max_possible=max_possible,
             )
 
-            rows.append({
-                "target_present": tp,
-                "memory_set_size": mem_size,
-                "fix_cutoff": fix_cutoff
-            })
+            rows.append(
+                {
+                    "target_present": tp,
+                    "memory_set_size": mem_size,
+                    "fix_cutoff": fix_cutoff,
+                }
+            )
 
         return pl.DataFrame(rows)
 
@@ -997,24 +1053,39 @@ class VisualSearchSubject(Subject):
         for key in keys:
             session = self.sessions[key]
             if session.has_poor_accuracy(threshold):
-                poor_accuracy_sessions+=1
+                poor_accuracy_sessions += 1
                 self.remove_session(key)
 
         if print_flag:
-            print(f"Removed {poor_accuracy_sessions} sessions with poor accuracy from subject {self.subject_id}")
+            print(
+                f"Removed {poor_accuracy_sessions} sessions with poor accuracy from subject {self.subject_id}"
+            )
 
     def cumulative_correct_trials_by_fixation(self, group_cutoffs=None):
         if group_cutoffs is None:
             group_cutoffs = self.find_fixation_cutoff()
 
-        cumulative_correct = pl.concat([session.cumulative_correct_trials_by_fixation(group_cutoffs) for session in self.sessions.values()])
+        cumulative_correct = pl.concat(
+            [
+                session.cumulative_correct_trials_by_fixation(group_cutoffs)
+                for session in self.sessions.values()
+            ]
+        )
         return cumulative_correct
-    
-      
+
+
 class VisualSearchSession(Session):
-    BEH_COLUMNS: list[str] = [
-        "trial_number", "stimulus", "stimulus_coords", "memory_set", "memory_set_locations",
-        "target_present", "target", "target_location", "correct_response", "was_answered"
+    BEH_COLUMNS: ClassVar[list[str]] = [
+        "trial_number",
+        "stimulus",
+        "stimulus_coords",
+        "memory_set",
+        "memory_set_locations",
+        "target_present",
+        "target",
+        "target_location",
+        "correct_response",
+        "was_answered",
     ]
     """
     Columns explanation:
@@ -1038,28 +1109,26 @@ class VisualSearchSession(Session):
     For all of the heights, widths and locations of the items, the values should be in pixels and according to the screen itself.
     """
 
-    COLLECTION_COLUMNS: dict = {
-        "stimulus_coords": tuple,           # Parse as a tuple
-        "memory_set": list,                 # Parse as a list
-        "memory_set_locations": list,       # Parse as a list of tuples
-        "target_location": tuple          # Parse as a tuple
+    COLLECTION_COLUMNS: ClassVar[dict[str, type]] = {
+        "stimulus_coords": tuple,  # Parse as a tuple
+        "memory_set": list,  # Parse as a list
+        "memory_set_locations": list,  # Parse as a list of tuples
+        "target_location": tuple,  # Parse as a tuple
     }
 
     def __init__(
-        self, 
-        session_id: str, 
-        subject: VisualSearchSubject,  
+        self,
+        session_id: str,
+        subject: VisualSearchSubject,
         search_phase_name: str,
         memorization_phase_name: str,
-        excluded_trials: list = None,
+        excluded_trials: list | None = None,
     ):
         excluded_trials = [] if excluded_trials is None else excluded_trials
         super().__init__(session_id, subject, excluded_trials)
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
         self.behavior_data = None
-
-
 
     def load_behavior_data(self):
         behavior_path = self.session_dataset_path / "beh"
@@ -1070,10 +1139,9 @@ class VisualSearchSession(Session):
                 f"{self.session_id} of subject {self.subject().subject_id}."
             )
         tables = [
-            pl.read_csv(
+            read_tsv(
                 path,
-                separator="\t",
-                null_values="n/a",
+                has_header=True,
                 schema_overrides={
                     "trial_number": pl.Int32,
                     "stimulus": pl.Utf8,
@@ -1086,9 +1154,7 @@ class VisualSearchSession(Session):
             for path in behavior_files
         ]
         self.behavior_data = (
-            pl.concat(tables, how="diagonal_relaxed")
-            if len(tables) > 1
-            else tables[0]
+            pl.concat(tables, how="diagonal_relaxed") if len(tables) > 1 else tables[0]
         )
 
         # Validate that all required columns are present
@@ -1100,22 +1166,12 @@ class VisualSearchSession(Session):
                 f"{self.subject().subject_id}"
             )
 
-    def _init_trials(self,samples,fix,sacc,blink,events_path):
-        def partition(frame):
-            if frame is None:
-                return {}
-            return {
-                group["trial_number"][0]: group
-                for group in frame.partition_by(
-                    "trial_number", maintain_order=True
-                )
-            }
-
-        sample_trials = partition(samples)
-        fixation_trials = partition(fix)
-        saccade_trials = partition(sacc)
-        blink_trials = partition(blink)
-        behavior_trials = partition(self.behavior_data)
+    def _init_trials(self, samples, fix, sacc, blink, events_path):
+        sample_trials = _partition_trials(samples)
+        fixation_trials = _partition_trials(fix)
+        saccade_trials = _partition_trials(sacc)
+        blink_trials = _partition_trials(blink)
+        behavior_trials = _partition_trials(self.behavior_data)
         empty_fix = fix.head(0)
         empty_sacc = sacc.head(0)
         empty_blink = blink.head(0) if blink is not None else None
@@ -1140,16 +1196,15 @@ class VisualSearchSession(Session):
                 and trial in behavior_trials
             )
         }
-    
+
     def load_data(self, detection_algorithm: str):
         self.load_behavior_data()
         super().load_data(detection_algorithm)
 
-
     def search_rts(self):
         rts = self.rts().filter(pl.col("phase") == self._search_phase_name)
         return rts
-    
+
     def search_saccades(self):
         saccades = self.saccades().filter(pl.col("phase") == self._search_phase_name)
         return saccades
@@ -1160,42 +1215,58 @@ class VisualSearchSession(Session):
 
     def accuracy(self):
         # Accuracy should be grouped by target present and memory set size
-        correct_trials = self.search_rts()[["target_present", "correct_response", "memory_set_size"]]
-        accuracy = correct_trials.groupby(["target_present", "memory_set_size"]).mean().reset_index()
+        correct_trials = self.search_rts()[
+            ["target_present", "correct_response", "memory_set_size"]
+        ]
+        accuracy = (
+            correct_trials.groupby(["target_present", "memory_set_size"])
+            .mean()
+            .reset_index()
+        )
         # Change the column name to accuracy
         accuracy.rename(columns={"correct_response": "accuracy"}, inplace=True)
         accuracy["session_id"] = self.session_id
 
         return accuracy
 
-    def remove_non_answered_trials(self,print_flag=True):
+    def remove_non_answered_trials(self, print_flag=True):
         # Remove trials that were not answered
-        non_answered_trials = [trial for trial in self.trials if not self.trials[trial].was_answered]
+        non_answered_trials = [
+            trial for trial in self.trials if not self.trials[trial].was_answered
+        ]
         for trial in non_answered_trials:
             self.remove_trial(trial)
         if print_flag:
-            print(f"Removed {len(non_answered_trials)} non answered trials from session {self.session_id}")
+            print(
+                f"Removed {len(non_answered_trials)} non answered trials from session {self.session_id}"
+            )
 
     def has_poor_accuracy(self, threshold=0.5):
-        correct_trials = self.search_rts()[["target_present", "correct_response", "memory_set_size"]]
-        accuracy = correct_trials["correct_response"].sum() / correct_trials["correct_response"].count()
+        correct_trials = self.search_rts()[
+            ["target_present", "correct_response", "memory_set_size"]
+        ]
+        accuracy = (
+            correct_trials["correct_response"].sum()
+            / correct_trials["correct_response"].count()
+        )
         return accuracy < threshold
-    
+
     def find_fixation_cutoff(self, percentile=1.0):
         # 1. Gather fixation counts
         fix_counts = [
             {
                 "fix_count": trial.search_fixations().height,
                 "target_present": trial.target_present,
-                "memory_set_size": trial.memory_set_size
+                "memory_set_size": trial.memory_set_size,
             }
-
             for trial in self.trials.values()
         ]
         fix_counts = pl.DataFrame(fix_counts)
 
         # 2. Get all unique group keys
-        group_keys = fix_counts.select(["target_present", "memory_set_size"]).unique().to_dicts()
+        group_keys = (
+            fix_counts.select(["target_present", "memory_set_size"]).unique().to_dicts()
+        )
 
         # 3. Compute cutoff per group
         rows = []
@@ -1204,8 +1275,8 @@ class VisualSearchSession(Session):
             mem_size = group["memory_set_size"]
 
             group_df = fix_counts.filter(
-                (pl.col("target_present") == tp) &
-                (pl.col("memory_set_size") == mem_size)
+                (pl.col("target_present") == tp)
+                & (pl.col("memory_set_size") == mem_size)
             )
 
             fix_counts_list = group_df["fix_count"].to_list()
@@ -1216,21 +1287,24 @@ class VisualSearchSession(Session):
             fix_cutoff = _find_fixation_cutoff(
                 fix_count_list=fix_counts_list,
                 threshold=threshold,
-                max_possible=max_possible
+                max_possible=max_possible,
             )
 
-            rows.append({
-                "target_present": tp,
-                "memory_set_size": mem_size,
-                "fix_cutoff": fix_cutoff
-            })
+            rows.append(
+                {
+                    "target_present": tp,
+                    "memory_set_size": mem_size,
+                    "fix_cutoff": fix_cutoff,
+                }
+            )
 
         return pl.DataFrame(rows)
-    
 
     def cumulative_correct_trials_by_fixation(self, group_cutoffs=None):
         if group_cutoffs is None:
-            group_cutoffs = self.find_fixation_cutoff()  # this should return a pl.DataFrame
+            group_cutoffs = (
+                self.find_fixation_cutoff()
+            )  # this should return a pl.DataFrame
 
         records = []
 
@@ -1239,10 +1313,9 @@ class VisualSearchSession(Session):
 
             # ✅ Filter the appropriate fix_cutoff value
             fix_cutoff = (
-                group_cutoffs
-                .filter(
-                    (pl.col("memory_set_size") == trial.memory_set_size) &
-                    (pl.col("target_present") == trial.target_present)
+                group_cutoffs.filter(
+                    (pl.col("memory_set_size") == trial.memory_set_size)
+                    & (pl.col("target_present") == trial.target_present)
                 )
                 .select("fix_cutoff")
                 .item()
@@ -1251,22 +1324,26 @@ class VisualSearchSession(Session):
             cumulative_correct = np.zeros(fix_cutoff)
 
             if trial.correct_response and scanpath_length - 1 <= fix_cutoff:
-                cumulative_correct[scanpath_length - 1:] = 1
+                cumulative_correct[scanpath_length - 1 :] = 1
 
-            records.append({
-                "cumulative_correct": cumulative_correct,
-                "target_present": trial.target_present,
-                "memory_set_size": trial.memory_set_size,
-            })
+            records.append(
+                {
+                    "cumulative_correct": cumulative_correct,
+                    "target_present": trial.target_present,
+                    "memory_set_size": trial.memory_set_size,
+                }
+            )
 
         df = pl.DataFrame(records)
         return df
-   
+
     def scanpaths_by_stimuli(self):
-        return pl.DataFrame([trial.scanpath_by_stimuli() for trial in self.trials.values()])
+        return pl.DataFrame(
+            [trial.scanpath_by_stimuli() for trial in self.trials.values()]
+        )
+
 
 class VisualSearchTrial(Trial):
-
     def __init__(
         self,
         trial_number,
@@ -1300,16 +1377,20 @@ class VisualSearchTrial(Trial):
 
         self._target_present = bool(trial_data.select("target_present").item())
         self._target = trial_data.select("target").item()
-        
+
         if self._target_present:
-            self._target_location = _as(trial_data.select("target_location").item(), tuple)
+            self._target_location = _as(
+                trial_data.select("target_location").item(), tuple
+            )
 
         self._correct_response = bool(trial_data.select("correct_response").item())
         self._stimulus = trial_data.select("stimulus").item()
         self._stimulus_coords = _as(trial_data.select("stimulus_coords").item(), tuple)
 
         self._memory_set = _as(trial_data.select("memory_set").item(), list)
-        self._memory_set_locations = _as(trial_data.select("memory_set_locations").item(), list)
+        self._memory_set_locations = _as(
+            trial_data.select("memory_set_locations").item(), list
+        )
         self._search_phase_name = search_phase_name
         self._memorization_phase_name = memorization_phase_name
         self._was_answered = trial_data.select("was_answered").item()
@@ -1325,31 +1406,31 @@ class VisualSearchTrial(Trial):
     @property
     def target_present(self):
         return self._target_present
-    
+
     @property
     def correct_response(self):
         return self._correct_response
-    
+
     @property
     def memory_set_size(self):
         return len(self._memory_set)
-    
+
     @property
     def memory_set_locations(self):
         return self._memory_set_locations
-    
+
     @property
     def memory_set(self):
         return self._memory_set
-    
+
     @property
     def stimulus(self):
         return self._stimulus
-    
+
     @property
     def stimulus_coords(self):
         return self._stimulus_coords
-    
+
     @property
     def was_answered(self):
         return self._was_answered
@@ -1363,99 +1444,158 @@ class VisualSearchTrial(Trial):
 
         # Calculate RT as the difference between last and first tSample per phase
         self._rts = (
-            filtered
-            .group_by("phase")
+            filtered.group_by("phase")
             .agg((pl.col("tSample").max() - pl.col("tSample").min()).alias("rt"))
-            .with_columns([
-                pl.lit(self.trial_number).alias("trial_number"),
-                pl.lit(len(self._memory_set)).alias("memory_set_size"),
-                pl.lit(self._target_present).alias("target_present"),
-                pl.lit(self._correct_response).alias("correct_response"),
-                pl.lit(self._stimulus).alias("stimulus"),
-                pl.lit(self._target).alias("target"),
-                pl.lit(self._was_answered).alias("was_answered"),
-            ])
+            .with_columns(
+                [
+                    pl.lit(self.trial_number).alias("trial_number"),
+                    pl.lit(len(self._memory_set)).alias("memory_set_size"),
+                    pl.lit(self._target_present).alias("target_present"),
+                    pl.lit(self._correct_response).alias("correct_response"),
+                    pl.lit(self._stimulus).alias("stimulus"),
+                    pl.lit(self._target).alias("target"),
+                    pl.lit(self._was_answered).alias("was_answered"),
+                ]
+            )
         )
 
-
     def fixations(self):
-        fixations = super().fixations().with_columns([
-            pl.lit(self._target_present).alias("target_present"),
-            pl.lit(self._correct_response).alias("correct_response"),
-            pl.lit(self._stimulus).alias("stimulus"),
-            pl.lit(self._target).alias("target"),
-            pl.lit(self._memory_set).alias("memory_set"),
-        ])
+        fixations = (
+            super()
+            .fixations()
+            .with_columns(
+                [
+                    pl.lit(self._target_present).alias("target_present"),
+                    pl.lit(self._correct_response).alias("correct_response"),
+                    pl.lit(self._stimulus).alias("stimulus"),
+                    pl.lit(self._target).alias("target"),
+                    pl.lit(self._memory_set).alias("memory_set"),
+                ]
+            )
+        )
         return fixations
 
-
     def saccades(self):
-        saccades = super().saccades().with_columns([
-            pl.lit(self._target_present).alias("target_present"),
-            pl.lit(self._correct_response).alias("correct_response"),
-            pl.lit(self._stimulus).alias("stimulus"),
-            pl.lit(self._target).alias("target"),
-            pl.lit(self._memory_set).alias("memory_set"),
-        ])
+        saccades = (
+            super()
+            .saccades()
+            .with_columns(
+                [
+                    pl.lit(self._target_present).alias("target_present"),
+                    pl.lit(self._correct_response).alias("correct_response"),
+                    pl.lit(self._stimulus).alias("stimulus"),
+                    pl.lit(self._target).alias("target"),
+                    pl.lit(self._memory_set).alias("memory_set"),
+                ]
+            )
+        )
         return saccades
 
-
-
     def search_fixations(self):
-        return self.fixations().filter(pl.col("phase") == self._search_phase_name).sort(by="tStart")
-    
+        return (
+            self.fixations()
+            .filter(pl.col("phase") == self._search_phase_name)
+            .sort(by="tStart")
+        )
+
     def memorization_fixations(self):
-        return self.fixations().filter(pl.col("phase") == self._memorization_phase_name).sort(by="tStart")
+        return (
+            self.fixations()
+            .filter(pl.col("phase") == self._memorization_phase_name)
+            .sort(by="tStart")
+        )
 
     def search_saccades(self):
-        return self.saccades().filter(pl.col("phase") == self._search_phase_name).sort(by="tStart")
-    
+        return (
+            self.saccades()
+            .filter(pl.col("phase") == self._search_phase_name)
+            .sort(by="tStart")
+        )
+
     def memorization_saccades(self):
-        return self.saccades().filter(pl.col("phase") == self._memorization_phase_name).sort(by="tStart")
-    
+        return (
+            self.saccades()
+            .filter(pl.col("phase") == self._memorization_phase_name)
+            .sort(by="tStart")
+        )
+
     def search_samples(self):
-        return self.samples().filter(pl.col("phase") == self._search_phase_name).sort(by="tSample")
-    
+        return (
+            self.samples()
+            .filter(pl.col("phase") == self._search_phase_name)
+            .sort(by="tSample")
+        )
+
     def memorization_samples(self):
-        return self.samples().filter(pl.col("phase") == self._memorization_phase_name).sort(by="tSample")
-    
+        return (
+            self.samples()
+            .filter(pl.col("phase") == self._memorization_phase_name)
+            .sort(by="tSample")
+        )
+
     def scanpath_by_stimuli(self):
-        return {"fixations": self.search_fixations(), "stimulus": self._stimulus,"correct_response":self._correct_response,"target_present":self._target_present,"memory_set_size":len(self._memory_set)}
-    
+        return {
+            "fixations": self.search_fixations(),
+            "stimulus": self._stimulus,
+            "correct_response": self._correct_response,
+            "target_present": self._target_present,
+            "memory_set_size": len(self._memory_set),
+        }
+
     def plot_scanpath(self, screen_height, screen_width, **kwargs):
-        '''
+        """
         Plots the scanpath of the trial. The scanpath will be plotted in two phases: the search phase and the memorization phase.
         The search phase will be plotted with the stimulus and the memorization phase will be plotted with the items memorized by the participant.
         The search phase will have the fixations and saccades of the trial, while the memorization phase will only have the fixations.
         The names of the phases should be the same ones used in the computation of the derivatives.
         If you don't really care about the memorization phase, you can pass None as an argument.
 
-        '''
+        """
         vis = Visualization(self.events_path, self.detection_algorithm)
         self.events_path.mkdir(parents=True, exist_ok=True)
 
-        
-        phase_data = {self._search_phase_name:{}, self._memorization_phase_name:{}}
+        phase_data = {self._search_phase_name: {}, self._memorization_phase_name: {}}
         dataset_parent_folder = self.session.session_dataset_path.parents[1]
-        phase_data[self._search_phase_name]["img_paths"] = [dataset_parent_folder / STIMULI_FOLDER / self._stimulus]
+        phase_data[self._search_phase_name]["img_paths"] = [
+            dataset_parent_folder / STIMULI_FOLDER / self._stimulus
+        ]
         phase_data[self._search_phase_name]["img_plot_coords"] = [self._stimulus_coords]
         if self._memorization_phase_name is not None:
-            phase_data[self._memorization_phase_name]["img_paths"] = [dataset_parent_folder / ITEMS_FOLDER / img for img in self._memory_set]
-            phase_data[self._memorization_phase_name]["img_plot_coords"] = self._memory_set_locations
+            phase_data[self._memorization_phase_name]["img_paths"] = [
+                dataset_parent_folder / ITEMS_FOLDER / img for img in self._memory_set
+            ]
+            phase_data[self._memorization_phase_name]["img_plot_coords"] = (
+                self._memory_set_locations
+            )
 
         # If the target is present add the "bbox" to the search_phase phase as a key-value pair
         if self._target_present:
             phase_data[self._search_phase_name]["bbox"] = self._target_location
-        vis.scanpath(fixations=self._fix,phase_data=phase_data, saccades=self._sacc, samples=self._samples, screen_height=screen_height, screen_width=screen_width, 
-                      folder_path=self.events_path, **kwargs)
+        vis.scanpath(
+            fixations=self._fix,
+            phase_data=phase_data,
+            saccades=self._sacc,
+            samples=self._samples,
+            screen_height=screen_height,
+            screen_width=screen_width,
+            folder_path=self.events_path,
+            **kwargs,
+        )
 
-    def plot_animation(self, screen_height, screen_width, video_path=None, background_image_path=None, **kwargs):
+    def plot_animation(
+        self,
+        screen_height,
+        screen_width,
+        video_path=None,
+        background_image_path=None,
+        **kwargs,
+    ):
         """
         Create an animated visualization of eye-tracking data for this trial.
 
         When a video is provided, the animation syncs gaze samples with video frames.
         When no video is provided, gaze points are animated on a grey background,
-        or a provided background image (e.g., the stimulus image), using the sample 
+        or a provided background image (e.g., the stimulus image), using the sample
         timestamps for timing.
 
         Parameters
@@ -1490,8 +1630,8 @@ class VisualSearchTrial(Trial):
         self.events_path.mkdir(parents=True, exist_ok=True)
 
         # Set default folder_path if not provided
-        if 'folder_path' not in kwargs:
-            kwargs['folder_path'] = self.events_path
+        if "folder_path" not in kwargs:
+            kwargs["folder_path"] = self.events_path
 
         # If no background image provided and no video, try to use the stimulus
         if video_path is None and background_image_path is None:
@@ -1506,5 +1646,5 @@ class VisualSearchTrial(Trial):
             screen_width=screen_width,
             video_path=video_path,
             background_image_path=background_image_path,
-            **kwargs
+            **kwargs,
         )

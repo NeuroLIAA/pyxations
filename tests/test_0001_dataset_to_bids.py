@@ -6,8 +6,12 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-import pyxations.bids_formatting as bids_formatting
-from pyxations import Experiment, compute_derivatives_for_dataset, dataset_to_bids
+from pyxations import (
+    Experiment,
+    bids_formatting,
+    compute_derivatives_for_dataset,
+    dataset_to_bids,
+)
 from pyxations.bids import (
     BIDSValidationError,
     validate_bids_dataset,
@@ -22,19 +26,15 @@ from pyxations.tables import SessionTables
 
 def _write_eyelink(folder: Path) -> None:
     (folder / "s01_A_task-look.asc").write_text(
-        "\n".join(
-            [
-                "** VERSION: EYELINK II 1",
-                "SAMPLES GAZE LEFT RIGHT RATE 1000.00 TRACKING CR FILTER 2",
-                "!MODE RECORD CR 1000 2 1 LR",
-                "MSG 1000 beginning_of_stimuli",
-                "1000 100.0 200.0 500.0 110.0 210.0 510.0",
-                "1001 101.0 201.0 501.0 111.0 211.0 511.0",
-                "1002 102.0 202.0 502.0 112.0 212.0 512.0",
-                "EFIX L 1000 1002 2 101.0 201.0 501.0",
-            ]
-        )
-        + "\n",
+        """** VERSION: EYELINK II 1
+SAMPLES GAZE LEFT RIGHT RATE 1000.00 TRACKING CR FILTER 2
+!MODE RECORD CR 1000 2 1 LR
+MSG 1000 beginning_of_stimuli
+1000 100.0 200.0 500.0 110.0 210.0 510.0
+1001 101.0 201.0 501.0 111.0 211.0 511.0
+1002 102.0 202.0 502.0 112.0 212.0 512.0
+EFIX L 1000 1002 2 101.0 201.0 501.0
+""",
         encoding="utf-8",
     )
 
@@ -125,25 +125,24 @@ def test_dataset_to_bids_writes_standardized_recordings(
     assert (dataset / "dataset_description.json").is_file()
     assert (dataset / "participants.tsv").is_file()
     source_files = sorted(
-        path.name
-        for path in (dataset / "sourcedata").iterdir()
-        if path.is_file()
+        path.name for path in (dataset / "sourcedata").iterdir() if path.is_file()
     )
     assert len(source_files) == 1
-    physio = list(
-        (dataset / "sub-0001" / "ses-A" / "beh").glob("*_physio.tsv.gz")
-    )
-    sidecars = list(
-        (dataset / "sub-0001" / "ses-A" / "beh").glob("*_physio.json")
-    )
+    physio = list((dataset / "sub-0001" / "ses-A" / "beh").glob("*_physio.tsv.gz"))
+    sidecars = list((dataset / "sub-0001" / "ses-A" / "beh").glob("*_physio.json"))
     assert len(physio) == eye_count
     assert len(sidecars) == eye_count
     if format_name == "eyelink":
-        assert len(list(
-            (dataset / "sub-0001" / "ses-A" / "beh").glob(
-                "*_physioevents.tsv.gz"
+        assert (
+            len(
+                list(
+                    (dataset / "sub-0001" / "ses-A" / "beh").glob(
+                        "*_physioevents.tsv.gz"
+                    )
+                )
             )
-        )) == eye_count
+            == eye_count
+        )
 
     participants = pl.read_csv(dataset / "participants.tsv", separator="\t")
     assert participants.item(0, "participant_id") == "sub-0001"
@@ -198,9 +197,7 @@ def test_dataset_to_bids_preserves_source_folder_verbatim(tmp_path, format_name)
         path.relative_to(source) for path in source.rglob("*") if path.is_file()
     )
     archived_paths = sorted(
-        path.relative_to(archived)
-        for path in archived.rglob("*")
-        if path.is_file()
+        path.relative_to(archived) for path in archived.rglob("*") if path.is_file()
     )
     assert archived_paths == source_paths
     for relative_path in source_paths:
@@ -208,13 +205,10 @@ def test_dataset_to_bids_preserves_source_folder_verbatim(tmp_path, format_name)
             source / relative_path
         ).read_bytes()
 
-    event_file = next(
-        (dataset / "sub-0001" / "ses-A" / "beh").glob("*_events.tsv")
-    )
+    event_file = next((dataset / "sub-0001" / "ses-A" / "beh").glob("*_events.tsv"))
     events = pl.read_csv(event_file, separator="\t")
-    assert (
-        "behavioral/s01_A_task-look_behavior.csv"
-        in set(events.get_column("source_file"))
+    assert "behavioral/s01_A_task-look_behavior.csv" in set(
+        events.get_column("source_file")
     )
 
 
@@ -225,33 +219,11 @@ def test_derivatives_are_scheduled_from_raw_bids_session(tmp_path, monkeypatch):
     def capture_process_session(*args, **kwargs):
         calls.append((args, kwargs))
 
-    class ImmediateFuture:
-        def result(self):
-            return None
-
-    class ImmediateExecutor:
-        def __init__(self, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return None
-
-        def submit(self, function, *args, **kwargs):
-            function(*args, **kwargs)
-            return ImmediateFuture()
-
     monkeypatch.setattr(bids_formatting, "process_session", capture_process_session)
-    monkeypatch.setattr(
-        bids_formatting, "ProcessPoolExecutor", ImmediateExecutor
-    )
 
     derivatives = compute_derivatives_for_dataset(
         dataset,
         "gaze",
-        num_processes=1,
     )
 
     assert derivatives == dataset.with_name(f"{dataset.name}_derivatives")
@@ -271,11 +243,20 @@ def test_derivatives_do_not_require_sourcedata(tmp_path):
         overwrite=True,
     )
 
-    assert list(
-        (
-            derivatives / "sub-0001" / "ses-A" / "beh"
-        ).glob("*_physio.tsv.gz")
-    )
+    assert list((derivatives / "sub-0001" / "ses-A" / "beh").glob("*_physio.tsv.gz"))
+
+
+@pytest.mark.parametrize(
+    ("num_processes", "error"),
+    [(0, ValueError), (True, TypeError), (1.5, TypeError)],
+)
+def test_derivative_worker_count_is_validated(tmp_path, num_processes, error):
+    with pytest.raises(error):
+        compute_derivatives_for_dataset(
+            tmp_path / "unused",
+            "gaze",
+            num_processes=num_processes,
+        )
 
 
 def _make_derivative_dataset(tmp_path: Path, format_name: str) -> Path:
@@ -357,6 +338,27 @@ def test_bids_derivatives_are_canonical_and_reversible(tmp_path):
     events = list((session / "beh").glob("*_physioevents.tsv.gz"))
     assert len(physio) == 1
     assert len(events) == 1
+    physio_metadata = json.loads(
+        physio[0].with_suffix("").with_suffix(".json").read_text(encoding="utf-8")
+    )
+    assert physio_metadata["Columns"][:4] == [
+        "timestamp",
+        "x_coordinate",
+        "y_coordinate",
+        "pupil_size",
+    ]
+    assert not {
+        "pyx_tsample",
+        "pyx_x",
+        "pyx_y",
+        "pyx_pupil",
+    }.intersection(physio_metadata["Columns"])
+    assert physio_metadata["PyxationsCanonicalColumnMap"] == {
+        "timestamp": "tSample",
+        "x_coordinate": "X",
+        "y_coordinate": "Y",
+        "pupil_size": "Pupil",
+    }
 
     bundle = BIDSDerivativeExport().read_session(session, "remodnav")
     assert bundle.samples.columns == [
@@ -367,6 +369,20 @@ def test_bids_derivatives_are_canonical_and_reversible(tmp_path):
         "trial_number",
         "phase",
         "Calib_index",
+    ]
+    assert bundle.samples.schema == {
+        "tSample": pl.Float64,
+        "X": pl.Float64,
+        "Y": pl.Float64,
+        "Pupil": pl.Float64,
+        "trial_number": pl.Int64,
+        "phase": pl.String,
+        "Calib_index": pl.Int64,
+    }
+    assert bundle.samples["tSample"].to_list() == [
+        1_000.0,
+        1_017.0,
+        1_034.0,
     ]
     assert bundle.fixations["trial_number"].to_list() == [0]
     assert bundle.saccades["xEnd"].to_list() == [102.0]

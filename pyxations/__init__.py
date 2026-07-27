@@ -16,7 +16,6 @@ from .export import BIDSDerivativeExport
 from .methods.eyemovement.engbert import EngbertDetection
 from .pre_processing import PreProcessing
 from .tables import SessionTables
-from .utils import get_ordered_trials_from_psycopy_logs
 from .visualization.samples import SampleVisualization
 from .visualization.visualization import Visualization
 
@@ -33,7 +32,6 @@ __all__ = [
     "Visualization",
     "compute_derivatives_for_dataset",
     "dataset_to_bids",
-    "get_ordered_trials_from_psycopy_logs",
     "validate_bids_dataset",
 ]
 

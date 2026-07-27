@@ -16,9 +16,7 @@ def _messages() -> pl.DataFrame:
 
 
 def _empty_events() -> pl.DataFrame:
-    return pl.DataFrame(
-        schema={"tStart": pl.Float64, "tEnd": pl.Float64}
-    )
+    return pl.DataFrame(schema={"tStart": pl.Float64, "tEnd": pl.Float64})
 
 
 def _values(frame: pl.DataFrame, column: str):
@@ -304,9 +302,7 @@ def test_add_trial_metadata_rejects_conflicting_duplicates(tmp_path: Path):
 def test_add_trial_metadata_validates_tables_and_join_key(tmp_path: Path):
     pp = _metadata_preprocessing(tmp_path)
 
-    with pytest.raises(
-        TypeError, match="metadata_df must be a Polars DataFrame"
-    ):
+    with pytest.raises(TypeError, match="metadata_df must be a Polars DataFrame"):
         pp.add_trial_metadata({"trial_index": [1]}, ["condition"])  # type: ignore[arg-type]
 
     with pytest.raises(ValueError, match="metadata_df must contain"):
@@ -505,9 +501,7 @@ def test_saccades_direction_custom_tolerance_and_validation(tmp_path: Path):
     with pytest.raises(ValueError, match="between 0 and 90"):
         pp.saccades_direction(tol_deg=100)
 
-    pp.saccades = pl.DataFrame(
-        {"xStart": [0.0], "yStart": [0.0], "xEnd": [1.0]}
-    )
+    pp.saccades = pl.DataFrame({"xStart": [0.0], "yStart": [0.0], "xEnd": [1.0]})
     with pytest.raises(ValueError, match="yEnd"):
         pp.saccades_direction()
 
@@ -524,9 +518,7 @@ def test_process_writes_recipe_and_provenance(tmp_path: Path):
 
     assert _values(pp.samples, "bad") == [False]
     recipe = json.loads((tmp_path / "preprocessing_recipe.json").read_text())
-    provenance = json.loads(
-        (tmp_path / "preprocessing_provenance.json").read_text()
-    )
+    provenance = json.loads((tmp_path / "preprocessing_provenance.json").read_text())
     assert recipe["tool_version"] == PreProcessing.VERSION
     assert provenance["completed_recipe"] == ["bad_samples"]
 

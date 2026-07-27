@@ -70,9 +70,7 @@ def test_saccade_rows_and_inter_saccadic_fixations_preserve_schema(
             dtype=float,
         )
 
-    monkeypatch.setattr(
-        engbert_module, "microsacc_plugin", fake_microsacc_plugin
-    )
+    monkeypatch.setattr(engbert_module, "microsacc_plugin", fake_microsacc_plugin)
     samples = pl.DataFrame(
         {
             "tSample": np.arange(6, dtype=float) * 10.0,

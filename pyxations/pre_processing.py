@@ -3,17 +3,16 @@ from __future__ import annotations
 import json
 import re
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Union
 
 import numpy as np
 import polars as pl
 
-
-Number = Union[int, float]
-PathLike = Union[str, Path]
+Number = int | float
+PathLike = str | Path
 DataFrame = pl.DataFrame
 
 _X_COORDINATE_COLUMNS = ("LX", "RX", "X", "xStart", "xEnd", "xAvg")
@@ -28,9 +27,9 @@ class SessionMetadata:
     coords_unit: str = "px"
     time_unit: str = "ms"
     pupil_unit: str = "arbitrary"
-    screen_width: Optional[int] = None
-    screen_height: Optional[int] = None
-    extra: Dict[str, Union[str, int, float, bool, None]] = field(default_factory=dict)
+    screen_width: int | None = None
+    screen_height: int | None = None
+    extra: dict[str, str | int | float | bool | None] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Return JSON-serializable metadata."""
@@ -83,7 +82,7 @@ class PreProcessing:
         blinks: DataFrame,
         user_messages: DataFrame,
         session_path: PathLike,
-        metadata: Optional[SessionMetadata] = None,
+        metadata: SessionMetadata | None = None,
     ):
         self.samples = self._copy_frame(samples, "samples")
         self.fixations = self._copy_frame(fixations, "fixations")
@@ -105,8 +104,7 @@ class PreProcessing:
         if isinstance(df, pl.DataFrame):
             return df.clone()
         raise TypeError(
-            f"PreProcessing {name} must be a Polars DataFrame, "
-            f"got {type(df)!r}."
+            f"PreProcessing {name} must be a Polars DataFrame, got {type(df)!r}."
         )
 
     @staticmethod
@@ -151,7 +149,7 @@ class PreProcessing:
     def _ensure_columns_exist(
         df: DataFrame,
         cols: Sequence[str],
-    ) -> List[str]:
+    ) -> list[str]:
         return [column for column in cols if column in df.columns]
 
     def _save_json_sidecar(self, obj: dict, filename: str) -> None:
@@ -163,11 +161,11 @@ class PreProcessing:
 
     def set_metadata(
         self,
-        coords_unit: Optional[str] = None,
-        time_unit: Optional[str] = None,
-        pupil_unit: Optional[str] = None,
-        screen_width: Optional[int] = None,
-        screen_height: Optional[int] = None,
+        coords_unit: str | None = None,
+        time_unit: str | None = None,
+        pupil_unit: str | None = None,
+        screen_width: int | None = None,
+        screen_height: int | None = None,
         **extra,
     ) -> None:
         """Update session-level metadata used by preprocessing operations."""
@@ -183,20 +181,16 @@ class PreProcessing:
             self.metadata.screen_height = screen_height
         self.metadata.extra.update(extra)
 
-    def save_metadata(self, filename: str = "metadata.json") -> None:
-        """Persist session metadata beside the derivatives."""
-        self._save_json_sidecar(self.metadata.to_dict(), filename)
-
     # ----------------------- Public API: Message Parsing ---------------------- #
 
     def get_timestamps_from_messages(
         self,
-        messages_dict: Dict[str, List[str]],
+        messages_dict: dict[str, list[str]],
         *,
         case_insensitive: bool = True,
         use_regex: bool = True,
         return_match_token: bool = False,
-    ) -> Dict[str, List[int]]:
+    ) -> dict[str, list[int]]:
         """Extract ordered timestamps by matching message patterns.
 
         Python's regular-expression engine is deliberately used instead of a
@@ -218,13 +212,12 @@ class PreProcessing:
         )
 
         flags = re.IGNORECASE if case_insensitive else 0
-        timestamps_dict: Dict[str, List[int]] = {}
+        timestamps_dict: dict[str, list[int]] = {}
 
         for key, tokens in messages_dict.items():
             if not tokens:
                 raise ValueError(
-                    f"[{key}] Empty token list passed to "
-                    "get_timestamps_from_messages."
+                    f"[{key}] Empty token list passed to get_timestamps_from_messages."
                 )
 
             prepared_tokens = [
@@ -240,7 +233,7 @@ class PreProcessing:
                     f"[{key}] Invalid message pattern in {tokens}: {error}"
                 ) from error
 
-            hits: List[tuple[int, int]] = []
+            hits: list[tuple[int, int]] = []
             for row_index, (timestamp, message) in enumerate(zip(timestamps, messages)):
                 message_text = "" if message is None else str(message)
                 if combined_pattern.search(message_text) is None:
@@ -293,9 +286,9 @@ class PreProcessing:
 
     def split_all_into_trials(
         self,
-        start_times: Dict[str, List[Number]],
-        end_times: Dict[str, List[Number]],
-        trial_labels: Optional[Dict[str, List[str]]] = None,
+        start_times: dict[str, list[Number]],
+        end_times: dict[str, list[Number]],
+        trial_labels: dict[str, list[str]] | None = None,
         *,
         allow_open_last: bool = True,
         require_nonoverlap: bool = True,
@@ -304,8 +297,7 @@ class PreProcessing:
         missing_end_keys = [key for key in start_times if key not in end_times]
         if missing_end_keys:
             raise ValueError(
-                "Missing end-time definitions for phases: "
-                f"{missing_end_keys}."
+                f"Missing end-time definitions for phases: {missing_end_keys}."
             )
 
         self.samples = self._split_into_trials_df(
@@ -347,9 +339,9 @@ class PreProcessing:
 
     def split_all_into_trials_by_msgs(
         self,
-        start_msgs: Dict[str, List[str]],
-        end_msgs: Dict[str, List[str]],
-        trial_labels: Optional[Dict[str, List[str]]] = None,
+        start_msgs: dict[str, list[str]],
+        end_msgs: dict[str, list[str]],
+        trial_labels: dict[str, list[str]] | None = None,
         *,
         case_insensitive: bool = True,
         use_regex: bool = True,
@@ -375,9 +367,9 @@ class PreProcessing:
 
     def split_all_into_trials_by_durations(
         self,
-        start_msgs: Dict[str, List[str]],
-        durations: Dict[str, List[Number]],
-        trial_labels: Optional[Dict[str, List[str]]] = None,
+        start_msgs: dict[str, list[str]],
+        durations: dict[str, list[Number]],
+        trial_labels: dict[str, list[str]] | None = None,
         *,
         case_insensitive: bool = True,
         use_regex: bool = True,
@@ -392,7 +384,7 @@ class PreProcessing:
             use_regex=use_regex,
             return_match_token=return_match_token,
         )
-        end_times: Dict[str, List[Number]] = {}
+        end_times: dict[str, list[Number]] = {}
         for key, start_values in starts.items():
             if key not in durations:
                 raise ValueError(f"[{key}] No trial durations were provided.")
@@ -418,9 +410,9 @@ class PreProcessing:
     def _split_into_trials_df(
         self,
         data: DataFrame,
-        start_times: Dict[str, List[Number]],
-        end_times: Dict[str, List[Number]],
-        trial_labels: Optional[Dict[str, List[str]]] = None,
+        start_times: dict[str, list[Number]],
+        end_times: dict[str, list[Number]],
+        trial_labels: dict[str, list[str]] | None = None,
         *,
         sample_table: bool,
         allow_open_last: bool = True,
@@ -501,23 +493,17 @@ class PreProcessing:
 
     def bad_samples(
         self,
-        screen_height: Optional[int] = None,
-        screen_width: Optional[int] = None,
+        screen_height: int | None = None,
+        screen_width: int | None = None,
         *,
         mark_nan_as_bad: bool = True,
         inclusive_bounds: bool = True,
     ) -> None:
         """Mark rows with out-of-screen or missing coordinates as bad."""
         height = (
-            screen_height
-            if screen_height is not None
-            else self.metadata.screen_height
+            screen_height if screen_height is not None else self.metadata.screen_height
         )
-        width = (
-            screen_width
-            if screen_width is not None
-            else self.metadata.screen_width
-        )
+        width = screen_width if screen_width is not None else self.metadata.screen_width
         if height is None or width is None:
             raise ValueError(
                 "bad_samples requires screen_height and screen_width (either "
@@ -615,7 +601,7 @@ class PreProcessing:
 
     def process(
         self,
-        functions_and_params: Dict[str, Dict],
+        functions_and_params: dict[str, dict],
         *,
         log_recipe: bool = True,
         recipe_filename: str = "preprocessing_recipe.json",
@@ -641,7 +627,7 @@ class PreProcessing:
                 )
             function = getattr(self, function_name)
             if not callable(function):
-                raise AttributeError(
+                raise TypeError(
                     f"Preprocessing attribute '{function_name}' is not callable."
                 )
             if not isinstance(parameters, dict):
@@ -662,7 +648,7 @@ class PreProcessing:
                 provenance_filename,
             )
 
-    def _public_recipe_methods(self) -> List[str]:
+    def _public_recipe_methods(self) -> list[str]:
         return sorted(
             name
             for name in dir(self)
@@ -685,8 +671,7 @@ class PreProcessing:
         metadata_df = self._copy_frame(metadata_df, "metadata_df")
         if "trial_index" not in metadata_df.columns:
             raise ValueError(
-                "[add_trial_metadata] metadata_df must contain a "
-                "'trial_index' column."
+                "[add_trial_metadata] metadata_df must contain a 'trial_index' column."
             )
         if "trial_index" not in self.samples.columns:
             raise ValueError(
@@ -695,16 +680,10 @@ class PreProcessing:
             )
 
         requested = [
-            column
-            for column in dict.fromkeys(columns)
-            if column != "trial_index"
+            column for column in dict.fromkeys(columns) if column != "trial_index"
         ]
-        available = [
-            column for column in requested if column in metadata_df.columns
-        ]
-        skipped = [
-            column for column in requested if column not in metadata_df.columns
-        ]
+        available = [column for column in requested if column in metadata_df.columns]
+        skipped = [column for column in requested if column not in metadata_df.columns]
         if skipped:
             warnings.warn(
                 "[add_trial_metadata] Columns not found in metadata_df and "
@@ -762,9 +741,9 @@ class PreProcessing:
         cls,
         records: Sequence[dict],
         columns: Sequence[str],
-    ) -> List[dict]:
-        by_trial: Dict[object, dict] = {}
-        ordered: List[dict] = []
+    ) -> list[dict]:
+        by_trial: dict[object, dict] = {}
+        ordered: list[dict] = []
 
         for record in records:
             trial_index = record["trial_index"]
@@ -823,7 +802,9 @@ class PreProcessing:
 
     @classmethod
     def _metadata_values_equal(cls, left: object, right: object) -> bool:
-        if cls._metadata_value_is_missing(left) and cls._metadata_value_is_missing(right):
+        if cls._metadata_value_is_missing(left) and cls._metadata_value_is_missing(
+            right
+        ):
             return True
         try:
             equal = left == right

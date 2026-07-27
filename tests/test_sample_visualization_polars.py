@@ -71,9 +71,7 @@ def test_plot_rejects_missing_or_non_numeric_columns():
 
 def test_empty_samples_are_rejected():
     visualizer = SampleVisualization(
-        pl.DataFrame(
-            schema={"tSample": pl.Float64, "X": pl.Float64, "Y": pl.Float64}
-        )
+        pl.DataFrame(schema={"tSample": pl.Float64, "X": pl.Float64, "Y": pl.Float64})
     )
 
     with pytest.raises(ValueError, match="At least one gaze sample"):

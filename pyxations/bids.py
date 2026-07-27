@@ -62,9 +62,7 @@ class EyeRecording:
         columns = required + (
             ["pupil_size"] if "pupil_size" in self.samples.columns else []
         )
-        columns += [
-            column for column in self.samples.columns if column not in columns
-        ]
+        columns += [column for column in self.samples.columns if column not in columns]
         numeric = required + (
             ["pupil_size"] if "pupil_size" in self.samples.columns else []
         )
@@ -119,14 +117,16 @@ class SourceRecordingBundle:
     metadata: dict = field(default_factory=dict)
 
 
-def _bids_label(value: str, *, fallback: str) -> str:
+def bids_label(value: str, *, fallback: str) -> str:
+    """Normalize a value for use as a BIDS entity label."""
+
     label = re.sub(r"[^A-Za-z0-9]+", "", str(value))
     return label or fallback
 
 
 def _task_from_filename(path: Path, default: str) -> str:
     match = re.search(r"(?:^|_)task-([A-Za-z0-9]+)", path.stem)
-    return _bids_label(match.group(1) if match else default, fallback="eyetracking")
+    return bids_label(match.group(1) if match else default, fallback="eyetracking")
 
 
 def _session_from_filename(path: Path, session_substrings: int) -> str:
@@ -135,7 +135,7 @@ def _session_from_filename(path: Path, session_substrings: int) -> str:
     raw = "".join(selected) if selected else "1"
     if raw.lower().startswith("ses-"):
         raw = raw[4:]
-    return _bids_label(raw, fallback="1")
+    return bids_label(raw, fallback="1")
 
 
 def _sampling_frequency(
@@ -223,9 +223,7 @@ def _read_gazepoint(
     return recordings
 
 
-def _read_tobii(
-    path: Path, *, data: pl.DataFrame | None = None
-) -> list[EyeRecording]:
+def _read_tobii(path: Path, *, data: pl.DataFrame | None = None) -> list[EyeRecording]:
     data = (
         pl.read_csv(path, separator="\t", infer_schema_length=None)
         if data is None
@@ -268,9 +266,7 @@ def _read_tobii(
 def _read_webgazer(
     path: Path, *, source: pl.DataFrame | None = None
 ) -> list[EyeRecording]:
-    source = (
-        pl.read_csv(path, infer_schema_length=None) if source is None else source
-    )
+    source = pl.read_csv(path, infer_schema_length=None) if source is None else source
     if "webgazer_data" not in source:
         raise ValueError(f"{path} does not contain a webgazer_data column")
 
@@ -365,9 +361,7 @@ def _read_eyelink_bundle(path: Path) -> SourceRecordingBundle:
                     continue
                 if line.startswith("*"):
                     header.append({"line": line, "Line_number": line_number})
-                rate_match = re.search(
-                    r"RATE\s+([0-9]+(?:\.[0-9]+)?)\s+TRACKING", line
-                )
+                rate_match = re.search(r"RATE\s+([0-9]+(?:\.[0-9]+)?)\s+TRACKING", line)
                 if rate_match:
                     declared_frequency = float(rate_match.group(1))
                 if "!CAL" in line and not calibration_active:
@@ -556,9 +550,7 @@ def _read_eyelink_bundle(path: Path) -> SourceRecordingBundle:
         recordings=recordings,
         events=pl.DataFrame(events, strict=False) if events else empty_frame(),
         calibration=(
-            pl.DataFrame(calibration, strict=False)
-            if calibration
-            else empty_frame()
+            pl.DataFrame(calibration, strict=False) if calibration else empty_frame()
         ),
         header=pl.DataFrame(header, strict=False) if header else empty_frame(),
         metadata={
@@ -609,9 +601,7 @@ def _read_source_bundle(path: Path, format_name: str) -> SourceRecordingBundle:
         )
     if format_name == "tobii":
         data = pl.read_csv(path, separator="\t", infer_schema_length=None)
-        return SourceRecordingBundle(
-            recordings=_read_tobii(path, data=data)
-        )
+        return SourceRecordingBundle(recordings=_read_tobii(path, data=data))
     if format_name == "webgazer":
         data = pl.read_csv(path, infer_schema_length=None)
         calibration = (
@@ -640,6 +630,7 @@ def _read_source_bundle(path: Path, format_name: str) -> SourceRecordingBundle:
         )
     raise ValueError(f"Unsupported eye-tracking format: {format_name}")
 
+
 PRIMARY_EXTENSIONS = {
     "eyelink": {".edf", ".asc"},
     "gazepoint": {".csv"},
@@ -663,7 +654,9 @@ def _is_primary_recording(path: Path, format_name: str) -> bool:
                 path,
                 separator="\t" if format_name == "tobii" else ",",
                 infer_schema_length=0,
-            ).collect_schema().names()
+            )
+            .collect_schema()
+            .names()
         )
     except (OSError, UnicodeDecodeError, pl.exceptions.PolarsError):
         return False
@@ -781,9 +774,7 @@ def _write_physio_events(
     for column in required:
         if column not in frame:
             frame = frame.with_columns(pl.lit("n/a").alias(column))
-    columns = required + [
-        column for column in frame.columns if column not in required
-    ]
+    columns = required + [column for column in frame.columns if column not in required]
     frame = frame.select(columns)
     path = destination / f"{prefix}_physioevents.tsv.gz"
     json_path = destination / f"{prefix}_physioevents.json"
@@ -800,8 +791,7 @@ def _write_physio_events(
     for column in columns:
         metadata[column] = {
             "Description": (
-                "Raw eye-tracking event field retained by Pyxations "
-                f"({column})."
+                f"Raw eye-tracking event field retained by Pyxations ({column})."
             )
         }
     _write_json(json_path, metadata)
@@ -843,9 +833,7 @@ def _read_behavioral_table(path: Path) -> pl.DataFrame | None:
         if path.suffix.lower() == ".csv":
             return pl.read_csv(path, infer_schema_length=None)
         if path.suffix.lower() == ".tsv":
-            return pl.read_csv(
-                path, separator="\t", infer_schema_length=None
-            )
+            return pl.read_csv(path, separator="\t", infer_schema_length=None)
     except (OSError, UnicodeDecodeError, pl.exceptions.PolarsError):
         return None
     return None
@@ -903,23 +891,19 @@ def _prepare_task_events(
         return None
     events = pl.concat(tables, how="diagonal_relaxed")
     if "trial_number" not in events and "trial_index" in events:
-        events = events.with_columns(
-            pl.col("trial_index").alias("trial_number")
-        )
+        events = events.with_columns(pl.col("trial_index").alias("trial_number"))
     if "onset" not in events:
         if "time_elapsed" in events:
             events = events.with_columns(
                 (
                     pl.col("time_elapsed").cast(pl.Float64, strict=False)
-                    - pl.col("time_elapsed")
-                    .cast(pl.Float64, strict=False)
-                    .min()
-                ).truediv(1_000.0).alias("onset")
+                    - pl.col("time_elapsed").cast(pl.Float64, strict=False).min()
+                )
+                .truediv(1_000.0)
+                .alias("onset")
             )
         else:
-            events = events.with_columns(
-                pl.lit(None, dtype=pl.Float64).alias("onset")
-            )
+            events = events.with_columns(pl.lit(None, dtype=pl.Float64).alias("onset"))
     if "duration" not in events:
         if "rt" in events:
             events = events.with_columns(
@@ -936,9 +920,7 @@ def _prepare_task_events(
     # experiments commonly store multiline HTML and pretty-printed JSON in
     # behavioral columns, so retain their content in a single-line form.
     string_columns = [
-        column
-        for column, dtype in events.schema.items()
-        if dtype == pl.String
+        column for column, dtype in events.schema.items() if dtype == pl.String
     ]
     if string_columns:
         events = events.with_columns(
@@ -961,9 +943,7 @@ def _write_task_events(
         return None
     frame = events.clone()
     columns = ["onset", "duration"] + [
-        column
-        for column in frame.columns
-        if column not in {"onset", "duration"}
+        column for column in frame.columns if column not in {"onset", "duration"}
     ]
     frame = frame.select(columns)
     path = destination / f"{prefix}_events.tsv"
@@ -972,10 +952,7 @@ def _write_task_events(
     write_tsv(path, frame, include_header=True, compressed=False)
     metadata = {
         column: {
-            "Description": (
-                "Behavioral trial field retained by Pyxations "
-                f"({column})."
-            )
+            "Description": (f"Behavioral trial field retained by Pyxations ({column}).")
         }
         for column in columns
     }
@@ -1024,8 +1001,13 @@ def write_bids_dataset(
             )
         source_resolved = source_root.resolve()
         dataset_resolved = dataset_root.resolve()
-        if source_resolved == dataset_resolved or dataset_resolved in source_resolved.parents:
-            raise ValueError("Refusing to overwrite a dataset containing its source files")
+        if (
+            source_resolved == dataset_resolved
+            or dataset_resolved in source_resolved.parents
+        ):
+            raise ValueError(
+                "Refusing to overwrite a dataset containing its source files"
+            )
         shutil.rmtree(dataset_root)
     dataset_root.mkdir(parents=True, exist_ok=True)
     shutil.copytree(
@@ -1040,7 +1022,9 @@ def write_bids_dataset(
         if path.is_file() and _is_primary_recording(path, format_name)
     ]
     if format_name == "eyelink":
-        edf_stems = {path.stem.lower() for path in primary if path.suffix.lower() == ".edf"}
+        edf_stems = {
+            path.stem.lower() for path in primary if path.suffix.lower() == ".edf"
+        }
         primary = [
             path
             for path in primary
@@ -1127,16 +1111,11 @@ def write_bids_dataset(
                 base = f"sub-{subject}_ses-{session}_task-{task}"
                 if len(session_primary) > 1:
                     base += f"_run-{run_index:02d}"
-                destination = (
-                    dataset_root / f"sub-{subject}" / f"ses-{session}" / "beh"
-                )
+                destination = dataset_root / f"sub-{subject}" / f"ses-{session}" / "beh"
                 available_eyes = [
-                    recording.recorded_eye
-                    for recording in bundle.recordings
+                    recording.recorded_eye for recording in bundle.recordings
                 ]
-                for eye_index, recording in enumerate(
-                    bundle.recordings, start=1
-                ):
+                for eye_index, recording in enumerate(bundle.recordings, start=1):
                     prefix = f"{base}_recording-eye{eye_index}"
                     _write_recording(
                         recording,
@@ -1145,15 +1124,9 @@ def write_bids_dataset(
                         extra_metadata=(
                             {
                                 "PyxationsCalibration": frame_payload(
-                                    bundle.calibration,
-                                    columns_key="columns",
-                                    records_key="data",
+                                    bundle.calibration
                                 ),
-                                "PyxationsHeader": frame_payload(
-                                    bundle.header,
-                                    columns_key="columns",
-                                    records_key="data",
-                                ),
+                                "PyxationsHeader": frame_payload(bundle.header),
                                 **bundle.metadata,
                             }
                             if eye_index == 1
@@ -1244,9 +1217,7 @@ def read_raw_bids_session(session_path: str | Path) -> SessionTables:
         first_metadata = first_metadata or metadata
         frequencies.append(float(metadata["SamplingFrequency"]))
         frame = _read_bids_table(path, metadata)
-        time_scale = _milliseconds_per_unit(
-            metadata.get("timestamp", {}).get("Units")
-        )
+        time_scale = _milliseconds_per_unit(metadata.get("timestamp", {}).get("Units"))
         stream = frame.select(
             pl.col("timestamp")
             .cast(pl.Float64, strict=False)
@@ -1307,9 +1278,12 @@ def read_raw_bids_session(session_path: str | Path) -> SessionTables:
             if column in stream and column in samples
         ]
         stream = stream.drop(duplicate_auxiliary)
-        samples = samples.join(
-            stream, on="tSample", how="full", coalesce=True
-        )
+        if samples.height == stream.height and samples.get_column("tSample").equals(
+            stream.get_column("tSample")
+        ):
+            samples = samples.hstack(stream.drop("tSample"))
+        else:
+            samples = samples.join(stream, on="tSample", how="full", coalesce=True)
     samples = samples.sort("tSample", maintain_order=True)
     sampling_frequency = float(np.nanmedian(frequencies))
     additions = [pl.lit(sampling_frequency).alias("Rate_recorded")]
@@ -1380,9 +1354,7 @@ def read_raw_bids_session(session_path: str | Path) -> SessionTables:
             return pl.DataFrame({column: [] for column in mapping.values()})
         result = events.filter(pl.col("trial_type") == event_type)
         available = {
-            source: target
-            for source, target in mapping.items()
-            if source in result
+            source: target for source, target in mapping.items() if source in result
         }
         return result.select(list(available)).rename(available)
 
@@ -1447,9 +1419,7 @@ def read_raw_bids_session(session_path: str | Path) -> SessionTables:
         saccades=saccades,
         blinks=blinks,
         messages=messages,
-        calibration=payload_frame(
-            first_metadata.get("PyxationsCalibration")
-        ),
+        calibration=payload_frame(first_metadata.get("PyxationsCalibration")),
         header=payload_frame(first_metadata.get("PyxationsHeader")),
         behavioral_events=read_bids_task_events(session),
         sampling_frequency=sampling_frequency,

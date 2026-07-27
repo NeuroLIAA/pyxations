@@ -19,7 +19,6 @@ from pyxations import (
     VisualSearchExperiment,
     BIDSDerivativeExport,
     SessionTables,
-    get_ordered_trials_from_psycopy_logs,
 )
 ```
 
@@ -80,9 +79,3 @@ Plotting utilities for scanpaths, fixations, saccades and raw samples.
 The canonical BIDS TSV.GZ/JSON derivative reader and writer.
 
 ::: pyxations.export
-
-## utils
-
-Helpers for log alignment and miscellaneous utilities.
-
-::: pyxations.utils

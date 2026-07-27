@@ -9,7 +9,7 @@ from pathlib import Path
 
 import polars as pl
 
-from pyxations.bids import read_raw_bids_session, write_bids_dataset
+from pyxations.bids import bids_label, read_raw_bids_session, write_bids_dataset
 from pyxations.export.bids import BIDSDerivativeExport, initialize_bids_derivative
 from pyxations.methods.eyemovement.engbert import EngbertDetection
 from pyxations.pre_processing import PreProcessing
@@ -48,9 +48,7 @@ def _segmentation_recipe(pre_processing, kwargs):
         function_name = "split_all_into_trials_by_durations"
     else:
         function_name = "split_all_into_trials_by_msgs"
-    allowed = set(
-        inspect.signature(getattr(pre_processing, function_name)).parameters
-    )
+    allowed = set(inspect.signature(getattr(pre_processing, function_name)).parameters)
     candidates = {
         "trial_labels",
         "start_times",
@@ -79,9 +77,7 @@ def _assign_default_trials(pre_processing):
             else pl.lit(0, dtype=pl.Int64)
         ).alias("trial_number"),
         (
-            pl.col("phase")
-            if "phase" in pre_processing.samples.columns
-            else pl.lit("")
+            pl.col("phase") if "phase" in pre_processing.samples.columns else pl.lit("")
         ).alias("phase"),
     )
     pre_processing.samples = samples
@@ -96,16 +92,12 @@ def _assign_default_trials(pre_processing):
                 "trial_number", as_dict=True
             ).items():
                 trial_value = (
-                    trial_number[0]
-                    if isinstance(trial_number, tuple)
-                    else trial_number
+                    trial_number[0] if isinstance(trial_number, tuple) else trial_number
                 )
                 start = group.get_column("tSample").min()
                 end = group.get_column("tSample").max()
                 table = table.with_columns(
-                    pl.when(
-                        (pl.col("tStart") >= start) & (pl.col("tEnd") <= end)
-                    )
+                    pl.when((pl.col("tStart") >= start) & (pl.col("tEnd") <= end))
                     .then(pl.lit(int(trial_value)))
                     .otherwise(pl.col("trial_number"))
                     .alias("trial_number")
@@ -137,15 +129,9 @@ def _detect_from_bids(
 
     detector_type = _detector_type(detection_algorithm)
     if detector_type is None:
-        raise ValueError(
-            f"Unknown eye-movement detector: {detection_algorithm}"
-        )
-    if dataset_format != "eyelink" and not {"X", "Y"}.issubset(
-        samples.columns
-    ):
-        eye_prefix = (
-            "L" if {"LX", "LY"}.issubset(samples.columns) else "R"
-        )
+        raise ValueError(f"Unknown eye-movement detector: {detection_algorithm}")
+    if dataset_format != "eyelink" and not {"X", "Y"}.issubset(samples.columns):
+        eye_prefix = "L" if {"LX", "LY"}.issubset(samples.columns) else "R"
         expressions = [
             pl.col(f"{eye_prefix}X").alias("X"),
             pl.col(f"{eye_prefix}Y").alias("Y"),
@@ -159,9 +145,7 @@ def _detect_from_bids(
         session_folder_path=session_folder_path,
         samples=samples,
     )
-    if detection_algorithm == "remodnav" and {"X", "Y"}.issubset(
-        samples.columns
-    ):
+    if detection_algorithm == "remodnav" and {"X", "Y"}.issubset(samples.columns):
         config = {
             "webgazer": {"savgol_length": 0.195, "max_pso_dur": 0.1},
             "gaze": {"savgol_length": 0.19, "max_pso_dur": 0.4},
@@ -208,9 +192,7 @@ def _find_best_eye(calibration: pl.DataFrame) -> str:
             continue
         match = re.search(r"\bERROR\s+([-+]?[0-9]*\.?[0-9]+)", upper)
         candidates[eye] = float(match.group(1)) if match else float("inf")
-    valid = {
-        eye: error for eye, error in candidates.items() if eye not in aborted
-    }
+    valid = {eye: error for eye, error in candidates.items() if eye not in aborted}
     if valid:
         return min(valid, key=valid.get)
     if len(aborted) == 1:
@@ -245,8 +227,8 @@ def _keep_eye(
         for source, target in zip(source_columns, target_columns)
         if source in retained
     }
-    samples = samples.select(retained).rename(rename).with_columns(
-        pl.lit(eye).alias("eye")
+    samples = (
+        samples.select(retained).rename(rename).with_columns(pl.lit(eye).alias("eye"))
     )
 
     def selected(table):
@@ -254,9 +236,7 @@ def _keep_eye(
             table = table.filter(
                 pl.col("eye").cast(pl.String).str.to_uppercase() == eye
             )
-        required = [
-            column for column in ("tStart", "tEnd") if column in table
-        ]
+        required = [column for column in ("tStart", "tEnd") if column in table]
         return table.drop_nulls(subset=required) if required else table
 
     return samples, selected(fixations), selected(blinks), selected(saccades)
@@ -264,13 +244,14 @@ def _keep_eye(
 
 def _choose_best_eye(raw, samples, fixations, blinks, saccades):
     required = {"Calib_index", "line"}
-    if raw.calibration.is_empty() or not required.issubset(
-        raw.calibration.columns
-    ):
+    if raw.calibration.is_empty() or not required.issubset(raw.calibration.columns):
         return samples, fixations, blinks, saccades
-    if not raw.calibration.get_column("line").cast(pl.String).str.contains(
-        "CAL VALIDATION"
-    ).any():
+    if (
+        not raw.calibration.get_column("line")
+        .cast(pl.String)
+        .str.contains("CAL VALIDATION")
+        .any()
+    ):
         return samples, fixations, blinks, saccades
 
     selected = []
@@ -327,14 +308,9 @@ def process_bids_session(
     messages = raw.messages.clone()
     message_keywords = kwargs.pop("msg_keywords", None)
     if message_keywords and not messages.is_empty() and "message" in messages:
-        pattern = "(?i)" + "|".join(
-            re.escape(keyword) for keyword in message_keywords
-        )
+        pattern = "(?i)" + "|".join(re.escape(keyword) for keyword in message_keywords)
         messages = messages.filter(
-            pl.col("message")
-            .cast(pl.String)
-            .str.contains(pattern)
-            .fill_null(False)
+            pl.col("message").cast(pl.String).str.contains(pattern).fill_null(False)
         )
 
     samples, fixations, saccades, blinks = _detect_from_bids(
@@ -380,9 +356,7 @@ def process_bids_session(
                 "bad_samples": bad_parameters,
                 name: parameters,
                 "saccades_direction": (
-                    {"tol_deg": kwargs["tol_deg"]}
-                    if "tol_deg" in kwargs
-                    else {}
+                    {"tol_deg": kwargs["tol_deg"]} if "tol_deg" in kwargs else {}
                 ),
             }
         pre_processing.process(recipe)
@@ -392,9 +366,7 @@ def process_bids_session(
     behavioral_columns = kwargs.get("behavioral_columns")
     if behavioral_columns and not raw.behavioral_events.is_empty():
         if "trial_number" in raw.behavioral_events:
-            metadata = raw.behavioral_events.rename(
-                {"trial_number": "trial_index"}
-            )
+            metadata = raw.behavioral_events.rename({"trial_number": "trial_index"})
         else:
             metadata = raw.behavioral_events
         if "trial_index" in metadata:
@@ -457,11 +429,7 @@ def process_session(
     """Process one raw BIDS session unless its requested output already exists."""
 
     session_folder_path = Path(session_folder_path)
-    label = "".join(
-        character
-        for character in detection_algorithm.lower()
-        if character.isalnum()
-    ) or "pyxations"
+    label = bids_label(detection_algorithm.lower(), fallback="pyxations")
     if not overwrite and session_folder_path.exists():
         existing = (session_folder_path / "beh").glob(
             f"*_recording-eye1{label}_physio.tsv.gz"
@@ -484,15 +452,24 @@ def compute_derivatives_for_dataset(
     bids_dataset_folder,
     dataset_format,
     detection_algorithm="remodnav",
-    num_processes=4,
+    num_processes: int = 1,
     force_best_eye=True,
     overwrite=False,
     behavioral_columns=None,
     **kwargs,
 ):
-    """Compute canonical BIDS derivatives for every raw BIDS session."""
+    """Compute canonical BIDS derivatives for every raw BIDS session.
+
+    Processing is serial by default to avoid process-startup and serialization
+    costs for small datasets. Set ``num_processes`` above one for large
+    collections of independent sessions.
+    """
 
     bids_dataset_folder = Path(bids_dataset_folder)
+    if isinstance(num_processes, bool) or not isinstance(num_processes, int):
+        raise TypeError("num_processes must be an integer")
+    if num_processes < 1:
+        raise ValueError("num_processes must be at least 1")
     derivatives_folder = Path(f"{bids_dataset_folder}_derivatives")
     initialize_bids_derivative(bids_dataset_folder, derivatives_folder)
 
@@ -526,17 +503,13 @@ def compute_derivatives_for_dataset(
                 and subject_name in start_times
                 and session_name in start_times[subject_name]
             ):
-                session_kwargs["start_times"] = start_times[subject_name][
-                    session_name
-                ]
+                session_kwargs["start_times"] = start_times[subject_name][session_name]
             if (
                 end_times
                 and subject_name in end_times
                 and session_name in end_times[subject_name]
             ):
-                session_kwargs["end_times"] = end_times[subject_name][
-                    session_name
-                ]
+                session_kwargs["end_times"] = end_times[subject_name][session_name]
             jobs.append(
                 (
                     session,
@@ -550,7 +523,15 @@ def compute_derivatives_for_dataset(
             )
 
     if num_processes == 1:
-        for source, format_name, algorithm, destination, choose_eye, replace, options in jobs:
+        for (
+            source,
+            format_name,
+            algorithm,
+            destination,
+            choose_eye,
+            replace,
+            options,
+        ) in jobs:
             process_session(
                 source,
                 format_name,

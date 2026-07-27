@@ -101,7 +101,10 @@ pyx.compute_derivatives_for_dataset(
 The returned derivatives path contains a `dataset_description.json` with
 `DatasetType` set to `derivative`, `GeneratedBy` metadata for Pyxations, and a
 link to the source dataset. Its TSV.GZ/JSON tables are the canonical inputs to
-the analysis API.
+the analysis API. Processing is serial by default, which avoids worker startup
+and table-serialization overhead for small datasets. For a large dataset with
+many independent sessions, pass `num_processes=N` explicitly to process
+sessions in parallel.
 
 ### Trial segmentation parameters
 

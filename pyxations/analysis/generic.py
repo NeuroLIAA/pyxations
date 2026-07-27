@@ -1,24 +1,28 @@
-from pathlib import Path
-import polars as pl
-from pyxations.visualization.visualization import Visualization
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from pyxations.export.bids import BIDSDerivativeExport
+import warnings
+import weakref
 from math import hypot
-import numpy as np
+from pathlib import Path
+
 import matplotlib.pyplot as plt
+import numpy as np
+import polars as pl
 from matplotlib import colormaps
 from matplotlib.colors import TwoSlopeNorm
-import weakref
-import warnings
+
+from pyxations.export.bids import BIDSDerivativeExport
+from pyxations.tables import read_tsv
+from pyxations.visualization.visualization import Visualization
 
 STIMULI_FOLDER = "stimuli"
 ITEMS_FOLDER = "items"
 
-_MULTIMATCH_DTYPE = np.dtype([
-    ("start_x", "<f8"),
-    ("start_y", "<f8"),
-    ("duration", "<f8"),
-])
+_MULTIMATCH_DTYPE = np.dtype(
+    [
+        ("start_x", "<f8"),
+        ("start_y", "<f8"),
+        ("duration", "<f8"),
+    ]
+)
 
 
 def _load_multimatch():
@@ -49,13 +53,38 @@ def _to_multimatch_scanpath(fixations: pl.DataFrame) -> np.ndarray:
     for source, target in zip(
         required_columns, ("start_x", "start_y", "duration"), strict=True
     ):
-        scanpath[target] = (
-            fixations.get_column(source)
-            .cast(pl.Float64)
-            .to_numpy()
-        )
+        scanpath[target] = fixations.get_column(source).cast(pl.Float64).to_numpy()
 
     return scanpath
+
+
+def _collect_frames(
+    children,
+    accessor: str,
+    *,
+    identifier: tuple[str, object] | None = None,
+) -> pl.DataFrame:
+    """Collect one table from a hierarchy level without Python row copies."""
+
+    frames = [getattr(child, accessor)() for child in children]
+    combined = pl.concat(frames, how="diagonal_relaxed") if frames else pl.DataFrame()
+    if identifier is not None:
+        column, value = identifier
+        combined = combined.with_columns(pl.lit(value).alias(column))
+    return combined
+
+
+def _partition_trials(
+    frame: pl.DataFrame | None,
+) -> dict[object, pl.DataFrame]:
+    """Partition a table once and index the results by trial number."""
+
+    if frame is None or frame.is_empty():
+        return {}
+    return {
+        group.get_column("trial_number")[0]: group
+        for group in frame.partition_by("trial_number", maintain_order=True)
+    }
 
 
 def _find_fixation_cutoff(fix_count_list, threshold, max_possible):
@@ -70,78 +99,71 @@ def _find_fixation_cutoff(fix_count_list, threshold, max_possible):
 
     # If threshold >= sum of fix_list, return max_possible
     if threshold >= sum(fix_count_list):
-        return max_possible-1
+        return max_possible - 1
 
     for i, val in enumerate(range(max_possible)):
         summation = sum([min(fix_count, val) for fix_count in fix_count_list])
         if summation >= threshold:
             return i
 
-    return max_possible-1
+    return max_possible - 1
+
 
 def _parse_validations(df: pl.DataFrame) -> pl.DataFrame:
     """
     Parse EyeLink `!CAL VALIDATION …` lines that are stored in df["line"].
     Returns a tidy DataFrame with numeric columns ready for plotting.
     """
-    df = df.filter(pl.col("line").str.contains("CAL VALIDATION")).select(["line","Calib_index"])
+    df = df.filter(pl.col("line").str.contains("CAL VALIDATION")).select(
+        ["line", "Calib_index"]
+    )
     # column "line" does not contain "ABORTED"
 
     # 0 · remove the "ABORTED" lines (if any)
     df = df.filter(~pl.col("line").str.contains("ABORTED"))
 
     # 1 · pull the pieces out with .str.extract
-    parsed = (
-        df
-        .with_columns([
+    parsed = df.with_columns(
+        [
             # time‑stamp after the initial MSG token
             pl.col("line")
-              .str.extract(r"MSG\s+(\d+)", 1)
-              .cast(pl.Int64)
-              .alias("timestamp"),
-
+            .str.extract(r"MSG\s+(\d+)", 1)
+            .cast(pl.Int64)
+            .alias("timestamp"),
             # eye label (LEFT / RIGHT)
-            pl.col("line")
-              .str.extract(r"\s(LEFT|RIGHT)\s", 1)
-              .alias("eye"),
-
+            pl.col("line").str.extract(r"\s(LEFT|RIGHT)\s", 1).alias("eye"),
             # average and maximum error (deg)
             pl.col("line")
-              .str.extract(r"ERROR\s+([\d.]+)\s+avg", 1)
-              .cast(pl.Float64)
-              .alias("avg_error"),
-
+            .str.extract(r"ERROR\s+([\d.]+)\s+avg", 1)
+            .cast(pl.Float64)
+            .alias("avg_error"),
             pl.col("line")
-              .str.extract(r"avg\.\s+([\d.]+)\s+max", 1)
-              .cast(pl.Float64)
-              .alias("max_error"),
-
+            .str.extract(r"avg\.\s+([\d.]+)\s+max", 1)
+            .cast(pl.Float64)
+            .alias("max_error"),
             # total offset (deg)
             pl.col("line")
-              .str.extract(r"OFFSET\s+([\d.]+)\s+deg", 1)
-              .cast(pl.Float64)
-              .alias("offset_deg"),
-
+            .str.extract(r"OFFSET\s+([\d.]+)\s+deg", 1)
+            .cast(pl.Float64)
+            .alias("offset_deg"),
             # X / Y pixel offsets  (two separate capture groups)
             pl.col("line")
-              .str.extract(r"deg\.\s+(-?[\d.]+),(-?[\d.]+)", 1)
-              .cast(pl.Float64)
-              .alias("offset_x"),
-
+            .str.extract(r"deg\.\s+(-?[\d.]+),(-?[\d.]+)", 1)
+            .cast(pl.Float64)
+            .alias("offset_x"),
             pl.col("line")
-              .str.extract(r"deg\.\s+(-?[\d.]+),(-?[\d.]+)", 2)
-              .cast(pl.Float64)
-              .alias("offset_y"),
-        ])
+            .str.extract(r"deg\.\s+(-?[\d.]+),(-?[\d.]+)", 2)
+            .cast(pl.Float64)
+            .alias("offset_y"),
+        ]
     )
 
     # 2 · create a validation index (0‑based) within each calibration block
     parsed = (
-        parsed
-        .with_columns(
-            pl.col("line")                 # ← a column to operate on
-            .cum_count()                 # running 0, 1, 2, …
-            .over(["Calib_index", "eye"])# reset counter per calibration × eye
+        parsed.with_columns(
+            pl.col("line")  # ← a column to operate on
+            .cum_count()  # running 0, 1, 2, …
+            .over(["Calib_index", "eye"])  # reset counter per calibration × eye
             .alias("validation_id")
         )
         .drop("line")
@@ -149,8 +171,9 @@ def _parse_validations(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     return parsed
-class Experiment:
 
+
+class Experiment:
     def __init__(
         self,
         dataset_path: str,
@@ -162,44 +185,64 @@ class Experiment:
         excluded_sessions = excluded_sessions or {}
         excluded_trials = excluded_trials or {}
         self.dataset_path = Path(dataset_path)
-        self.derivatives_path = self.dataset_path.with_name(self.dataset_path.name + "_derivatives")
-        self.metadata = pl.read_csv(self.dataset_path / "participants.tsv", separator="\t", 
-                                    schema_overrides={"subject_id": pl.Utf8, "old_subject_id": pl.Utf8})
-        self.subjects = { subject_id:
-            Subject(subject_id, old_subject_id, self, 
-                     excluded_sessions.get(subject_id, []), excluded_trials.get(subject_id, {}))
-            for subject_id, old_subject_id in zip(self.metadata.select("subject_id").to_series(),
-                                                  self.metadata.select("old_subject_id").to_series())
-            if subject_id not in excluded_subjects and old_subject_id not in excluded_subjects
+        self.derivatives_path = self.dataset_path.with_name(
+            self.dataset_path.name + "_derivatives"
+        )
+        self.metadata = read_tsv(
+            self.dataset_path / "participants.tsv",
+            has_header=True,
+            schema_overrides={"subject_id": pl.Utf8, "old_subject_id": pl.Utf8},
+        )
+        self.subjects = {
+            subject_id: self._create_subject(
+                subject_id,
+                old_subject_id,
+                excluded_sessions.get(subject_id, []),
+                excluded_trials.get(subject_id, {}),
+            )
+            for subject_id, old_subject_id in self.metadata.select(
+                "subject_id", "old_subject_id"
+            ).iter_rows()
+            if subject_id not in excluded_subjects
+            and old_subject_id not in excluded_subjects
         }
+
+    def _create_subject(
+        self,
+        subject_id: str,
+        old_subject_id: str,
+        excluded_sessions: list,
+        excluded_trials: dict,
+    ):
+        return Subject(
+            subject_id,
+            old_subject_id,
+            self,
+            excluded_sessions,
+            excluded_trials,
+        )
 
     def __iter__(self):
         return iter(self.subjects)
-    
+
     def __getitem__(self, index):
         return self.subjects[index]
-    
+
     def __len__(self):
         return len(self.subjects)
-    
+
     def __repr__(self):
         return f"Experiment = '{self.dataset_path.name}'"
-    
-    def __next__(self):
-        return next(self.subjects)
-    
+
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
         for subject in self.subjects.values():
             subject.load_data(detection_algorithm)
 
     def plot_multipanel(self, display: bool):
-        fixations = pl.concat([subject.fixations() for subject in self.subjects.values()])
-        saccades = pl.concat([subject.saccades() for subject in self.subjects.values()])
-
         visualization_root = self.derivatives_path / "figures" / "group"
         vis = Visualization(visualization_root, self.detection_algorithm)
-        vis.plot_multipanel(fixations, saccades, display)
+        vis.plot_multipanel(self.fixations(), self.saccades(), display)
 
     def filter_fixations(self, min_fix_dur=50, print_flag=True):
         amount_fix = self.fixations().shape[0]
@@ -207,80 +250,86 @@ class Experiment:
             subject.filter_fixations(min_fix_dur)
 
         if print_flag:
-            print(f"Removed {amount_fix - self.fixations().shape[0]} fixations shorter than {min_fix_dur} ms.")
+            print(
+                f"Removed {amount_fix - self.fixations().shape[0]} fixations shorter than {min_fix_dur} ms."
+            )
+
     def collapse_fixations(self, threshold_px: float, print_flag=True):
         amount_fix = self.fixations().shape[0]
         for subject in self.subjects.values():
             subject.collapse_fixations(threshold_px)
         if print_flag:
-            print(f"Removed {amount_fix - self.fixations().shape[0]} fixations that were merged.")
+            print(
+                f"Removed {amount_fix - self.fixations().shape[0]} fixations that were merged."
+            )
 
-    def drop_trials_with_nan_threshold(self, phase, threshold=0.1,print_flag=True):
+    def drop_trials_with_nan_threshold(self, phase, threshold=0.1, print_flag=True):
         amount_trials_total = self.rts().shape[0]
         for subject in list(self.subjects.values()):
-            subject.drop_trials_with_nan_threshold(phase,threshold,False)
+            subject.drop_trials_with_nan_threshold(phase, threshold, False)
         if print_flag:
-            print(f"Removed {amount_trials_total - self.rts().shape[0]} trials with NaN values.")
+            print(
+                f"Removed {amount_trials_total - self.rts().shape[0]} trials with NaN values."
+            )
 
-    def drop_trials_longer_than(self, seconds,phase, print_flag=True):
+    def drop_trials_longer_than(self, seconds, phase, print_flag=True):
         amount_trials_total = self.rts().shape[0]
         for subject in list(self.subjects.values()):
-            subject.drop_trials_longer_than(seconds,phase,False)
+            subject.drop_trials_longer_than(seconds, phase, False)
         if print_flag:
-            print(f"Removed {amount_trials_total - self.rts().shape[0]} trials longer than {seconds} seconds.")
-    
-    def plot_scanpaths(self,screen_height,screen_width,display: bool = False):
-        with ProcessPoolExecutor(8) as executor:
-            futures = [executor.submit(subject.plot_scanpaths,screen_height,screen_width,display) for subject in self.subjects.values()]
-            for future in as_completed(futures):
-                future.result()
+            print(
+                f"Removed {amount_trials_total - self.rts().shape[0]} trials longer than {seconds} seconds."
+            )
+
+    def plot_scanpaths(self, screen_height, screen_width, display: bool = False):
+        for subject in self.subjects.values():
+            subject.plot_scanpaths(screen_height, screen_width, display)
 
     def drop_poor_or_non_calibrated_trials(self, threshold=1.0, print_flag=True):
-        '''
+        """
         Drop trials that are not calibrated or have a poor calibration.
         A trial is considered not calibrated if there is no validation data for its calibration index.
         A trial is considered poorly calibrated if the average error is greater than the threshold.
-        '''
+        """
         amount_trials_total = self.rts().shape[0]
         for subject in list(self.subjects.values()):
-            subject.drop_poor_or_non_calibrated_trials(threshold,False)
+            subject.drop_poor_or_non_calibrated_trials(threshold, False)
         if print_flag:
-            print(f"Removed {amount_trials_total - self.rts().shape[0]} trials with poor calibration.")
+            print(
+                f"Removed {amount_trials_total - self.rts().shape[0]} trials with poor calibration."
+            )
 
     def rts(self):
-        rts = [subject.rts() for subject in self.subjects.values()]
-        return pl.concat(rts)
+        return _collect_frames(self.subjects.values(), "rts")
 
     def get_subject(self, subject_id):
         return self.subjects[subject_id]
-    
+
     def get_session(self, subject_id, session_id):
         subject = self.get_subject(subject_id)
         return subject.get_session(session_id)
-    
+
     def get_trial(self, subject_id, session_id, trial_number):
         session = self.get_session(subject_id, session_id)
         return session.get_trial(trial_number)
-    
+
     def fixations(self):
-        return pl.concat([subject.fixations() for subject in self.subjects.values()])
+        return _collect_frames(self.subjects.values(), "fixations")
 
     def saccades(self):
-        return pl.concat([subject.saccades() for subject in self.subjects.values()])
+        return _collect_frames(self.subjects.values(), "saccades")
 
     def blinks(self):
         """Return blink events from every loaded subject."""
-        return pl.concat([subject.blinks() for subject in self.subjects.values()])
+        return _collect_frames(self.subjects.values(), "blinks")
 
     def pupil_samples(self):
         """Return samples containing pupil measurements from every subject."""
-        return pl.concat(
-            [subject.pupil_samples() for subject in self.subjects.values()]
-        )
+        return _collect_frames(self.subjects.values(), "pupil_samples")
 
     def samples(self):
-        return pl.concat([subject.samples() for subject in self.subjects.values()])
-    
+        return _collect_frames(self.subjects.values(), "samples")
+
     def remove_subject(self, subject_id):
         if subject_id in self.subjects:
             del self.subjects[subject_id]
@@ -295,67 +344,67 @@ class Experiment:
         # Step 0: Load and preprocess
         calib_data = self.calib_data()
         trial_numbers = calib_data[1]
-        calib_data = calib_data[0].select([
-            "subject_id", "session_id", "Calib_index", "eye", "avg_error", "validation_id"
-        ])
-
-        # Step 1: Get only rows with max validation_id per group
-        max_vals = (
-            calib_data
-            .group_by(["subject_id", "session_id", "Calib_index", "eye"])
-            .agg(pl.col("validation_id").max().alias("max_validation_id"))
+        calib_data = calib_data[0].select(
+            [
+                "subject_id",
+                "session_id",
+                "Calib_index",
+                "eye",
+                "avg_error",
+                "validation_id",
+            ]
         )
 
+        # Step 1: Get only rows with max validation_id per group
+        max_vals = calib_data.group_by(
+            ["subject_id", "session_id", "Calib_index", "eye"]
+        ).agg(pl.col("validation_id").max().alias("max_validation_id"))
+
         calib_data = (
-            calib_data
-            .join(max_vals, on=["subject_id", "session_id", "Calib_index", "eye"])
+            calib_data.join(
+                max_vals, on=["subject_id", "session_id", "Calib_index", "eye"]
+            )
             .filter(pl.col("validation_id") == pl.col("max_validation_id"))
             .drop(["max_validation_id", "validation_id"])
         )
 
         # Step 2: Choose best eye (lowest avg_error) per calibration
-        best_eyes = (
-            calib_data
-            .group_by(["subject_id", "session_id", "Calib_index"])
-            .agg(pl.col("avg_error").min().alias("best_eye_error"))
-        )
+        best_eyes = calib_data.group_by(
+            ["subject_id", "session_id", "Calib_index"]
+        ).agg(pl.col("avg_error").min().alias("best_eye_error"))
 
         calib_data = (
-            calib_data
-            .join(best_eyes, on=["subject_id", "session_id", "Calib_index"])
+            calib_data.join(best_eyes, on=["subject_id", "session_id", "Calib_index"])
             .filter(pl.col("avg_error") == pl.col("best_eye_error"))
             .drop(["eye", "best_eye_error"])
         )
 
         # Step 3: Add trial number and clean up
-        calib_data = (
-            calib_data
-            .join(trial_numbers, on=["subject_id", "session_id", "Calib_index"],how="right")
-            .drop("Calib_index")
-        )
+        calib_data = calib_data.join(
+            trial_numbers, on=["subject_id", "session_id", "Calib_index"], how="right"
+        ).drop("Calib_index")
         # Replace nans in avg_error with -1
         calib_data = calib_data.with_columns(
-            pl.when(pl.col("avg_error").is_null()).then(-1).otherwise(pl.col("avg_error")).alias("avg_error")
+            pl.when(pl.col("avg_error").is_null())
+            .then(-1)
+            .otherwise(pl.col("avg_error"))
+            .alias("avg_error")
         )
 
         # Step 4: Combine the columns "subject_id" and "session_id" into a single column
-        calib_data = (
-            calib_data
-            .with_columns(
-                (pl.col("subject_id").cast(pl.Utf8) + "_" + pl.col("session_id").cast(pl.Utf8)).alias("subject_id")
-            )
-            .drop("session_id")
-        )
-        heatmap_data = (
-            calib_data
-            .pivot(
-                values="avg_error",
-                index="subject_id",
-                on="trial_number",
-                aggregate_function="first",  # safe if unique per cell
-            )
-            .sort("subject_id")
-        )
+        calib_data = calib_data.with_columns(
+            (
+                pl.col("subject_id").cast(pl.Utf8)
+                + "_"
+                + pl.col("session_id").cast(pl.Utf8)
+            ).alias("subject_id")
+        ).drop("session_id")
+        heatmap_data = calib_data.pivot(
+            values="avg_error",
+            index="subject_id",
+            on="trial_number",
+            aggregate_function="first",  # safe if unique per cell
+        ).sort("subject_id")
 
         trial_columns = sorted(
             (column for column in heatmap_data.columns if column != "subject_id"),
@@ -368,7 +417,7 @@ class Experiment:
         n_subjects, n_trials = heatmap_values.shape
 
         # Define a base size per cell, then scale it
-        cell_width = 0.5   # width per trial column
+        cell_width = 0.5  # width per trial column
         cell_height = 0.2  # height per subject row
 
         # Limit extremes so it doesn’t explode with huge data
@@ -381,7 +430,9 @@ class Experiment:
         cmap.set_under("yellow")
         cmap.set_bad("white")
 
-        valid_values = heatmap_values[np.isfinite(heatmap_values) & (heatmap_values >= 0)]
+        valid_values = heatmap_values[
+            np.isfinite(heatmap_values) & (heatmap_values >= 0)
+        ]
         vmax = max(0.500001, float(valid_values.max())) if valid_values.size else 1.0
         norm = TwoSlopeNorm(vmin=0, vcenter=0.5, vmax=vmax)
         masked_values = np.ma.masked_invalid(heatmap_values)
@@ -414,11 +465,16 @@ class Experiment:
         plt.show()
         plt.close()
 
-class Subject:
 
-    def __init__(self, subject_id: str, old_subject_id: str, experiment: Experiment,
-                 excluded_sessions: list | None = None,
-                 excluded_trials: dict | None = None):
+class Subject:
+    def __init__(
+        self,
+        subject_id: str,
+        old_subject_id: str,
+        experiment: Experiment,
+        excluded_sessions: list | None = None,
+        excluded_trials: dict | None = None,
+    ):
         excluded_sessions = excluded_sessions or []
         excluded_trials = excluded_trials or {}
         self.subject_id = subject_id
@@ -427,48 +483,43 @@ class Subject:
         self._sessions = None  # Lazy load sessions
         self.excluded_sessions = excluded_sessions
         self.excluded_trials = excluded_trials
-        self.subject_dataset_path = self.experiment().dataset_path / f"sub-{self.subject_id}"
-        self.subject_derivatives_path = self.experiment().derivatives_path / f"sub-{self.subject_id}"
-
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        # Save the parent *id* instead of the weakref itself
-        exp = state.pop("experiment", None)
-        state["_experiment_id"] = id(exp()) if exp else None
-        return state
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        # In a worker the real Experiment instance isn’t available
-        # – keep a placeholder or rebuild if you can look it up.
-        self.experiment = lambda: None      # callable that returns None
+        self.subject_dataset_path = (
+            self.experiment().dataset_path / f"sub-{self.subject_id}"
+        )
+        self.subject_derivatives_path = (
+            self.experiment().derivatives_path / f"sub-{self.subject_id}"
+        )
 
     @property
     def sessions(self):
         if self._sessions is None:
-            self._sessions = { session_folder.name.split("-")[-1] :
-                Session(session_folder.name.split("-")[-1], self,
-                        self.excluded_trials.get(session_folder.name.split("-")[-1], {}))
-                for session_folder in self.subject_derivatives_path.glob("ses-*") 
-                if session_folder.name.split("-")[-1] not in self.excluded_sessions
+            session_folders = sorted(self.subject_derivatives_path.glob("ses-*"))
+            self._sessions = {
+                session_id: self._create_session(session_id)
+                for session_folder in session_folders
+                if (session_id := session_folder.name.removeprefix("ses-"))
+                not in self.excluded_sessions
             }
         return self._sessions
 
+    def _create_session(self, session_id: str):
+        return Session(
+            session_id,
+            self,
+            self.excluded_trials.get(session_id, {}),
+        )
+
     def __iter__(self):
         return iter(self.sessions)
-    
+
     def __getitem__(self, index):
         return self.sessions[index]
-    
+
     def __len__(self):
         return len(self.sessions)
-    
+
     def __repr__(self):
         return f"Subject = '{self.subject_id}', " + self.experiment().__repr__()
-    
-    def __next__(self):
-        return next(self.sessions)
-    
 
     def remove_session(self, session_id):
         if self._sessions and session_id in self._sessions:
@@ -479,12 +530,11 @@ class Subject:
                     exp.remove_subject(self.subject_id)
                 self._sessions = None
                 self.experiment = lambda: None
-    
+
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
         for session in self.sessions.values():
             session.load_data(detection_algorithm)
-
 
     def filter_fixations(self, min_fix_dur=50):
         for session in self.sessions.values():
@@ -494,49 +544,55 @@ class Subject:
         for session in self.sessions.values():
             session.collapse_fixations(threshold_px)
 
-    def drop_trials_with_nan_threshold(self,phase, threshold=0.1, print_flag=True):
+    def drop_trials_with_nan_threshold(self, phase, threshold=0.1, print_flag=True):
         total_sessions = len(self.sessions)
         amount_trials_total = self.rts().shape[0]
         for session in list(self.sessions.values()):
-            session.drop_trials_with_nan_threshold(phase,threshold,False)
+            session.drop_trials_with_nan_threshold(phase, threshold, False)
         bad_sessions_count = total_sessions - len(self.sessions)
-
 
         # If the proportion of bad sessions exceeds the threshold, remove all sessions
         if bad_sessions_count / total_sessions > threshold:
             self.experiment().remove_subject(self.subject_id)
-        
+
         if print_flag:
-            print(f"Removed {amount_trials_total - self.rts().shape[0]} trials with NaN values.")
+            print(
+                f"Removed {amount_trials_total - self.rts().shape[0]} trials with NaN values."
+            )
 
     def drop_poor_or_non_calibrated_trials(self, threshold=1.0, print_flag=True):
-        '''
+        """
         Drop trials that are not calibrated or have a poor calibration.
         A trial is considered not calibrated if there is no validation data for its calibration index.
         A trial is considered poorly calibrated if the average error is greater than the threshold.
-        '''
+        """
         amount_trials_total = self.rts().shape[0]
         for session in list(self.sessions.values()):
-            session.drop_poor_or_non_calibrated_trials(threshold,False)
+            session.drop_poor_or_non_calibrated_trials(threshold, False)
         if print_flag:
-            print(f"Removed {amount_trials_total - self.rts().shape[0]} trials with poor calibration.")
+            print(
+                f"Removed {amount_trials_total - self.rts().shape[0]} trials with poor calibration."
+            )
 
-    def drop_trials_longer_than(self, seconds,phase, print_flag=True):
+    def drop_trials_longer_than(self, seconds, phase, print_flag=True):
         amount_trials_total = self.rts().shape[0]
         for session in list(self.sessions.values()):
-            session.drop_trials_longer_than(seconds,phase,False)
+            session.drop_trials_longer_than(seconds, phase, False)
         if print_flag:
-            print(f"Removed {amount_trials_total - self.rts().shape[0]} trials longer than {seconds} seconds.")
+            print(
+                f"Removed {amount_trials_total - self.rts().shape[0]} trials longer than {seconds} seconds."
+            )
 
-    def plot_scanpaths(self,screen_height,screen_width, display: bool = False):
+    def plot_scanpaths(self, screen_height, screen_width, display: bool = False):
         for session in self.sessions.values():
-            session.plot_scanpaths(screen_height,screen_width,display)
- 
+            session.plot_scanpaths(screen_height, screen_width, display)
+
     def rts(self):
-        rts = [session.rts() for session in self.sessions.values()]
-        rts = pl.concat(rts).with_columns([
-            (pl.lit(self.subject_id)).alias("subject_id"),])
-        return rts
+        return _collect_frames(
+            self.sessions.values(),
+            "rts",
+            identifier=("subject_id", self.subject_id),
+        )
 
     def get_session(self, session_id):
         return self.sessions[session_id]
@@ -544,45 +600,64 @@ class Subject:
     def get_trial(self, session_id, trial_number):
         session = self.get_session(session_id)
         return session.get_trial(trial_number)
-    
-    
+
     def fixations(self):
-        df = pl.concat([session.fixations() for session in self.sessions.values()]).with_columns([
-            (pl.lit(self.subject_id)).alias("subject_id"),])
-        return df
-    
+        return _collect_frames(
+            self.sessions.values(),
+            "fixations",
+            identifier=("subject_id", self.subject_id),
+        )
+
     def saccades(self):
-        df = pl.concat([session.saccades() for session in self.sessions.values()]).with_columns([
-            (pl.lit(self.subject_id)).alias("subject_id"),])
-        return df
+        return _collect_frames(
+            self.sessions.values(),
+            "saccades",
+            identifier=("subject_id", self.subject_id),
+        )
 
     def blinks(self):
         """Return blink events with the subject identifier attached."""
-        return pl.concat(
-            [session.blinks() for session in self.sessions.values()]
-        ).with_columns(pl.lit(self.subject_id).alias("subject_id"))
+        return _collect_frames(
+            self.sessions.values(),
+            "blinks",
+            identifier=("subject_id", self.subject_id),
+        )
 
     def pupil_samples(self):
         """Return pupil samples with the subject identifier attached."""
-        return pl.concat(
-            [session.pupil_samples() for session in self.sessions.values()]
-        ).with_columns(pl.lit(self.subject_id).alias("subject_id"))
+        return _collect_frames(
+            self.sessions.values(),
+            "pupil_samples",
+            identifier=("subject_id", self.subject_id),
+        )
 
     def samples(self):
-        df = pl.concat([session.samples() for session in self.sessions.values()]).with_columns([
-            (pl.lit(self.subject_id)).alias("subject_id"),])
-        return df
+        return _collect_frames(
+            self.sessions.values(),
+            "samples",
+            identifier=("subject_id", self.subject_id),
+        )
 
     def calib_data(self):
         calib_data = [session.calib_data() for session in self.sessions.values()]
-        calib_indexes = pl.concat([calib_data[1] for calib_data in calib_data]).with_columns([
-            (pl.lit(self.subject_id)).alias("subject_id"),])
-        calib_data = pl.concat([calib_data[0] for calib_data in calib_data]).with_columns([
-            (pl.lit(self.subject_id)).alias("subject_id"),])
+        calib_indexes = pl.concat(
+            [calib_data[1] for calib_data in calib_data]
+        ).with_columns(
+            [
+                (pl.lit(self.subject_id)).alias("subject_id"),
+            ]
+        )
+        calib_data = pl.concat(
+            [calib_data[0] for calib_data in calib_data]
+        ).with_columns(
+            [
+                (pl.lit(self.subject_id)).alias("subject_id"),
+            ]
+        )
         return calib_data, calib_indexes
 
-class Session():
-    
+
+class Session:
     def __init__(
         self,
         session_id: str,
@@ -593,22 +668,18 @@ class Session():
         self.session_id = session_id
         self.subject = weakref.ref(subject)
         self.excluded_trials = excluded_trials
-        self.session_dataset_path = self.subject().subject_dataset_path / f"ses-{self.session_id}"
-        self.session_derivatives_path = self.subject().subject_derivatives_path / f"ses-{self.session_id}"
+        self.session_dataset_path = (
+            self.subject().subject_dataset_path / f"ses-{self.session_id}"
+        )
+        self.session_derivatives_path = (
+            self.subject().subject_derivatives_path / f"ses-{self.session_id}"
+        )
         self._trials = None  # Lazy load trials
 
         if not self.session_derivatives_path.exists():
-            raise FileNotFoundError(f"Session path not found: {self.session_derivatives_path}")
-        
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        sess_parent = state.pop("subject", None)
-        state["_subject_id"] = id(sess_parent()) if sess_parent else None
-        return state
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        self.subject = lambda: None
+            raise FileNotFoundError(
+                f"Session path not found: {self.session_derivatives_path}"
+            )
 
     @property
     def trials(self):
@@ -618,84 +689,87 @@ class Session():
 
     def __repr__(self):
         return f"Session = '{self.session_id}', " + self.subject().__repr__()
-    
+
     def drop_trials_with_nan_threshold(self, phase, threshold=0.1, print_flag=True):
         total_trials = len(self.trials)
         # Filter bad trials
 
-        bad_trials = [trial for trial in self.trials.keys() if self.trials[trial].is_trial_bad(phase, threshold)]
-        if len(bad_trials)/total_trials > threshold:
+        bad_trials = [
+            trial
+            for trial in self.trials
+            if self.trials[trial].is_trial_bad(phase, threshold)
+        ]
+        if len(bad_trials) / total_trials > threshold:
             self.subject().remove_session(self.session_id)
 
-        
         if print_flag:
             print(f"Removed {len(bad_trials)} trials with NaN values.")
-    
+
     def drop_poor_or_non_calibrated_trials(self, threshold=1.0, print_flag=True):
-        '''
+        """
         Drop trials that are not calibrated or have a poor calibration.
         A trial is considered not calibrated if there is no validation data for its calibration index.
         A trial is considered poorly calibrated if the average error is greater than the threshold.
-        '''
-        trial_numbers = [trial for trial in self.trials.keys()]
+        """
+        trial_numbers = list(self.trials)
         # Step 1: Get only rows with max validation_id per group
         calib_data, trial_numbers = self.calib_data()
         calib_data = calib_data.drop("session_id")
-        max_vals = (
-            calib_data
-            .group_by(["Calib_index", "eye"])
-            .agg(pl.col("validation_id").max().alias("max_validation_id"))
+        max_vals = calib_data.group_by(["Calib_index", "eye"]).agg(
+            pl.col("validation_id").max().alias("max_validation_id")
         )
 
         calib_data = (
-            calib_data
-            .join(max_vals, on=["Calib_index", "eye"])
+            calib_data.join(max_vals, on=["Calib_index", "eye"])
             .filter(pl.col("validation_id") == pl.col("max_validation_id"))
             .drop(["max_validation_id", "validation_id"])
         )
 
         # Step 2: Choose best eye (lowest avg_error) per calibration
-        best_eyes = (
-            calib_data
-            .group_by(["Calib_index"])
-            .agg(pl.col("avg_error").min().alias("best_eye_error"))
+        best_eyes = calib_data.group_by(["Calib_index"]).agg(
+            pl.col("avg_error").min().alias("best_eye_error")
         )
 
         calib_data = (
-            calib_data
-            .join(best_eyes, on=["Calib_index"])
+            calib_data.join(best_eyes, on=["Calib_index"])
             .filter(pl.col("avg_error") == pl.col("best_eye_error"))
             .drop(["eye", "best_eye_error"])
         )
 
-        calib_data = (
-            calib_data
-            .join(trial_numbers, on=["Calib_index"],how="right")
-            .drop("Calib_index")
-        )
+        calib_data = calib_data.join(
+            trial_numbers, on=["Calib_index"], how="right"
+        ).drop("Calib_index")
         # Bad trials are those with avg_error > threshold, or those that have NaN values in avg_error
-        bad_trials = calib_data.filter((pl.col("avg_error") > threshold) | (pl.col("avg_error").is_null())).select("trial_number").to_series().unique().to_list()
+        bad_trials = (
+            calib_data.filter(
+                (pl.col("avg_error") > threshold) | (pl.col("avg_error").is_null())
+            )
+            .select("trial_number")
+            .to_series()
+            .unique()
+            .to_list()
+        )
 
         for trial in bad_trials:
             self.remove_trial(trial)
-        
+
         if print_flag:
             print(f"Removed {len(bad_trials)} trials with poor calibration.")
 
-    def drop_trials_longer_than(self, seconds,phase, print_flag=True):
+    def drop_trials_longer_than(self, seconds, phase, print_flag=True):
 
         # Filter bad trials
 
-        bad_trials = [trial for trial in self.trials.keys() if self.trials[trial].is_trial_longer_than(seconds,phase)]
+        bad_trials = [
+            trial
+            for trial in self.trials
+            if self.trials[trial].is_trial_longer_than(seconds, phase)
+        ]
         for trial in bad_trials:
             self.remove_trial(trial)
-                      
+
         if print_flag:
             print(f"Removed {len(bad_trials)} trials longer than {seconds} seconds.")
-
-    def load_behavior_data(self):
-        # This should be implemented for each type of experiment
-        pass
 
     def load_data(self, detection_algorithm: str):
         self.detection_algorithm = detection_algorithm
@@ -728,29 +802,27 @@ class Session():
 
     def calib_data(self):
         if self._calib_data is None:
-            raise ValueError(f"Calibration data for session {self.session_id} and subject {self.subject().subject_id} not loaded. Please load data first.")
-        
-        calib_indexes = [(trial.trial_number,trial.calib_index) for trial in self.trials.values() if trial.calib_index is not None]
-        calib_indexes = pl.DataFrame(calib_indexes, schema=["trial_number","Calib_index"],orient="row").with_columns([
-            (pl.lit(self.session_id)).alias("session_id")])
-        return self._calib_data.with_columns([
-            (pl.lit(self.session_id)).alias("session_id")]), calib_indexes
+            raise ValueError(
+                f"Calibration data for session {self.session_id} and subject {self.subject().subject_id} not loaded. Please load data first."
+            )
 
-    def _init_trials(self,samples,fix,sacc,blink,events_path):
-        def partition(frame):
-            if frame is None:
-                return {}
-            return {
-                group["trial_number"][0]: group
-                for group in frame.partition_by(
-                    "trial_number", maintain_order=True
-                )
-            }
+        calib_indexes = [
+            (trial.trial_number, trial.calib_index)
+            for trial in self.trials.values()
+            if trial.calib_index is not None
+        ]
+        calib_indexes = pl.DataFrame(
+            calib_indexes, schema=["trial_number", "Calib_index"], orient="row"
+        ).with_columns([(pl.lit(self.session_id)).alias("session_id")])
+        return self._calib_data.with_columns(
+            [(pl.lit(self.session_id)).alias("session_id")]
+        ), calib_indexes
 
-        sample_trials = partition(samples)
-        fixation_trials = partition(fix)
-        saccade_trials = partition(sacc)
-        blink_trials = partition(blink)
+    def _init_trials(self, samples, fix, sacc, blink, events_path):
+        sample_trials = _partition_trials(samples)
+        fixation_trials = _partition_trials(fix)
+        saccade_trials = _partition_trials(sacc)
+        blink_trials = _partition_trials(blink)
         empty_fix = fix.head(0)
         empty_sacc = sacc.head(0)
         empty_blink = blink.head(0) if blink is not None else None
@@ -773,19 +845,19 @@ class Session():
             for trial in trial_numbers
         }
 
-    def plot_scanpaths(self,screen_height,screen_width, display: bool = False):
+    def plot_scanpaths(self, screen_height, screen_width, display: bool = False):
         for trial in self.trials.values():
-            trial.plot_scanpath(screen_height,screen_width,display=display)
+            trial.plot_scanpath(screen_height, screen_width, display=display)
 
     def __iter__(self):
         return iter(self.trials)
-    
+
     def __getitem__(self, index):
         return self.trials[index]
-    
+
     def __len__(self):
         return len(self.trials)
-    
+
     def get_trial(self, trial_number):
         return self._trials[trial_number]
 
@@ -797,40 +869,49 @@ class Session():
         for trial in self.trials.values():
             trial.collapse_fixations(threshold_px)
 
-
     def rts(self):
-        rts = [trial.rts() for trial in self.trials.values()]
-        rts = pl.concat(rts).with_columns([
-            (pl.lit(self.session_id)).alias("session_id"),])
-        return rts
-    
+        return _collect_frames(
+            self.trials.values(),
+            "rts",
+            identifier=("session_id", self.session_id),
+        )
 
     def fixations(self):
-        df = pl.concat([trial.fixations() for trial in self.trials.values()]).with_columns([
-            (pl.lit(self.session_id)).alias("session_id"),])
-        return df
+        return _collect_frames(
+            self.trials.values(),
+            "fixations",
+            identifier=("session_id", self.session_id),
+        )
 
     def saccades(self):
-        df = pl.concat([trial.saccades() for trial in self.trials.values()]).with_columns([
-            (pl.lit(self.session_id)).alias("session_id"),])
-        return df
+        return _collect_frames(
+            self.trials.values(),
+            "saccades",
+            identifier=("session_id", self.session_id),
+        )
 
     def blinks(self):
         """Return blink events with the session identifier attached."""
-        return pl.concat(
-            [trial.blinks() for trial in self.trials.values()]
-        ).with_columns(pl.lit(self.session_id).alias("session_id"))
+        return _collect_frames(
+            self.trials.values(),
+            "blinks",
+            identifier=("session_id", self.session_id),
+        )
 
     def pupil_samples(self):
         """Return pupil samples with the session identifier attached."""
-        return pl.concat(
-            [trial.pupil_samples() for trial in self.trials.values()]
-        ).with_columns(pl.lit(self.session_id).alias("session_id"))
+        return _collect_frames(
+            self.trials.values(),
+            "pupil_samples",
+            identifier=("session_id", self.session_id),
+        )
 
     def samples(self):
-        df = pl.concat([trial.samples() for trial in self.trials.values()]).with_columns([
-            (pl.lit(self.session_id)).alias("session_id"),])
-        return df
+        return _collect_frames(
+            self.trials.values(),
+            "samples",
+            identifier=("session_id", self.session_id),
+        )
 
     def remove_trial(self, trial_number):
         if self._trials and trial_number in self._trials:
@@ -841,8 +922,9 @@ class Session():
                     subj.remove_session(self.session_id)
                 self._trials = None
                 self.subject = lambda: None
-class Trial:
 
+
+class Trial:
     def __init__(
         self,
         trial_number: int,
@@ -891,37 +973,41 @@ class Trial:
         start_time = self._samples.select("tSample").to_series()[0]
 
         # Time normalization
-        self._samples = self._samples.with_columns([
-            (pl.col("tSample") - start_time).alias("tSample")
-        ])
+        self._samples = self._samples.with_columns(
+            [(pl.col("tSample") - start_time).alias("tSample")]
+        )
 
-        self._fix = self._fix.with_columns([
-            (pl.col("tStart") - start_time).alias("tStart"),
-            (pl.col("tEnd") - start_time).alias("tEnd")
-        ])
+        self._fix = self._fix.with_columns(
+            [
+                (pl.col("tStart") - start_time).alias("tStart"),
+                (pl.col("tEnd") - start_time).alias("tEnd"),
+            ]
+        )
 
-        self._sacc = self._sacc.with_columns([
-            (pl.col("tStart") - start_time).alias("tStart"),
-            (pl.col("tEnd") - start_time).alias("tEnd")
-        ])
+        self._sacc = self._sacc.with_columns(
+            [
+                (pl.col("tStart") - start_time).alias("tStart"),
+                (pl.col("tEnd") - start_time).alias("tEnd"),
+            ]
+        )
 
         if self._blink is not None:
-            self._blink = self._blink.with_columns([
-                (pl.col("tStart") - start_time).alias("tStart"),
-                (pl.col("tEnd") - start_time).alias("tEnd")
-            ])
+            self._blink = self._blink.with_columns(
+                [
+                    (pl.col("tStart") - start_time).alias("tStart"),
+                    (pl.col("tEnd") - start_time).alias("tEnd"),
+                ]
+            )
 
         self.events_path = events_path
         self.detection_algorithm = events_path.name.removesuffix("_events")
 
- 
     def fixations(self):
         return self._fix
-    
+
     @property
     def calib_index(self):
         return self._calib_index
-    
 
     def saccades(self):
         return self._sacc
@@ -971,13 +1057,27 @@ class Trial:
     def __repr__(self):
         return f"Trial = '{self.trial_number}', " + self.session.__repr__()
 
-    def plot_scanpath(self,screen_height,screen_width, **kwargs):
+    def plot_scanpath(self, screen_height, screen_width, **kwargs):
         vis = Visualization(self.events_path, self.detection_algorithm)
         self.events_path.mkdir(parents=True, exist_ok=True)
-        vis.scanpath(fixations=self._fix, saccades=self._sacc, samples=self._samples, screen_height=screen_height, screen_width=screen_width, 
-                      folder_path=self.events_path, **kwargs)
+        vis.scanpath(
+            fixations=self._fix,
+            saccades=self._sacc,
+            samples=self._samples,
+            screen_height=screen_height,
+            screen_width=screen_width,
+            folder_path=self.events_path,
+            **kwargs,
+        )
 
-    def plot_animation(self, screen_height, screen_width, video_path=None, background_image_path=None, **kwargs):
+    def plot_animation(
+        self,
+        screen_height,
+        screen_width,
+        video_path=None,
+        background_image_path=None,
+        **kwargs,
+    ):
         """
         Create an animated visualization of eye-tracking data for this trial.
 
@@ -1022,7 +1122,7 @@ class Trial:
             screen_width=screen_width,
             video_path=video_path,
             background_image_path=background_image_path,
-            **kwargs
+            **kwargs,
         )
 
     def filter_fixations(self, min_fix_dur: int = 50):
@@ -1038,30 +1138,27 @@ class Trial:
         """
         # ─────────────────────── 0 · split keep / drop ──────────────────────
         short_fix = self._fix.filter(pl.col("duration") < min_fix_dur)
-        keep_fix  = self._fix.filter(pl.col("duration") >= min_fix_dur)
+        keep_fix = self._fix.filter(pl.col("duration") >= min_fix_dur)
 
         if short_fix.is_empty():
-            return                                # nothing to do
+            return  # nothing to do
 
         # ─────────────────────── 1 · prepare saccades ───────────────────────
-        sacc = (self._sacc       # add an integer key that survives every shuffle
-                .with_row_count("idx")
-                .sort(["phase", "eye", "tStart"]))
+        sacc = (
+            self._sacc.with_row_count(  # add an integer key that survives every shuffle
+                "idx"
+            ).sort(["phase", "eye", "tStart"])
+        )
 
-        prev_src = sacc.select(["idx", "phase", "eye",
-                                pl.col("tEnd").alias("t")])
-        next_src = sacc.select(["idx", "phase", "eye",
-                                pl.col("tStart").alias("t")])
+        prev_src = sacc.select(["idx", "phase", "eye", pl.col("tEnd").alias("t")])
+        next_src = sacc.select(["idx", "phase", "eye", pl.col("tStart").alias("t")])
 
         # ─────────────────────── 2 · find neighbour IDs ─────────────────────
-        short_fix = short_fix.rename({"tStart": "tStart_fix",
-                                    "tEnd":   "tEnd_fix"})
-
-
+        short_fix = short_fix.rename({"tStart": "tStart_fix", "tEnd": "tEnd_fix"})
 
         short_fix = short_fix.sort(["phase", "eye", "tStart_fix"])
-        prev_src  = prev_src.sort(["phase", "eye", "t"])
-        next_src  = next_src.sort(["phase", "eye", "t"])
+        prev_src = prev_src.sort(["phase", "eye", "t"])
+        next_src = next_src.sort(["phase", "eye", "t"])
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
@@ -1070,13 +1167,12 @@ class Trial:
             )
 
             short_fix = (
-                short_fix
-                .join_asof(
+                short_fix.join_asof(
                     prev_src,
                     left_on="tStart_fix",
                     right_on="t",
                     by=["phase", "eye"],
-                    strategy="backward"
+                    strategy="backward",
                 )
                 .rename({"idx": "idx_prev"})
                 .drop("t")
@@ -1085,7 +1181,7 @@ class Trial:
                     left_on="tEnd_fix",
                     right_on="t",
                     by=["phase", "eye"],
-                    strategy="forward"
+                    strategy="forward",
                 )
                 .rename({"idx": "idx_next"})
                 .drop("t")
@@ -1099,27 +1195,33 @@ class Trial:
             return self
 
         # ───────────────────── 3 · join the two saccades ────────────────────
-        pair_df = (short_fix_pairs.unique()
-                .join(sacc, left_on="idx_prev", right_on="idx", how="inner")
-                .join(sacc, left_on="idx_next", right_on="idx", suffix="_nxt"))
+        pair_df = (
+            short_fix_pairs.unique()
+            .join(sacc, left_on="idx_prev", right_on="idx", how="inner")
+            .join(sacc, left_on="idx_next", right_on="idx", suffix="_nxt")
+        )
 
         # keep **prev** row plus ONLY the four _nxt columns that we still need
         prev_cols = [c for c in pair_df.columns if not c.endswith("_nxt")]
-        need_nxt  = ["tEnd_nxt", "xEnd_nxt", "yEnd_nxt", "vPeak_nxt"]
+        need_nxt = ["tEnd_nxt", "xEnd_nxt", "yEnd_nxt", "vPeak_nxt"]
         merged = pair_df.select(prev_cols + need_nxt)
 
         # ───────── overwrite / derive fields that span both flanks ──────────
-        merged = merged.with_columns([
-            pl.col("tEnd_nxt").alias("tEnd"),
-            (pl.col("tEnd_nxt") - pl.col("tStart")).alias("duration"),
-            pl.col("xEnd_nxt").alias("xEnd"),
-            pl.col("yEnd_nxt").alias("yEnd"),
-            pl.max_horizontal("vPeak", "vPeak_nxt").alias("vPeak"),
-            (
-                (pl.col("xEnd_nxt") - pl.col("xStart"))**2
-            + (pl.col("yEnd_nxt") - pl.col("yStart"))**2
-            ).sqrt().alias("ampDeg"),
-        ])
+        merged = merged.with_columns(
+            [
+                pl.col("tEnd_nxt").alias("tEnd"),
+                (pl.col("tEnd_nxt") - pl.col("tStart")).alias("duration"),
+                pl.col("xEnd_nxt").alias("xEnd"),
+                pl.col("yEnd_nxt").alias("yEnd"),
+                pl.max_horizontal("vPeak", "vPeak_nxt").alias("vPeak"),
+                (
+                    (pl.col("xEnd_nxt") - pl.col("xStart")) ** 2
+                    + (pl.col("yEnd_nxt") - pl.col("yStart")) ** 2
+                )
+                .sqrt()
+                .alias("ampDeg"),
+            ]
+        )
 
         # drop helper columns that end in _nxt (no longer needed)
         merged = merged.drop([c for c in merged.columns if c.endswith("_nxt")])
@@ -1144,19 +1246,19 @@ class Trial:
         merged = merged.select(base_cols)
 
         # ───────────────────── 5 · build the final saccade table ────────────
-        to_drop = pl.concat([short_fix_pairs["idx_prev"],
-                            short_fix_pairs["idx_next"]]).unique()
-        new_sacc = (sacc
-                    .filter(~pl.col("idx").is_in(to_drop))
-                    .drop("idx")          # helper column gone
-                    .vstack(merged)       # add fused rows
-                    .sort(["phase", "eye", "tStart"]))
+        to_drop = pl.concat(
+            [short_fix_pairs["idx_prev"], short_fix_pairs["idx_next"]]
+        ).unique()
+        new_sacc = (
+            sacc.filter(~pl.col("idx").is_in(to_drop))
+            .drop("idx")  # helper column gone
+            .vstack(merged)  # add fused rows
+            .sort(["phase", "eye", "tStart"])
+        )
 
         # ───────────────────── 6 · store back and return ────────────────────
-        self._fix  = keep_fix.sort(["phase", "tStart"])
+        self._fix = keep_fix.sort(["phase", "tStart"])
         self._sacc = new_sacc
-        
-
 
     def collapse_fixations(self, threshold_px: float) -> None:
         """
@@ -1179,19 +1281,22 @@ class Trial:
         sac = self._sacc.sort("tStart").with_row_count("sac_idx")
 
         new_fix_rows: list[dict] = []
-        drop_sac_idx: set[int]   = set()
-        mod_sac: dict[int, dict] = {}          # idx → partial‑row updates
+        drop_sac_idx: set[int] = set()
+        mod_sac: dict[int, dict] = {}  # idx → partial‑row updates
 
         # ────────────────── 1 · loop over phases ─────────────────
-        for phase_val in fix["phase"].unique():               # ① per phase
+        for phase_val in fix["phase"].unique():  # ① per phase
             # Loop over eyes if needed
             for eye in fix["eye"].unique():
-                fix_p = fix.filter((pl.col("phase") == phase_val) & (pl.col("eye") == eye))
-                sac_p = sac.filter((pl.col("phase") == phase_val) & (pl.col("eye") == eye))
+                fix_p = fix.filter(
+                    (pl.col("phase") == phase_val) & (pl.col("eye") == eye)
+                )
+                sac_p = sac.filter(
+                    (pl.col("phase") == phase_val) & (pl.col("eye") == eye)
+                )
 
                 i, n_fix = 0, len(fix_p)
                 while i < n_fix:
-
                     # ── grow one pool ───────────────────────────────
                     pool = [fix_p.row(i, named=True)]
                     j = i + 1
@@ -1206,7 +1311,7 @@ class Trial:
 
                     # ── pool of size 1: keep as‑is ──────────────────
                     if len(pool) == 1:
-                        new_fix_rows.append(pool[0].copy())        # unchanged
+                        new_fix_rows.append(pool[0].copy())  # unchanged
                         i = j
                         continue
 
@@ -1214,19 +1319,21 @@ class Trial:
                     first_fix, last_fix = pool[0], pool[-1]
 
                     merged_fix = first_fix.copy()
-                    merged_fix.update({
-                        "tEnd":     last_fix["tEnd"],
-                        "duration": sum(f["duration"] for f in pool),
-                        "xAvg":     np.mean([f["xAvg"] for f in pool]),
-                        "yAvg":     np.mean([f["yAvg"] for f in pool]),
-                        "pupilAvg": np.mean([f["pupilAvg"] for f in pool]),
-                    })
+                    merged_fix.update(
+                        {
+                            "tEnd": last_fix["tEnd"],
+                            "duration": sum(f["duration"] for f in pool),
+                            "xAvg": np.mean([f["xAvg"] for f in pool]),
+                            "yAvg": np.mean([f["yAvg"] for f in pool]),
+                            "pupilAvg": np.mean([f["pupilAvg"] for f in pool]),
+                        }
+                    )
                     new_fix_rows.append(merged_fix)
 
                     # ── identify & drop fully‑internal saccades ─────
                     inside = sac_p.filter(
-                        (pl.col("tStart") >= first_fix["tEnd"]) &
-                        (pl.col("tEnd")   <= last_fix["tStart"])
+                        (pl.col("tStart") >= first_fix["tEnd"])
+                        & (pl.col("tEnd") <= last_fix["tStart"])
                     )
                     drop_sac_idx.update(inside["sac_idx"].to_list())
 
@@ -1235,15 +1342,17 @@ class Trial:
                     merged_y = merged_fix["yAvg"]
 
                     # previous saccade (ends at first_fix.tStart)
-                    prev_df = sac_p.filter(pl.col("tEnd") <= first_fix["tStart"]).tail(1)
+                    prev_df = sac_p.filter(pl.col("tEnd") <= first_fix["tStart"]).tail(
+                        1
+                    )
                     if prev_df.height:
                         prev = prev_df.row(0, named=True)
-                        idx  = prev["sac_idx"]
-                        upd  = {
+                        idx = prev["sac_idx"]
+                        upd = {
                             "xEnd": merged_x,
                             "yEnd": merged_y,
-                            "dx":   merged_x - prev["xStart"],
-                            "dy":   merged_y - prev["yStart"],
+                            "dx": merged_x - prev["xStart"],
+                            "dy": merged_y - prev["yStart"],
                         }
                         upd["amplitude"] = hypot(upd["dx"], upd["dy"])
                         mod_sac.setdefault(idx, {}).update(upd)
@@ -1256,45 +1365,39 @@ class Trial:
                         upd = {
                             "xStart": merged_x,
                             "yStart": merged_y,
-                            "dx":     nxt["xEnd"] - merged_x,
-                            "dy":     nxt["yEnd"] - merged_y,
+                            "dx": nxt["xEnd"] - merged_x,
+                            "dy": nxt["yEnd"] - merged_y,
                         }
                         upd["amplitude"] = hypot(upd["dx"], upd["dy"])
                         mod_sac.setdefault(idx, {}).update(upd)
 
-                    i = j                                         # advance
+                    i = j  # advance
 
         # ────────────────── 2 · rebuild tables ──────────────────
         # 2‑a  fixations
-        new_fix = (
-            pl.DataFrame(new_fix_rows,
-                        schema=fix.drop("fix_idx").schema,
-                        orient="row")
-            .sort(["phase", "tStart"])
-        )
+        new_fix = pl.DataFrame(
+            new_fix_rows, schema=fix.drop("fix_idx").schema, orient="row"
+        ).sort(["phase", "tStart"])
 
         # 2‑b  saccades: drop + modify in one pass
         new_sac_rows = []
         for row in sac.iter_rows(named=True):
             idx = row["sac_idx"]
             if idx in drop_sac_idx:
-                continue                                     # discard
-            if idx in mod_sac:                               # apply edits
+                continue  # discard
+            if idx in mod_sac:  # apply edits
                 row.update(mod_sac[idx])
                 # re‑compute amplitude in case only dx/dy were provided
                 if "amplitude" not in mod_sac[idx]:
                     row["amplitude"] = hypot(row["dx"], row["dy"])
             new_sac_rows.append({k: v for k, v in row.items() if k != "sac_idx"})
 
-        new_sac = (
-            pl.DataFrame(new_sac_rows,
-                        schema=sac.drop("sac_idx").schema,
-                        orient="row")
-            .sort(["phase", "tStart"])
-        )
+        new_sac = pl.DataFrame(
+            new_sac_rows, schema=sac.drop("sac_idx").schema, orient="row"
+        ).sort(["phase", "tStart"])
 
         # ────────────────── 3 · store back ──────────────────────
-        self._fix  = new_fix
+        self._fix = new_fix
         self._sacc = new_sac
 
     def save_rts(self):
@@ -1306,24 +1409,18 @@ class Trial:
 
         # Calculate RT as the difference between last and first tSample per phase
         rts = (
-            filtered
-            .group_by("phase")
-            .agg([
-                (pl.col("tSample").max() - pl.col("tSample").min()).alias("rt")
-            ])
-            .with_columns([
-                pl.lit(self.trial_number).alias("trial_number")
-            ])
+            filtered.group_by("phase")
+            .agg([(pl.col("tSample").max() - pl.col("tSample").min()).alias("rt")])
+            .with_columns([pl.lit(self.trial_number).alias("trial_number")])
         )
 
         self._rts = rts
-
 
     def rts(self):
         if not hasattr(self, "_rts"):
             self.save_rts()
         return self._rts
-    
+
     def is_trial_bad(self, phase, threshold=0.1):
         # Filter samples for the given phase
         samples = self._samples.filter(pl.col("phase") == phase)
@@ -1332,14 +1429,18 @@ class Trial:
         if self._blink is not None and self._blink.height > 0:
             for blink in self._blink.iter_rows(named=True):
                 start, end = blink["tStart"], blink["tEnd"]
-                samples = samples.filter(~((pl.col("tSample") > start) & (pl.col("tSample") < end)))
+                samples = samples.filter(
+                    ~((pl.col("tSample") > start) & (pl.col("tSample") < end))
+                )
 
         total_samples = samples.height
         if total_samples == 0:
             return True  # If no samples remain, consider it bad
 
         # Count total NaNs across all columns
-        nan_counts = samples.select([pl.col(c).is_null().sum().alias(c) for c in samples.columns])
+        nan_counts = samples.select(
+            [pl.col(c).is_null().sum().alias(c) for c in samples.columns]
+        )
         nan_total = sum(nan_counts.row(0))
 
         # Count "bad" values
@@ -1349,16 +1450,13 @@ class Trial:
 
         return bad_and_nan_percentage > threshold
 
-    
     def is_trial_longer_than(self, seconds, phase):
         rt_row = self.rts().filter(pl.col("phase") == phase)
         if rt_row.is_empty():
             return False  # Or True if no data should be considered long
         return rt_row.select("rt").item() > seconds * 1000.0
 
-    def compute_multimatch(
-        self, other_trial: "Trial", screen_height, screen_width
-    ):
+    def compute_multimatch(self, other_trial: "Trial", screen_height, screen_width):
         trial_scanpath = _to_multimatch_scanpath(self.search_fixations())
         trial_to_compare_scanpath = _to_multimatch_scanpath(
             other_trial.search_fixations()

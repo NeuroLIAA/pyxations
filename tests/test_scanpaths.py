@@ -6,9 +6,7 @@ def test_scanpath_is_written_to_ignored_figures_directory(generated_datasets):
     experiment = Experiment(case["raw"])
     experiment.load_data(case["algorithm"])
 
-    experiment.get_trial("0001", "second", 0).plot_scanpath(
-        1080, 1920, display=False
-    )
+    experiment.get_trial("0001", "second", 0).plot_scanpath(1080, 1920, display=False)
 
     figure = (
         case["derivatives"]

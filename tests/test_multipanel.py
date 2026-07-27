@@ -13,11 +13,7 @@ def test_multipanel_is_written_without_invalidating_derivatives(
     experiment.plot_multipanel(display=False)
 
     figure = (
-        case["derivatives"]
-        / "figures"
-        / "group"
-        / "eyelink"
-        / "multipanel_search.png"
+        case["derivatives"] / "figures" / "group" / "eyelink" / "multipanel_search.png"
     )
     assert figure.is_file()
 

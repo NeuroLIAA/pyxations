@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
+from matplotlib import animation
 
 
 class SampleVisualization:
@@ -48,9 +48,7 @@ class SampleVisualization:
     def _numeric_column(self, name: str) -> np.ndarray:
         """Return one dataframe column as a one-dimensional float array."""
         if name not in self.samples.columns:
-            raise ValueError(
-                f"Sample dataframe is missing required column {name!r}."
-            )
+            raise ValueError(f"Sample dataframe is missing required column {name!r}.")
 
         try:
             values = self.samples.get_column(name).cast(pl.Float64, strict=True)

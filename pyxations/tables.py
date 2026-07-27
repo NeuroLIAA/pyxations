@@ -29,9 +29,7 @@ def as_polars(frame: Any | None, *, name: str = "table") -> pl.DataFrame:
         return pl.DataFrame()
     if isinstance(frame, pl.DataFrame):
         return frame.clone()
-    raise TypeError(
-        f"{name} must be a Polars DataFrame, got {type(frame)!r}."
-    )
+    raise TypeError(f"{name} must be a Polars DataFrame, got {type(frame)!r}.")
 
 
 @dataclass(slots=True)
@@ -120,12 +118,7 @@ def json_value(value: Any) -> Any:
     return str(value)
 
 
-def frame_payload(
-    frame: Any | None,
-    *,
-    columns_key: str = "Columns",
-    records_key: str = "Records",
-) -> dict[str, Any]:
+def frame_payload(frame: Any | None) -> dict[str, Any]:
     """Serialize a table into an explicitly column-ordered JSON payload."""
 
     table = as_polars(frame)
@@ -133,16 +126,16 @@ def frame_payload(
         {column: json_value(value) for column, value in row.items()}
         for row in table.to_dicts()
     ]
-    return {columns_key: table.columns, records_key: records}
+    return {"Columns": table.columns, "Records": records}
 
 
 def payload_frame(payload: Mapping[str, Any] | None) -> pl.DataFrame:
-    """Deserialize either historical or canonical table payload keys."""
+    """Deserialize a canonical table payload."""
 
     if not payload:
         return pl.DataFrame()
-    columns = list(payload.get("Columns", payload.get("columns", [])))
-    records = list(payload.get("Records", payload.get("data", [])))
+    columns = list(payload.get("Columns", []))
+    records = list(payload.get("Records", []))
     if not records:
         return pl.DataFrame({column: [] for column in columns})
     table = pl.DataFrame(records, strict=False)
@@ -152,14 +145,10 @@ def payload_frame(payload: Mapping[str, Any] | None) -> pl.DataFrame:
     return table.select(columns)
 
 
-def _tabular_value(value: Any) -> Any:
-    if isinstance(value, (Mapping, list, tuple)):
-        return json.dumps(json_value(value), ensure_ascii=False)
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if isinstance(value, float) and not math.isfinite(value):
+def _tabular_json(value: Any) -> str | None:
+    if value is None:
         return None
-    return value
+    return json.dumps(json_value(value), ensure_ascii=False)
 
 
 def tabular_frame(frame: Any | None) -> pl.DataFrame:
@@ -168,18 +157,23 @@ def tabular_frame(frame: Any | None) -> pl.DataFrame:
     table = as_polars(frame)
     if table.is_empty() or not table.columns:
         return table
-    return pl.DataFrame(
-        [
-            {
-                column: _tabular_value(value)
-                for column, value in row.items()
-            }
-            for row in table.to_dicts()
-        ],
-        schema=table.columns,
-        orient="row",
-        strict=False,
-    )
+
+    expressions = []
+    for column, dtype in table.schema.items():
+        if dtype.is_float():
+            expressions.append(
+                pl.when(pl.col(column).is_finite())
+                .then(pl.col(column))
+                .otherwise(None)
+                .alias(column)
+            )
+        elif dtype.is_nested() or dtype == pl.Object:
+            expressions.append(
+                pl.col(column)
+                .map_elements(_tabular_json, return_dtype=pl.String)
+                .alias(column)
+            )
+    return table.with_columns(expressions) if expressions else table.clone()
 
 
 def write_tsv(
@@ -196,11 +190,13 @@ def write_tsv(
     table = tabular_frame(frame)
 
     if compressed:
-        with destination.open("wb") as binary_stream, gzip.GzipFile(
-            filename="", fileobj=binary_stream, mode="wb", mtime=0
-        ) as gzip_stream, io.TextIOWrapper(
-            gzip_stream, encoding="utf-8", newline=""
-        ) as text_stream:
+        with (
+            destination.open("wb") as binary_stream,
+            gzip.GzipFile(
+                filename="", fileobj=binary_stream, mode="wb", mtime=0
+            ) as gzip_stream,
+            io.TextIOWrapper(gzip_stream, encoding="utf-8", newline="") as text_stream,
+        ):
             table.write_csv(
                 text_stream,
                 separator="\t",
@@ -222,6 +218,7 @@ def read_tsv(
     *,
     columns: Sequence[str] | None = None,
     has_header: bool,
+    schema_overrides: Mapping[str, pl.DataType] | None = None,
 ) -> pl.DataFrame:
     """Read a BIDS TSV using Polars with stable null handling."""
 
@@ -234,4 +231,6 @@ def read_tsv(
     }
     if columns is not None:
         options["new_columns"] = list(columns)
+    if schema_overrides is not None:
+        options["schema_overrides"] = dict(schema_overrides)
     return pl.read_csv(path, **options)
