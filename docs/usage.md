@@ -197,6 +197,8 @@ See [`pyxations.visualization`](api_reference.md#visualization) for the full plo
 The repository includes focused notebooks under [`notebooks/`](https://github.com/NeuroLIAA/pyxations/tree/main/notebooks):
 
 - `Eyelink tutorial.ipynb`: full EyeLink pipeline on the bundled example dataset.
+- `tobii_example.ipynb`: complete workflow for a Tobii tabular export.
+- `gazepoint_example.ipynb`: complete workflow for a GazePoint CSV export.
 - `multimatch_example.ipynb`: scanpath comparison with MultiMatch.
 - `webgazer_example.ipynb`: webcam-based recordings.
 - `driving_animation.ipynb`: visualization on a continuous task; the bundled

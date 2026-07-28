@@ -87,6 +87,8 @@ TSV.GZ/JSON outputs remain validator-compatible after plotting.
 For longer walkthroughs see the notebooks in [`notebooks/`](https://github.com/NeuroLIAA/pyxations/tree/main/notebooks):
 
 - `Eyelink tutorial.ipynb`: full EyeLink pipeline.
+- `tobii_example.ipynb`: Tobii tabular export to BIDS and derivatives.
+- `gazepoint_example.ipynb`: GazePoint CSV export to BIDS and derivatives.
 - `multimatch_example.ipynb`: scanpath comparison with MultiMatch.
 - `webgazer_example.ipynb`: webcam-based recordings.
 - `driving_animation.ipynb`: visualization on a continuous task; it requires
