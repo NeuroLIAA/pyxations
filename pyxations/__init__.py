@@ -11,11 +11,13 @@ from typing import Any
 
 from .analysis.generic import Experiment
 from .analysis.visual_search import VisualSearchExperiment
+from .behavior import read_behavioral_events
 from .bids import BIDSValidationError, validate_bids_dataset
 from .bids_formatting import compute_derivatives_for_dataset, dataset_to_bids
 from .export import BIDSDerivativeExport
 from .methods.eyemovement.engbert import EngbertDetection
 from .pre_processing import PreProcessing
+from .psychopy import psychopy_log_to_events
 from .tables import SessionTables
 from .visualization.samples import SampleVisualization
 from .visualization.visualization import Visualization
@@ -33,6 +35,8 @@ __all__ = [
     "Visualization",
     "compute_derivatives_for_dataset",
     "dataset_to_bids",
+    "psychopy_log_to_events",
+    "read_behavioral_events",
     "validate_bids_dataset",
 ]
 

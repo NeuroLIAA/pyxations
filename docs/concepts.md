@@ -114,4 +114,11 @@ supported:
 - `gaze`: Gazepoint exports.
 - `webgazer`: WebGazer.js browser-based recordings.
 
+These tracker formats are independent of the behavioral source format.
+Associated CSV and TSV tables are preferred when present. Otherwise, a
+PsychoPy `.log` can supply trial conditions, displayed-component updates, and
+keypresses for BIDS `events.tsv`; parsing the log does not require PsychoPy to
+be installed. A single `behavioral_column_map` maps fields from any of these
+sources onto the experiment-level schema used by downstream analysis.
+
 Pupil Labs Neon is not currently supported as a `dataset_format`.

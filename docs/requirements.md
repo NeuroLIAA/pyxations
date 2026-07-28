@@ -35,6 +35,9 @@ tables. Pandas, PyArrow, and Seaborn are not direct requirements. Transitive
 dependencies are resolved by the installer and are not repeated in Pyxations
 metadata.
 
+PsychoPy text logs are parsed directly and do not require PsychoPy to be
+installed.
+
 ## Optional feature dependencies
 
 Install feature-specific packages only when needed:

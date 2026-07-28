@@ -9,6 +9,8 @@ The most common entry points are re-exported from the package root:
 ```python
 from pyxations import (
     dataset_to_bids,
+    read_behavioral_events,
+    psychopy_log_to_events,
     compute_derivatives_for_dataset,
     validate_bids_dataset,
     BIDSValidationError,
@@ -29,6 +31,17 @@ the `remodnav` extra:
 ```python
 from pyxations import RemodnavDetection
 ```
+
+## Behavioral input
+
+Read and map behavioral CSV, TSV, or PsychoPy log data through a common
+source-independent interface.
+
+::: pyxations.behavior
+
+PsychoPy log parsing does not require PsychoPy to be installed:
+
+::: pyxations.psychopy
 
 ## bids_formatting
 

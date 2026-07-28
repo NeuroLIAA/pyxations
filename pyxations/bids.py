@@ -13,13 +13,14 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 
+from pyxations.behavior import read_behavioral_events
 from pyxations.tables import (
     SessionTables,
     empty_frame,
@@ -828,15 +829,18 @@ def _events_for_recording(
     )
 
 
-def _read_behavioral_table(path: Path) -> pl.DataFrame | None:
+def _read_behavioral_table(
+    path: Path,
+    *,
+    behavioral_column_map: Mapping[str, str] | None = None,
+) -> pl.DataFrame | None:
     try:
-        if path.suffix.lower() == ".csv":
-            return pl.read_csv(path, infer_schema_length=None)
-        if path.suffix.lower() == ".tsv":
-            return pl.read_csv(path, separator="\t", infer_schema_length=None)
+        return read_behavioral_events(
+            path,
+            column_map=behavioral_column_map,
+        )
     except (OSError, UnicodeDecodeError, pl.exceptions.PolarsError):
         return None
-    return None
 
 
 def _prepare_task_events(
@@ -845,48 +849,66 @@ def _prepare_task_events(
     source_root: Path,
     primary_source: Path,
     format_name: str,
+    behavioral_column_map: Mapping[str, str] | None = None,
 ) -> pl.DataFrame | None:
-    tables = []
     candidates = list(files)
     if format_name == "webgazer":
         candidates.insert(0, primary_source)
     seen = set()
+    unique_candidates = []
     for path in candidates:
         resolved = path.resolve()
         if resolved in seen:
             continue
         seen.add(resolved)
-        if path.resolve() == primary_source.resolve() and format_name != "webgazer":
-            continue
-        table = _read_behavioral_table(path)
-        if table is None or table.is_empty():
-            continue
-        if _is_primary_recording(path, format_name) and format_name != "webgazer":
-            continue
-        if format_name == "webgazer" and "webgazer_data" in table:
-            table = table.drop(
-                [
-                    column
-                    for column in (
-                        "webgazer_data",
-                        "webgazer_targets",
-                        "last-estimations",
-                        "validation-results",
-                    )
-                    if column in table
-                ]
+        unique_candidates.append(path)
+
+    tabular_candidates = [
+        path
+        for path in unique_candidates
+        if path.suffix.lower() in {".csv", ".tsv"}
+        and (format_name == "webgazer" or not _is_primary_recording(path, format_name))
+    ]
+    log_candidates = [
+        path for path in unique_candidates if path.suffix.lower() == ".log"
+    ]
+    candidate_groups = [tabular_candidates, log_candidates]
+
+    tables = []
+    for group in candidate_groups:
+        for path in group:
+            table = _read_behavioral_table(
+                path,
+                behavioral_column_map=behavioral_column_map,
             )
-            if "trial_index" in table:
-                table = table.unique(
-                    subset=["trial_index"], keep="last", maintain_order=True
+            if table is None or table.is_empty():
+                continue
+            if format_name == "webgazer" and "webgazer_data" in table:
+                table = table.drop(
+                    [
+                        column
+                        for column in (
+                            "webgazer_data",
+                            "webgazer_targets",
+                            "last-estimations",
+                            "validation-results",
+                        )
+                        if column in table
+                    ]
                 )
-        table = table.clone()
-        try:
-            source_file = path.relative_to(source_root).as_posix()
-        except ValueError:
-            source_file = path.name
-        table = table.with_columns(pl.lit(source_file).alias("source_file"))
-        tables.append(table)
+                if "trial_index" in table:
+                    table = table.unique(
+                        subset=["trial_index"], keep="last", maintain_order=True
+                    )
+            table = table.clone()
+            try:
+                source_file = path.relative_to(source_root).as_posix()
+            except ValueError:
+                source_file = path.name
+            table = table.with_columns(pl.lit(source_file).alias("source_file"))
+            tables.append(table)
+        if tables:
+            break
     if not tables:
         return None
     events = pl.concat(tables, how="diagonal_relaxed")
@@ -956,6 +978,29 @@ def _write_task_events(
         }
         for column in columns
     }
+    if "psychopy_onset" in columns:
+        metadata["psychopy_onset"] = {
+            "Description": (
+                "Trial timestamp from PsychoPy's local clock. This value is "
+                "retained for provenance and is not assumed to be synchronized "
+                "with the eye-tracker clock."
+            ),
+            "Units": "s",
+        }
+    if "psychopy_trial_interval" in columns:
+        metadata["psychopy_trial_interval"] = {
+            "Description": (
+                "Time from this PsychoPy New trial record to the next one."
+            ),
+            "Units": "s",
+        }
+    if "keypresses" in columns:
+        metadata["keypresses"] = {
+            "Description": (
+                "Ordered keypresses logged by PsychoPy between this trial "
+                "record and the next."
+            )
+        }
     task_match = re.search(r"_task-([^_]+)", prefix)
     if task_match:
         metadata["TaskName"] = task_match.group(1)
@@ -972,6 +1017,7 @@ def write_bids_dataset(
     format_name: str = "eyelink",
     task_name: str = "eyetracking",
     authors: Sequence[str] | None = None,
+    behavioral_column_map: Mapping[str, str] | None = None,
     overwrite: bool = False,
 ) -> Path:
     """Convert supported vendor recordings into a validated BIDS layout.
@@ -1147,6 +1193,7 @@ def write_bids_dataset(
                     source_root=source_root,
                     primary_source=source,
                     format_name=format_name,
+                    behavioral_column_map=behavioral_column_map,
                 )
                 _write_task_events(
                     task_events,

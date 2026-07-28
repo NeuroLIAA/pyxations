@@ -27,6 +27,9 @@
   extracts messages, calibration reports, tracker events, and gaze samples from
   the resulting ASC data.
 - **Trial Segmentation**: Segment continuous eye-tracking data into trials using flexible methods, including start/end messages, fixed durations, or explicit start/end times.
+- **Behavioral Input Adapters**: Normalize behavioral CSV, TSV, or standard
+  PsychoPy `New trial` logs into BIDS `events.tsv`, with source-independent
+  column mapping and no PsychoPy runtime dependency.
 - **Derivative Computation**: Compute derivatives directly from the normalized
   raw BIDS dataset; the archived source files are not required at runtime.
 - **Analysis and Visualization**: Load derivative tables through the experiment,

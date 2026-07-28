@@ -55,6 +55,48 @@ description, and pupil units. Tracker events are normalized to
 input tree is retained byte-for-byte under `sourcedata/` for provenance only;
 derivative processing does not read it.
 
+### Behavioral CSV, TSV, and PsychoPy logs
+
+Behavioral CSV and TSV files associated with a recording are normalized into
+BIDS `events.tsv`. If no behavioral CSV or TSV is present, Pyxations also reads
+PsychoPy text logs containing standard `New trial` records. It retains:
+
+- the TrialHandler condition mapping;
+- the zero-based trial order and PsychoPy repetition/index values;
+- relevant component updates such as displayed images, text, position, rating,
+  and slider values;
+- keypresses observed before the next trial.
+
+PsychoPy component columns use explicit names such as
+`trial_image_image`. Map these to experiment concepts only when their meaning
+is known:
+
+```python
+bids_path = pyx.dataset_to_bids(
+    target_folder_path="path/to/output",
+    files_folder_path="path/to/source-recordings",
+    dataset_name="my_experiment",
+    format_name="eyelink",
+    behavioral_column_map={
+        "trial_image_image": "stimulus",
+        "is_target_present": "target_present",
+    },
+)
+```
+
+`behavioral_column_map` applies equally to CSV, TSV, and PsychoPy inputs. It
+maps source-specific names onto the experiment concepts expected by downstream
+analysis; for example, `VisualSearchExperiment` expects fields including
+`stimulus`, `target_present`, and `correct_response`.
+
+When a behavioral CSV/TSV and a log are both present, the tabular file takes
+precedence; the original log remains archived under `sourcedata/`. PsychoPy's
+clock is not assumed to be synchronized with the eye tracker, so its timestamps
+are stored as `psychopy_onset` while BIDS `onset` remains `n/a`. Call
+`pyx.read_behavioral_events()` for the source-independent reader, or
+`pyx.psychopy_log_to_events()` when you specifically need the unmodified
+PsychoPy fields.
+
 To validate an output dataset locally, install the official BIDS Validator or
 Deno and run:
 

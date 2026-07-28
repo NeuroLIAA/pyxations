@@ -18,9 +18,9 @@ directories. They are intentionally not committed.
 - `eyelink_visual_search`: reduced EyeLink ASC recording and two behavioral
   trials.
 - `eyelink_target_absent`: full EyeLink EDF recording from a target-absent
-  visual-search experiment. It requires SR Research's `edf2asc` utility and is
-  kept separate from the reduced ASC fixture because they are different
-  recordings.
+  visual-search experiment and its matching PsychoPy log. EDF conversion
+  requires SR Research's `edf2asc` utility. This example is kept separate from
+  the reduced ASC fixture because they are different recordings.
 - `webgazer_antisaccade`: jsPsych/WebGazer recording with embedded behavior.
 - `tobii_sceneviewing`: reduced Tobii text export.
 - `gazepoint_sart`: reduced GazePoint recording and behavioral events.

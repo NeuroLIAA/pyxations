@@ -426,9 +426,15 @@ def dataset_to_bids(
     *,
     task_name="eyetracking",
     authors=None,
+    behavioral_column_map=None,
     overwrite=False,
 ):
-    """Convert vendor recordings to raw BIDS and retain originals in sourcedata."""
+    """Convert vendor recordings and associated behavior to raw BIDS.
+
+    PsychoPy logs are used when no behavioral CSV or TSV exists for the
+    recording. ``behavioral_column_map`` can map fields from any behavioral
+    source onto experiment-level names without changing the archived source.
+    """
 
     return write_bids_dataset(
         target_folder_path,
@@ -438,6 +444,7 @@ def dataset_to_bids(
         format_name=format_name,
         task_name=task_name,
         authors=authors,
+        behavioral_column_map=behavioral_column_map,
         overwrite=overwrite,
     )
 

@@ -21,6 +21,7 @@ site/
 .bids-first-*/
 
 *.log
+!examples/eyelink_target_absent/*.log
 *pyxations.egg-info
 */build
 *.ipynb_checkpoints

@@ -49,6 +49,8 @@ See [Usage](usage.md) for an end-to-end walkthrough.
   `edf2asc` before extracting messages, calibration reports, tracker events,
   and gaze samples.
 - **Multi-vendor support**: input formats for EyeLink, Tobii, Gazepoint and WebGazer.
+- **Behavioral-log support**: normalize PsychoPy trial logs, condition fields,
+  displayed-component updates, and keypresses into BIDS events tables.
 - **Trial segmentation**: split continuous recordings using start/end messages, fixed durations or explicit timestamps.
 - **Eye movement detection**: fixations and saccades with REMoDNaV,
   Engbert–Kliegl, or EyeLink-reported events.
