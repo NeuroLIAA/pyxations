@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   test:
     name: ${{ matrix.os }} / py${{ matrix.python-version }}
@@ -45,4 +49,23 @@ jobs:
           curl -L -o /usr/local/bin/edf2asc https://github.com/ihrke/pypillometry/raw/refs/heads/master/external/edf2asc-linux
           chmod +x /usr/local/bin/edf2asc
 
-      - run: uv run --locked pytest -vv -ra
+      - name: Run tests
+        if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.11'
+        run: uv run --locked pytest -vv -ra
+
+      - name: Run tests with coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        run: >-
+          uv run --locked pytest -vv -ra
+          --cov=pyxations
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-fail-under=80
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          use_oidc: true
+          fail_ci_if_error: false

@@ -54,3 +54,13 @@ Homepage = "https://github.com/NeuroLIAA/pyxations"
 
 [tool.hatch.build.targets.sdist]
 include = ["pyxations"]
+
+[tool.coverage.run]
+relative_files = true
+source = ["pyxations"]
+
+[tool.coverage.report]
+fail_under = 80
+precision = 2
+show_missing = true
+skip_covered = true

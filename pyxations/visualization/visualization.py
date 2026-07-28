@@ -69,6 +69,18 @@ class Visualization:
         display
             If *False* the figure canvas is never shown (faster for batch jobs).
         """
+        if fixations.is_empty():
+            return
+        required = {"trial_number", "phase", "tStart", "duration", "xAvg", "yAvg"}
+        missing = sorted(required - set(fixations.columns))
+        if missing:
+            raise ValueError(
+                "Fixations are missing required columns: " + ", ".join(missing)
+            )
+        if (tmin is None) != (tmax is None):
+            raise ValueError("tmin and tmax must be provided together")
+        if folder_path is not None:
+            Path(folder_path).mkdir(parents=True, exist_ok=True)
 
         # ------------- small helpers ------------------------------------------------
         def _make_axes(plot_samples: bool):
@@ -148,12 +160,14 @@ class Visualization:
         cmap = plt.cm.rainbow
 
         # ---- build & draw ---------------------------------------------------------
+        interactive_before = plt.isinteractive()
         if not display:
             plt.ioff()
 
         for phase, phase_fix in fix_by_phase.items():
             if phase_fix.is_empty():
                 continue
+            phase_name = phase[0] if isinstance(phase, tuple) else phase
 
             # ---------- vectors (zero‑copy) -----------------
             fx, fy, fdur = phase_fix.select(["xAvg", "yAvg", "duration"]).to_numpy().T
@@ -206,8 +220,8 @@ class Visualization:
             ).set_label("# of fixation")
 
             # ---------- stimulus imagery / bbox ------------
-            if phase_data and phase[0] in phase_data:
-                pdict = phase_data[phase[0]]
+            if phase_data and phase_name in phase_data:
+                pdict = phase_data[phase_name]
                 coords = pdict.get("img_plot_coords") or []
                 bbox = pdict.get("bbox", None)
                 for img_path, box in zip(pdict.get("img_paths", []), coords):
@@ -273,7 +287,7 @@ class Visualization:
                     bbox_to_anchor=(1, 0.5),
                 )
                 ax_gaze.set_ylabel("Gaze")
-                ax_gaze.set_xlabel("Time [s]")
+                ax_gaze.set_xlabel("Time [ms]")
 
             fig.tight_layout()
 
@@ -282,14 +296,14 @@ class Visualization:
                 scan_name = f"scanpath_{trial_idx}"
                 if tmin is not None and tmax is not None:
                     scan_name += f"_{tmin}_{tmax}"
-                out = Path(folder_path) / f"{scan_name}_{phase[0]}.png"
+                out = Path(folder_path) / f"{scan_name}_{phase_name}.png"
                 fig.savefig(out, dpi=150)
 
             if display:
                 plt.show()
             plt.close(fig)
 
-        if not display:
+        if not display and interactive_before:
             plt.ion()
 
     def fix_duration(self, fixations: pl.DataFrame, axs=None):
@@ -341,6 +355,10 @@ class Visualization:
             raise ValueError(
                 "Compute saccades direction first by using saccades_direction function from the PreProcessing module."
             )
+        if saccades.is_empty():
+            ax.set_title("Saccades direction")
+            ax.set_yticklabels([])
+            return
         # Convert from deg to rad
         saccades_rad = saccades.select(pl.col("deg")).to_numpy().ravel() * np.pi / 180
 
@@ -361,8 +379,9 @@ class Visualization:
         ax.set_title("Saccades direction")
         ax.set_yticklabels([])
 
-        for r, bar in zip(ang_hist, bars):
-            bar.set_facecolor(plt.cm.Blues(r / np.max(ang_hist)))
+        maximum = np.max(ang_hist)
+        for radius, bar in zip(ang_hist, bars):
+            bar.set_facecolor(plt.cm.Blues(radius / maximum if maximum else 0))
 
     def sacc_main_sequence(self, saccades: pl.DataFrame, axs=None, hline=None):
 
@@ -373,8 +392,14 @@ class Visualization:
         XL = np.log10(25)  # Adjusted to fit the xlim
         YL = np.log10(1000)  # Adjusted to fit the ylim
 
-        saccades_peak_vel = saccades.select(pl.col("vPeak")).to_numpy().ravel()
-        saccades_amp = saccades.select(pl.col("ampDeg")).to_numpy().ravel()
+        valid = saccades.filter(
+            pl.col("vPeak").cast(pl.Float64, strict=False).is_finite()
+            & pl.col("ampDeg").cast(pl.Float64, strict=False).is_finite()
+            & (pl.col("vPeak") > 0)
+            & (pl.col("ampDeg") > 0)
+        )
+        saccades_peak_vel = valid.select(pl.col("vPeak")).to_numpy().ravel()
+        saccades_amp = valid.select(pl.col("ampDeg")).to_numpy().ravel()
 
         # Create a 2D histogram with logarithmic bins
         ax.hist2d(
@@ -529,6 +554,13 @@ class Visualization:
 
         mpl.rcParams["animation.embed_limit"] = 100
 
+        if scale_factor <= 0:
+            raise ValueError("scale_factor must be greater than zero")
+        if fps is not None and fps <= 0:
+            raise ValueError("fps must be greater than zero")
+        if (tmin is None) != (tmax is None):
+            raise ValueError("tmin and tmax must be provided together")
+
         # Validate output_format
         valid_formats = ["html", "mp4", "gif", "matplotlib"]
         if output_format not in valid_formats:
@@ -559,6 +591,12 @@ class Visualization:
         samples = samples.filter(
             pl.col(x_col).is_not_null() & pl.col(y_col).is_not_null()
         )
+        samples = samples.filter(
+            pl.col(x_col).cast(pl.Float64, strict=False).is_finite()
+            & pl.col(y_col).cast(pl.Float64, strict=False).is_finite()
+        )
+        if samples.is_empty():
+            raise ValueError("No finite gaze samples available")
 
         # ---- Calculate scaled dimensions ----
         scaled_width = int(screen_width * scale_factor)

@@ -1,5 +1,7 @@
 # Pyxations
 
+[![codecov](https://codecov.io/gh/NeuroLIAA/pyxations/branch/main/graph/badge.svg)](https://codecov.io/gh/NeuroLIAA/pyxations)
+
 <div>
   <table>
     <tr>

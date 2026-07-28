@@ -12,6 +12,10 @@ vend/
 env/
 .pytest_cache/
 .ruff_cache/
+.coverage
+coverage.json
+coverage.xml
+htmlcov/
 site/
 .migration-*/
 .bids-first-*/

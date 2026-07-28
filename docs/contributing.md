@@ -54,6 +54,20 @@ mkdocs serve
 
 `mkdocs serve` watches `docs/` and `mkdocs.yml` and rebuilds on save. The API reference is generated from source docstrings via [mkdocstrings](https://mkdocstrings.github.io/) (NumPy style).
 
+## Coverage
+
+Run the same coverage check used by CI:
+
+```bash
+pytest --cov=pyxations --cov-report=term-missing --cov-report=xml
+```
+
+CI enforces an 80% project-wide floor and uploads the report used by the
+coverage badge in the README. The floor should increase as meaningful tests
+are added, with 95% retained as the long-term target; it should not be raised
+by excluding supported modules or adding tests that merely execute lines
+without asserting behavior.
+
 ## Repository layout
 
 - `pyxations/`: the package source.

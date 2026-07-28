@@ -25,6 +25,99 @@ def _as(obj, typ):
     return ast.literal_eval(obj)
 
 
+def _grouped_accuracy(
+    rts: pl.DataFrame,
+    *,
+    identifier: tuple[str, object] | None = None,
+) -> pl.DataFrame:
+    """Compute visual-search accuracy using the canonical Polars table."""
+
+    accuracy = rts.group_by(["target_present", "memory_set_size"]).agg(
+        pl.col("correct_response").mean().alias("accuracy")
+    )
+    if identifier is not None:
+        column, value = identifier
+        accuracy = accuracy.with_columns(pl.lit(value).alias(column))
+    return accuracy
+
+
+def _fixation_cutoffs(trials, percentile: float) -> pl.DataFrame:
+    """Compute fixation-count cutoffs for visual-search trial groups."""
+
+    if not 0 < percentile <= 1:
+        raise ValueError("percentile must be greater than 0 and at most 1")
+
+    rows = [
+        {
+            "fix_count": trial.search_fixations().height,
+            "target_present": trial.target_present,
+            "memory_set_size": trial.memory_set_size,
+        }
+        for trial in trials
+    ]
+    if not rows:
+        return pl.DataFrame(
+            schema={
+                "target_present": pl.Boolean,
+                "memory_set_size": pl.Int64,
+                "fix_cutoff": pl.Int64,
+            }
+        )
+
+    fixation_counts = pl.DataFrame(rows)
+    cutoffs = []
+    for group in fixation_counts.partition_by(
+        ["target_present", "memory_set_size"], maintain_order=True
+    ):
+        counts = group.get_column("fix_count").to_list()
+        cutoffs.append(
+            {
+                "target_present": group.get_column("target_present")[0],
+                "memory_set_size": group.get_column("memory_set_size")[0],
+                "fix_cutoff": _find_fixation_cutoff(
+                    counts,
+                    threshold=sum(counts) * percentile,
+                    max_possible=max(counts, default=0),
+                ),
+            }
+        )
+    return pl.DataFrame(cutoffs)
+
+
+def _cumulative_correct_by_fixation(
+    trials, group_cutoffs: pl.DataFrame
+) -> pl.DataFrame:
+    """Build one cumulative-correctness sequence per trial."""
+
+    records = []
+    for trial in trials:
+        cutoff_rows = group_cutoffs.filter(
+            (pl.col("memory_set_size") == trial.memory_set_size)
+            & (pl.col("target_present") == trial.target_present)
+        )
+        if cutoff_rows.height != 1:
+            raise ValueError(
+                "group_cutoffs must contain exactly one row for every trial group"
+            )
+        fixation_cutoff = int(cutoff_rows.get_column("fix_cutoff")[0])
+        scanpath_length = trial.search_fixations().height
+        cumulative_correct = np.zeros(fixation_cutoff)
+        if (
+            trial.correct_response
+            and scanpath_length > 0
+            and scanpath_length <= fixation_cutoff
+        ):
+            cumulative_correct[scanpath_length - 1 :] = 1
+        records.append(
+            {
+                "cumulative_correct": cumulative_correct,
+                "target_present": trial.target_present,
+                "memory_set_size": trial.memory_set_size,
+            }
+        )
+    return pl.DataFrame(records)
+
+
 def _plot_grouped_mean_with_se(
     ax,
     data: pl.DataFrame,
@@ -545,55 +638,15 @@ class VisualSearchExperiment(Experiment):
         )
 
     def find_fixation_cutoff(self, percentile=1.0):
-        # 1. Gather fixation counts
-        fix_counts = [
-            {
-                "fix_count": trial.search_fixations().height,
-                "target_present": trial.target_present,
-                "memory_set_size": trial.memory_set_size,
-            }
-            for subject in self.subjects.values()
-            for session in subject.sessions.values()
-            for trial in session.trials.values()
-        ]
-        fix_counts = pl.DataFrame(fix_counts)
-
-        # 2. Get all unique group keys
-        group_keys = (
-            fix_counts.select(["target_present", "memory_set_size"]).unique().to_dicts()
+        return _fixation_cutoffs(
+            (
+                trial
+                for subject in self.subjects.values()
+                for session in subject.sessions.values()
+                for trial in session.trials.values()
+            ),
+            percentile,
         )
-
-        # 3. Compute cutoff per group
-        rows = []
-        for group in group_keys:
-            tp = group["target_present"]
-            mem_size = group["memory_set_size"]
-
-            group_df = fix_counts.filter(
-                (pl.col("target_present") == tp)
-                & (pl.col("memory_set_size") == mem_size)
-            )
-
-            fix_counts_list = group_df["fix_count"].to_list()
-            total_fixations = sum(fix_counts_list)
-            threshold = total_fixations * percentile
-            max_possible = max(fix_counts_list)
-
-            fix_cutoff = _find_fixation_cutoff(
-                fix_count_list=fix_counts_list,
-                threshold=threshold,
-                max_possible=max_possible,
-            )
-
-            rows.append(
-                {
-                    "target_present": tp,
-                    "memory_set_size": mem_size,
-                    "fix_cutoff": fix_cutoff,
-                }
-            )
-
-        return pl.DataFrame(rows)
 
     def remove_trials_for_stimuli(self, stimuli, print_flag=True):
         """
@@ -622,20 +675,17 @@ class VisualSearchExperiment(Experiment):
     def remove_trials_for_stimuli_with_poor_accuracy(
         self, threshold=0.5, print_flag=True
     ):
-        """For now this will be done without grouping by target_present"""
         scanpaths_by_stimuli = self.scanpaths_by_stimuli()
-        grouped = scanpaths_by_stimuli.group_by(["stimulus", "memory_set_size"])
+        grouped = scanpaths_by_stimuli.group_by(
+            ["stimulus", "memory_set_size", "target_present"]
+        )
         poor_accuracy_stimuli = grouped.agg(
             pl.col("correct_response").mean().alias("accuracy")
         ).filter(pl.col("accuracy") < threshold)
-        # Get the stimulus and memory set size of poor_accuracy_stimuli into a list of tuples
         poor_accuracy_stimuli = poor_accuracy_stimuli.select(
-            pl.col("stimulus"), pl.col("memory_set_size")
-        ).to_dicts()
-        poor_accuracy_stimuli = [
-            (stimulus["stimulus"], stimulus["memory_set_size"])
-            for stimulus in poor_accuracy_stimuli
-        ]
+            "stimulus", "memory_set_size", "target_present"
+        ).iter_rows()
+        poor_accuracy_stimuli = set(poor_accuracy_stimuli)
         amount_trials_removed = 0
         subj_keys = list(self.subjects.keys())
         for subject_key in subj_keys:
@@ -646,7 +696,11 @@ class VisualSearchExperiment(Experiment):
                 trial_keys = list(session.trials.keys())
                 for trial_key in trial_keys:
                     trial = session.trials[trial_key]
-                    if (trial.stimulus, trial.memory_set_size) in poor_accuracy_stimuli:
+                    if (
+                        trial.stimulus,
+                        trial.memory_set_size,
+                        trial.target_present,
+                    ) in poor_accuracy_stimuli:
                         session.remove_trial(trial_key)
                         amount_trials_removed += 1
         if print_flag:
@@ -733,6 +787,11 @@ class VisualSearchExperiment(Experiment):
         plt.close()
 
     def trials_by_rt_bins(self, bin_end, bin_step):
+        if bin_end <= 0:
+            raise ValueError("bin_end must be greater than zero")
+        if bin_step <= 0:
+            raise ValueError("bin_step must be greater than zero")
+
         # 1. Get and filter RTs
         rts = self.rts().filter(pl.col("phase") == self._search_phase_name)
         rts = rts.with_columns([(pl.col("rt") / 1000).alias("rt")])
@@ -974,17 +1033,10 @@ class VisualSearchSubject(Subject):
         return fixations
 
     def accuracy(self):
-        # Accuracy should be grouped by target present and memory set size
-        correct_trials = self.search_rts()[
-            ["target_present", "correct_response", "memory_set_size"]
-        ]
-        accuracy = correct_trials.group_by(["target_present", "memory_set_size"]).agg(
-            pl.col("correct_response").mean().alias("accuracy")
+        return _grouped_accuracy(
+            self.search_rts(),
+            identifier=("subject_id", self.subject_id),
         )
-        # Add the self.subject_id to a new column
-        accuracy = accuracy.with_columns(pl.lit(self.subject_id).alias("subject_id"))
-
-        return accuracy
 
     def remove_non_answered_trials(self, print_flag=True):
         # Remove non answered trials from all sessions
@@ -998,54 +1050,14 @@ class VisualSearchSubject(Subject):
             )
 
     def find_fixation_cutoff(self, percentile=1.0):
-        # 1. Gather fixation counts
-        fix_counts = [
-            {
-                "fix_count": trial.search_fixations().height,
-                "target_present": trial.target_present,
-                "memory_set_size": trial.memory_set_size,
-            }
-            for session in self.sessions.values()
-            for trial in session.trials.values()
-        ]
-        fix_counts = pl.DataFrame(fix_counts)
-
-        # 2. Get all unique group keys
-        group_keys = (
-            fix_counts.select(["target_present", "memory_set_size"]).unique().to_dicts()
+        return _fixation_cutoffs(
+            (
+                trial
+                for session in self.sessions.values()
+                for trial in session.trials.values()
+            ),
+            percentile,
         )
-
-        # 3. Compute cutoff per group
-        rows = []
-        for group in group_keys:
-            tp = group["target_present"]
-            mem_size = group["memory_set_size"]
-
-            group_df = fix_counts.filter(
-                (pl.col("target_present") == tp)
-                & (pl.col("memory_set_size") == mem_size)
-            )
-
-            fix_counts_list = group_df["fix_count"].to_list()
-            total_fixations = sum(fix_counts_list)
-            threshold = total_fixations * percentile
-            max_possible = max(fix_counts_list)
-
-            fix_cutoff = _find_fixation_cutoff(
-                fix_count_list=fix_counts_list,
-                threshold=threshold,
-                max_possible=max_possible,
-            )
-
-            rows.append(
-                {
-                    "target_present": tp,
-                    "memory_set_size": mem_size,
-                    "fix_cutoff": fix_cutoff,
-                }
-            )
-
-        return pl.DataFrame(rows)
 
     def remove_poor_accuracy_sessions(self, threshold=0.5, print_flag=True):
         poor_accuracy_sessions = 0
@@ -1214,20 +1226,10 @@ class VisualSearchSession(Session):
         return fixations
 
     def accuracy(self):
-        # Accuracy should be grouped by target present and memory set size
-        correct_trials = self.search_rts()[
-            ["target_present", "correct_response", "memory_set_size"]
-        ]
-        accuracy = (
-            correct_trials.groupby(["target_present", "memory_set_size"])
-            .mean()
-            .reset_index()
+        return _grouped_accuracy(
+            self.search_rts(),
+            identifier=("session_id", self.session_id),
         )
-        # Change the column name to accuracy
-        accuracy.rename(columns={"correct_response": "accuracy"}, inplace=True)
-        accuracy["session_id"] = self.session_id
-
-        return accuracy
 
     def remove_non_answered_trials(self, print_flag=True):
         # Remove trials that were not answered
@@ -1242,100 +1244,16 @@ class VisualSearchSession(Session):
             )
 
     def has_poor_accuracy(self, threshold=0.5):
-        correct_trials = self.search_rts()[
-            ["target_present", "correct_response", "memory_set_size"]
-        ]
-        accuracy = (
-            correct_trials["correct_response"].sum()
-            / correct_trials["correct_response"].count()
-        )
-        return accuracy < threshold
+        responses = self.search_rts().get_column("correct_response")
+        return responses.is_empty() or responses.mean() < threshold
 
     def find_fixation_cutoff(self, percentile=1.0):
-        # 1. Gather fixation counts
-        fix_counts = [
-            {
-                "fix_count": trial.search_fixations().height,
-                "target_present": trial.target_present,
-                "memory_set_size": trial.memory_set_size,
-            }
-            for trial in self.trials.values()
-        ]
-        fix_counts = pl.DataFrame(fix_counts)
-
-        # 2. Get all unique group keys
-        group_keys = (
-            fix_counts.select(["target_present", "memory_set_size"]).unique().to_dicts()
-        )
-
-        # 3. Compute cutoff per group
-        rows = []
-        for group in group_keys:
-            tp = group["target_present"]
-            mem_size = group["memory_set_size"]
-
-            group_df = fix_counts.filter(
-                (pl.col("target_present") == tp)
-                & (pl.col("memory_set_size") == mem_size)
-            )
-
-            fix_counts_list = group_df["fix_count"].to_list()
-            total_fixations = sum(fix_counts_list)
-            threshold = total_fixations * percentile
-            max_possible = max(fix_counts_list)
-
-            fix_cutoff = _find_fixation_cutoff(
-                fix_count_list=fix_counts_list,
-                threshold=threshold,
-                max_possible=max_possible,
-            )
-
-            rows.append(
-                {
-                    "target_present": tp,
-                    "memory_set_size": mem_size,
-                    "fix_cutoff": fix_cutoff,
-                }
-            )
-
-        return pl.DataFrame(rows)
+        return _fixation_cutoffs(self.trials.values(), percentile)
 
     def cumulative_correct_trials_by_fixation(self, group_cutoffs=None):
         if group_cutoffs is None:
-            group_cutoffs = (
-                self.find_fixation_cutoff()
-            )  # this should return a pl.DataFrame
-
-        records = []
-
-        for trial in self.trials.values():
-            scanpath_length = len(trial.search_fixations())
-
-            # ✅ Filter the appropriate fix_cutoff value
-            fix_cutoff = (
-                group_cutoffs.filter(
-                    (pl.col("memory_set_size") == trial.memory_set_size)
-                    & (pl.col("target_present") == trial.target_present)
-                )
-                .select("fix_cutoff")
-                .item()
-            )
-
-            cumulative_correct = np.zeros(fix_cutoff)
-
-            if trial.correct_response and scanpath_length - 1 <= fix_cutoff:
-                cumulative_correct[scanpath_length - 1 :] = 1
-
-            records.append(
-                {
-                    "cumulative_correct": cumulative_correct,
-                    "target_present": trial.target_present,
-                    "memory_set_size": trial.memory_set_size,
-                }
-            )
-
-        df = pl.DataFrame(records)
-        return df
+            group_cutoffs = self.find_fixation_cutoff()
+        return _cumulative_correct_by_fixation(self.trials.values(), group_cutoffs)
 
     def scanpaths_by_stimuli(self):
         return pl.DataFrame(
@@ -1378,6 +1296,7 @@ class VisualSearchTrial(Trial):
         self._target_present = bool(trial_data.select("target_present").item())
         self._target = trial_data.select("target").item()
 
+        self._target_location = None
         if self._target_present:
             self._target_location = _as(
                 trial_data.select("target_location").item(), tuple

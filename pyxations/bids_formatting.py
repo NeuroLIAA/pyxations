@@ -151,11 +151,27 @@ def _detect_from_bids(
             "gaze": {"savgol_length": 0.19, "max_pso_dur": 0.4},
             "tobii": {"savgol_length": 0.195, "max_pso_dur": 0.3},
         }.get(dataset_format, {})
-        detector_rate = {
+        accepted_config = set(
+            inspect.signature(detector.run_eye_movement).parameters
+        ) - {"self", "gazex_data", "gazey_data", "sample_rate"}
+        config.update(
+            {key: value for key, value in kwargs.items() if key in accepted_config}
+        )
+        format_rate = {
             "webgazer": 30.0,
             "gaze": 60.0,
             "tobii": 60.0,
-        }.get(dataset_format, raw.sampling_frequency)
+        }.get(dataset_format)
+        detector_rate = (
+            kwargs.get("sample_rate")
+            or kwargs.get("sampling_frequency")
+            or format_rate
+            or raw.sampling_frequency
+        )
+        if detector_rate is None:
+            raise ValueError(
+                "Sampling frequency is required for sample-based event detection"
+            )
         fixations, saccades = detector.run_eye_movement_from_samples(
             detector_rate,
             config=config,

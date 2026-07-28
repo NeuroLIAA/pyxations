@@ -1,5 +1,6 @@
 import warnings
 import weakref
+from dataclasses import dataclass
 from math import hypot
 from pathlib import Path
 
@@ -15,6 +16,44 @@ from pyxations.visualization.visualization import Visualization
 
 STIMULI_FOLDER = "stimuli"
 ITEMS_FOLDER = "items"
+
+
+@dataclass(frozen=True)
+class SessionQualityAssessment:
+    """Bad-trial assessment made before a session is modified."""
+
+    bad_trials: tuple[object, ...]
+    total_trials: int
+
+    @property
+    def bad_trial_fraction(self) -> float:
+        if self.total_trials == 0:
+            return 0.0
+        return len(self.bad_trials) / self.total_trials
+
+
+@dataclass(frozen=True)
+class QualityFilterResult:
+    """Changes made by a bad-trial and bad-session quality filter."""
+
+    bad_trials_removed: int = 0
+    sessions_removed: int = 0
+    subjects_removed: int = 0
+    trials_discarded_with_sessions: int = 0
+
+    def __add__(self, other):
+        if not isinstance(other, QualityFilterResult):
+            return NotImplemented
+        return QualityFilterResult(
+            bad_trials_removed=self.bad_trials_removed + other.bad_trials_removed,
+            sessions_removed=self.sessions_removed + other.sessions_removed,
+            subjects_removed=self.subjects_removed + other.subjects_removed,
+            trials_discarded_with_sessions=(
+                self.trials_discarded_with_sessions
+                + other.trials_discarded_with_sessions
+            ),
+        )
+
 
 _MULTIMATCH_DTYPE = np.dtype(
     [
@@ -88,25 +127,22 @@ def _partition_trials(
 
 
 def _find_fixation_cutoff(fix_count_list, threshold, max_possible):
-    """
-    fix_count_list: The list of fixation counts for each trial
-    threshold: e.g. 0.95 * sum(fix_list)
-    max_possible: max(fix_list), or possibly something else, depending on logic
+    """Return the smallest fixation count that reaches ``threshold``.
 
-    Returns: For each element in fix_list, sum the minimum of the element and a given index i, until the sum is greater than or equal to the threshold.
-    Then return that index i.
+    Each trial contributes at most the candidate number of fixations. The
+    returned value is a count, not a zero-based index.
     """
 
-    # If threshold >= sum of fix_list, return max_possible
-    if threshold >= sum(fix_count_list):
-        return max_possible - 1
+    counts = [max(0, int(count)) for count in fix_count_list]
+    if not counts or max_possible <= 0:
+        return 0
 
-    for i, val in enumerate(range(max_possible)):
-        summation = sum([min(fix_count, val) for fix_count in fix_count_list])
-        if summation >= threshold:
-            return i
-
-    return max_possible - 1
+    maximum = max(0, int(max_possible))
+    target = max(0.0, float(threshold))
+    for candidate in range(1, maximum + 1):
+        if sum(min(count, candidate) for count in counts) >= target:
+            return candidate
+    return maximum
 
 
 def _parse_validations(df: pl.DataFrame) -> pl.DataFrame:
@@ -161,7 +197,7 @@ def _parse_validations(df: pl.DataFrame) -> pl.DataFrame:
     # 2 · create a validation index (0‑based) within each calibration block
     parsed = (
         parsed.with_columns(
-            pl.col("line")  # ← a column to operate on
+            pl.col("line")
             .cum_count()  # running 0, 1, 2, …
             .over(["Calib_index", "eye"])  # reset counter per calibration × eye
             .alias("validation_id")
@@ -263,14 +299,40 @@ class Experiment:
                 f"Removed {amount_fix - self.fixations().shape[0]} fixations that were merged."
             )
 
-    def drop_trials_with_nan_threshold(self, phase, threshold=0.1, print_flag=True):
-        amount_trials_total = self.rts().shape[0]
-        for subject in list(self.subjects.values()):
-            subject.drop_trials_with_nan_threshold(phase, threshold, False)
+    def remove_bad_trials_and_sessions(
+        self,
+        phase,
+        trial_nan_threshold=0.1,
+        session_bad_trial_threshold=0.1,
+        print_flag=True,
+    ):
+        """Remove poor sessions, or only their bad trials when recoverable.
+
+        Every session is assessed before it is modified. A session is removed
+        when its fraction of bad trials is greater than
+        ``session_bad_trial_threshold``. Otherwise, only its bad trials are
+        removed. Subjects left without sessions are removed from the
+        experiment.
+        """
+
+        result = QualityFilterResult()
+        for subject_id, subject in list(self.subjects.items()):
+            result += subject.remove_bad_trials_and_sessions(
+                phase,
+                trial_nan_threshold,
+                session_bad_trial_threshold,
+                False,
+            )
+            if subject_id not in self.subjects:
+                result += QualityFilterResult(subjects_removed=1)
         if print_flag:
             print(
-                f"Removed {amount_trials_total - self.rts().shape[0]} trials with NaN values."
+                f"Removed {result.bad_trials_removed} bad trials and "
+                f"{result.sessions_removed} sessions across "
+                f"{result.subjects_removed} removed subjects, discarding "
+                f"{result.trials_discarded_with_sessions} trials with those sessions."
             )
+        return result
 
     def drop_trials_longer_than(self, seconds, phase, print_flag=True):
         amount_trials_total = self.rts().shape[0]
@@ -425,9 +487,7 @@ class Experiment:
         fig_height = max(8, min(cell_height * n_subjects, 40))
 
         # Use a high-contrast reversed sequential map for calibration error.
-        cmap = colormaps["magma_r"].copy()
-        cmap.set_under("yellow")
-        cmap.set_bad("white")
+        cmap = colormaps["magma_r"].with_extremes(under="yellow", bad="white")
 
         valid_values = heatmap_values[
             np.isfinite(heatmap_values) & (heatmap_values >= 0)
@@ -543,21 +603,39 @@ class Subject:
         for session in self.sessions.values():
             session.collapse_fixations(threshold_px)
 
-    def drop_trials_with_nan_threshold(self, phase, threshold=0.1, print_flag=True):
-        total_sessions = len(self.sessions)
-        amount_trials_total = self.rts().shape[0]
-        for session in list(self.sessions.values()):
-            session.drop_trials_with_nan_threshold(phase, threshold, False)
-        bad_sessions_count = total_sessions - len(self.sessions)
+    def remove_bad_trials_and_sessions(
+        self,
+        phase,
+        trial_nan_threshold=0.1,
+        session_bad_trial_threshold=0.1,
+        print_flag=True,
+    ):
+        """Apply the session-or-trial quality policy to this subject."""
 
-        # If the proportion of bad sessions exceeds the threshold, remove all sessions
-        if bad_sessions_count / total_sessions > threshold:
-            self.experiment().remove_subject(self.subject_id)
+        if not 0 <= session_bad_trial_threshold <= 1:
+            raise ValueError(
+                "session_bad_trial_threshold must be between 0 and 1 inclusive"
+            )
+
+        result = QualityFilterResult()
+        for session_id, session in list(self.sessions.items()):
+            assessment = session.assess_trial_quality(phase, trial_nan_threshold)
+            if assessment.bad_trial_fraction > session_bad_trial_threshold:
+                result += QualityFilterResult(
+                    sessions_removed=1,
+                    trials_discarded_with_sessions=assessment.total_trials,
+                )
+                self.remove_session(session_id)
+            else:
+                removed = session._remove_assessed_bad_trials(assessment)
+                result += QualityFilterResult(bad_trials_removed=removed)
 
         if print_flag:
             print(
-                f"Removed {amount_trials_total - self.rts().shape[0]} trials with NaN values."
+                f"Removed {result.bad_trials_removed} bad trials and "
+                f"{result.sessions_removed} sessions from subject {self.subject_id}."
             )
+        return result
 
     def drop_poor_or_non_calibrated_trials(self, threshold=1.0, print_flag=True):
         """
@@ -689,20 +767,49 @@ class Session:
     def __repr__(self):
         return f"Session = '{self.session_id}', " + self.subject().__repr__()
 
-    def drop_trials_with_nan_threshold(self, phase, threshold=0.1, print_flag=True):
-        total_trials = len(self.trials)
-        # Filter bad trials
+    def assess_trial_quality(
+        self, phase, trial_nan_threshold=0.1
+    ) -> SessionQualityAssessment:
+        """Classify trials without modifying the session.
 
-        bad_trials = [
-            trial
-            for trial in self.trials
-            if self.trials[trial].is_trial_bad(phase, threshold)
-        ]
-        if len(bad_trials) / total_trials > threshold:
-            self.subject().remove_session(self.session_id)
+        ``trial_nan_threshold`` is the largest allowed fraction of invalid gaze
+        samples in an individual trial.
+        """
 
+        if not 0 <= trial_nan_threshold <= 1:
+            raise ValueError("trial_nan_threshold must be between 0 and 1 inclusive")
+
+        bad_trials = tuple(
+            trial_number
+            for trial_number, trial in self.trials.items()
+            if trial.is_trial_bad(phase, trial_nan_threshold)
+        )
+        return SessionQualityAssessment(
+            bad_trials=bad_trials,
+            total_trials=len(self.trials),
+        )
+
+    def _remove_assessed_bad_trials(
+        self, assessment: SessionQualityAssessment
+    ) -> int:
+        removed = 0
+        for trial_number in assessment.bad_trials:
+            if self._trials is None or trial_number not in self._trials:
+                continue
+            self.remove_trial(trial_number)
+            removed += 1
+        return removed
+
+    def remove_bad_trials(
+        self, phase, trial_nan_threshold=0.1, print_flag=True
+    ) -> int:
+        """Remove individual bad trials without applying a session policy."""
+
+        assessment = self.assess_trial_quality(phase, trial_nan_threshold)
+        removed = self._remove_assessed_bad_trials(assessment)
         if print_flag:
-            print(f"Removed {len(bad_trials)} trials with NaN values.")
+            print(f"Removed {removed} bad trials.")
+        return removed
 
     def drop_poor_or_non_calibrated_trials(self, threshold=1.0, print_flag=True):
         """
@@ -813,9 +920,14 @@ class Session:
         calib_indexes = pl.DataFrame(
             calib_indexes, schema=["trial_number", "Calib_index"], orient="row"
         ).with_columns([(pl.lit(self.session_id)).alias("session_id")])
-        return self._calib_data.with_columns(
-            [(pl.lit(self.session_id)).alias("session_id")]
-        ), calib_indexes
+        calibration = self._calib_data.with_columns(
+            pl.col("Calib_index").cast(pl.Int64, strict=False),
+            pl.lit(self.session_id).alias("session_id"),
+        )
+        calib_indexes = calib_indexes.with_columns(
+            pl.col("Calib_index").cast(pl.Int64, strict=False)
+        )
+        return calibration, calib_indexes
 
     def _init_trials(self, samples, fix, sacc, blink, events_path):
         sample_trials = _partition_trials(samples)
@@ -1144,7 +1256,7 @@ class Trial:
 
         # ─────────────────────── 1 · prepare saccades ───────────────────────
         sacc = (
-            self._sacc.with_row_count(  # add an integer key that survives every shuffle
+            self._sacc.with_row_index(  # add an integer key that survives every shuffle
                 "idx"
             ).sort(["phase", "eye", "tStart"])
         )
@@ -1237,7 +1349,7 @@ class Trial:
                         pl.lit(None).cast(sacc[col].dtype).alias(col)
                     )
 
-        # --- NEW: make sure every dtype matches the canonical sacc table ----
+        # Match the canonical saccade-table dtypes.
         for col in base_cols:
             if merged[col].dtype != sacc[col].dtype:
                 merged = merged.with_columns(pl.col(col).cast(sacc[col].dtype))
@@ -1249,7 +1361,7 @@ class Trial:
             [short_fix_pairs["idx_prev"], short_fix_pairs["idx_next"]]
         ).unique()
         new_sacc = (
-            sacc.filter(~pl.col("idx").is_in(to_drop))
+            sacc.filter(~pl.col("idx").is_in(to_drop.implode()))
             .drop("idx")  # helper column gone
             .vstack(merged)  # add fused rows
             .sort(["phase", "eye", "tStart"])
@@ -1276,8 +1388,8 @@ class Trial:
         """
 
         # ────────────────── 0 · prepare helpers ──────────────────
-        fix = self._fix.sort("tStart").with_row_count("fix_idx")
-        sac = self._sacc.sort("tStart").with_row_count("sac_idx")
+        fix = self._fix.sort("tStart").with_row_index("fix_idx")
+        sac = self._sacc.sort("tStart").with_row_index("sac_idx")
 
         new_fix_rows: list[dict] = []
         drop_sac_idx: set[int] = set()
@@ -1421,10 +1533,8 @@ class Trial:
         return self._rts
 
     def is_trial_bad(self, phase, threshold=0.1):
-        # Filter samples for the given phase
         samples = self._samples.filter(pl.col("phase") == phase)
 
-        # Remove samples during blinks
         if self._blink is not None and self._blink.height > 0:
             for blink in self._blink.iter_rows(named=True):
                 start, end = blink["tStart"], blink["tEnd"]
@@ -1434,20 +1544,34 @@ class Trial:
 
         total_samples = samples.height
         if total_samples == 0:
-            return True  # If no samples remain, consider it bad
+            return True
 
-        # Count total NaNs across all columns
-        nan_counts = samples.select(
-            [pl.col(c).is_null().sum().alias(c) for c in samples.columns]
+        gaze_pairs = [
+            (x, y)
+            for x, y in (("X", "Y"), ("LX", "LY"), ("RX", "RY"))
+            if x in samples.columns and y in samples.columns
+        ]
+        valid_pair_expressions = [
+            (
+                pl.col(x).cast(pl.Float64, strict=False).is_finite()
+                & pl.col(y).cast(pl.Float64, strict=False).is_finite()
+            ).fill_null(False)
+            for x, y in gaze_pairs
+        ]
+        invalid_gaze = (
+            ~pl.any_horizontal(valid_pair_expressions)
+            if valid_pair_expressions
+            else pl.lit(False)
         )
-        nan_total = sum(nan_counts.row(0))
-
-        # Count "bad" values
-        bad_values = samples.select(pl.col("bad").sum()).item()
-
-        bad_and_nan_percentage = (nan_total + bad_values) / total_samples
-
-        return bad_and_nan_percentage > threshold
+        marked_bad = (
+            pl.col("bad").cast(pl.Boolean, strict=False).fill_null(False)
+            if "bad" in samples.columns
+            else pl.lit(False)
+        )
+        bad_samples = samples.select(
+            (invalid_gaze | marked_bad).sum().alias("count")
+        ).item()
+        return bad_samples / total_samples > threshold
 
     def is_trial_longer_than(self, seconds, phase):
         rt_row = self.rts().filter(pl.col("phase") == phase)
