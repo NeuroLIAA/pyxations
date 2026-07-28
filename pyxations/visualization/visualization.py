@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from importlib import import_module
 from pathlib import Path
 
 import matplotlib.colors as mplcolors
@@ -8,6 +9,18 @@ import numpy as np
 import polars as pl
 
 MAX_CACHED_IMAGES = 8
+
+
+def _load_cv2():
+    """Load optional OpenCV support with an actionable error."""
+
+    try:
+        return import_module("cv2")
+    except ImportError as exc:
+        raise ImportError(
+            "OpenCV video support is optional. Install it with "
+            "`pip install 'pyxations[video]'`."
+        ) from exc
 
 
 class Visualization:
@@ -541,13 +554,7 @@ class Visualization:
         IPython.display.HTML or None
             Returns HTML animation if display=True and output_format="html", otherwise None.
         """
-        try:
-            import cv2
-        except ImportError as exc:
-            raise ImportError(
-                "OpenCV video support is optional. Install it with "
-                "`pip install 'pyxations[video]'`."
-            ) from exc
+        cv2 = _load_cv2()
 
         import matplotlib as mpl
         from matplotlib.animation import FuncAnimation
@@ -621,7 +628,6 @@ class Visualization:
             # Calculate time to frame mapping
             t_start = samples["tSample"].min()
             t_end = samples["tSample"].max()
-            trial_duration = t_end - t_start
 
             # Create frame-to-time mapping
             frame_edges = np.linspace(t_start, t_end, total_frames + 1)

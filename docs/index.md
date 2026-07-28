@@ -45,7 +45,9 @@ See [Usage](usage.md) for an end-to-end walkthrough.
 - **Validated BIDS conversion**: write per-eye physiological recordings from
   EyeLink, Tobii, GazePoint, and webcam/WebGazer data, normalize tracker and
   behavioral events, and retain a verbatim archival copy under `sourcedata/`.
-- **EDF parsing**: extract headers, messages, calibration, events and raw samples from EyeLink EDF files (via `edf2asc`).
+- **EyeLink import**: read ASC exports directly, or convert EDF files with
+  `edf2asc` before extracting messages, calibration reports, tracker events,
+  and gaze samples.
 - **Multi-vendor support**: input formats for EyeLink, Tobii, Gazepoint and WebGazer.
 - **Trial segmentation**: split continuous recordings using start/end messages, fixed durations or explicit timestamps.
 - **Eye movement detection**: fixations and saccades with REMoDNaV,

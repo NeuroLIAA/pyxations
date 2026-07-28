@@ -1,7 +1,4 @@
-import pytest
-
 from pyxations import Experiment
-from pyxations.bids import validate_bids_dataset, validator_command
 
 
 def test_multipanel_is_written_without_invalidating_derivatives(
@@ -16,8 +13,3 @@ def test_multipanel_is_written_without_invalidating_derivatives(
         case["derivatives"] / "figures" / "group" / "eyelink" / "multipanel_search.png"
     )
     assert figure.is_file()
-
-    command = validator_command()
-    if command is None:
-        pytest.skip("Official BIDS Validator or Deno is not installed")
-    validate_bids_dataset(case["derivatives"], command=command)

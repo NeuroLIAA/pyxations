@@ -42,7 +42,7 @@ runs the pinned validator.
 For coverage:
 
 ```bash
-uv run pytest --cov=pyxations
+uv run pytest --cov=pyxations --cov-report=term-missing --cov-report=xml --cov-fail-under=95
 ```
 
 ## Building the docs locally
@@ -59,14 +59,12 @@ mkdocs serve
 Run the same coverage check used by CI:
 
 ```bash
-pytest --cov=pyxations --cov-report=term-missing --cov-report=xml
+pytest --cov=pyxations --cov-report=term-missing --cov-report=xml --cov-fail-under=95
 ```
 
-CI enforces an 80% project-wide floor and uploads the report used by the
-coverage badge in the README. The floor should increase as meaningful tests
-are added, with 95% retained as the long-term target; it should not be raised
-by excluding supported modules or adding tests that merely execute lines
-without asserting behavior.
+CI enforces a 95% project-wide floor and uploads the report used by the
+coverage badge in the README. Supported modules are not excluded from the
+measurement; tests should assert behavior rather than merely execute lines.
 
 ## Repository layout
 

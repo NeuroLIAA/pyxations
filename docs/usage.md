@@ -164,6 +164,31 @@ which units were reported. Pyxations exposes these measurements for analysis
 but does not currently implement a complete pupillometry preprocessing
 pipeline (for example, deblinking, interpolation, or baseline correction).
 
+### Trial and session quality filtering
+
+Trial-level and session-level exclusion are deliberately separate decisions.
+First, `assess_trial_quality()` classifies every trial in a session from its
+fraction of invalid gaze samples without modifying the hierarchy. You can use
+`session.remove_bad_trials()` when you only want to remove those individual
+trials.
+
+For a combined policy, call:
+
+```python
+result = exp.remove_bad_trials_and_sessions(
+    phase="search",
+    trial_nan_threshold=0.1,
+    session_bad_trial_threshold=0.25,
+)
+```
+
+Each session is assessed before any trial is removed. If more than 25% of its
+trials are bad in this example, the entire session is removed; otherwise only
+the bad trials are removed. A subject whose last session is removed is also
+removed explicitly from `exp.subjects`. The returned `QualityFilterResult`
+reports removed trials, removed sessions, removed subjects, and trials
+discarded as part of session removal.
+
 For visual-search paradigms, `VisualSearchExperiment` adds helpers for target/distractor analyses.
 
 ## 4. Visualization

@@ -301,3 +301,147 @@ def test_derivative_worker_count_validation(tmp_path, value, error):
             "tobii",
             num_processes=value,
         )
+
+
+def test_optional_detector_loading_and_errors(monkeypatch):
+    assert formatting._detector_type("engbert") is formatting.EngbertDetection
+    assert formatting._detector_type("missing") is None
+
+    def missing_dependency(name):
+        error = ModuleNotFoundError("No module named 'remodnav'")
+        error.name = "remodnav"
+        raise error
+
+    monkeypatch.setattr(formatting, "import_module", missing_dependency)
+    with pytest.raises(ImportError, match=r"pyxations\[remodnav\]"):
+        formatting._detector_type("remodnav")
+
+    def unrelated_dependency(name):
+        error = ModuleNotFoundError("No module named 'unrelated'")
+        error.name = "unrelated"
+        raise error
+
+    monkeypatch.setattr(formatting, "import_module", unrelated_dependency)
+    with pytest.raises(ModuleNotFoundError, match="unrelated"):
+        formatting._detector_type("remodnav")
+
+
+def test_detector_sampling_and_engbert_forwarding(tmp_path, monkeypatch):
+    calls = {}
+
+    class FakeRemodnav:
+        def __init__(self, **kwargs):
+            pass
+
+        def run_eye_movement(self, gazex_data, gazey_data, sample_rate):
+            pass
+
+        def run_eye_movement_from_samples(self, sample_rate, config):
+            raise AssertionError("missing frequency must fail before detection")
+
+    monkeypatch.setattr(formatting, "_detector_type", lambda name: FakeRemodnav)
+    raw = SimpleNamespace(
+        samples=pl.DataFrame({"tSample": [0.0], "X": [1.0], "Y": [2.0]}),
+        fixations=pl.DataFrame(),
+        saccades=pl.DataFrame(),
+        blinks=pl.DataFrame(),
+        sampling_frequency=None,
+    )
+    with pytest.raises(ValueError, match="Sampling frequency"):
+        formatting._detect_from_bids(
+            raw,
+            dataset_format="eyelink",
+            detection_algorithm="remodnav",
+            session_folder_path=tmp_path,
+            kwargs={},
+        )
+
+    class FakeEngbert:
+        def __init__(self, session_folder_path, samples):
+            calls["samples"] = samples
+
+        def detect_eye_movements(self, vfac=5):
+            calls["vfac"] = vfac
+            return pl.DataFrame({"event": [1]}), pl.DataFrame({"event": [2]})
+
+    monkeypatch.setattr(formatting, "_detector_type", lambda name: FakeEngbert)
+    raw.samples = pl.DataFrame(
+        {
+            "tSample": [0.0],
+            "RX": [1.0],
+            "RY": [2.0],
+            "RPupil": [3.0],
+        }
+    )
+    samples, fixations, saccades, _ = formatting._detect_from_bids(
+        raw,
+        dataset_format="tobii",
+        detection_algorithm="engbert",
+        session_folder_path=tmp_path,
+        kwargs={"vfac": 7, "ignored": True},
+    )
+    assert {"X", "Y", "Pupil", "eye"} <= set(samples.columns)
+    assert samples["eye"].to_list() == ["R"]
+    assert calls["vfac"] == 7
+    assert fixations["event"].to_list() == [1]
+    assert saccades["event"].to_list() == [2]
+
+
+def test_best_eye_fallbacks_and_calibration_groups():
+    tables = (
+        pl.DataFrame({"Calib_index": [1], "LX": [1.0], "LY": [2.0]}),
+        pl.DataFrame({"Calib_index": [1]}),
+        pl.DataFrame({"Calib_index": [1]}),
+        pl.DataFrame({"Calib_index": [1]}),
+    )
+    raw = SimpleNamespace(calibration=pl.DataFrame())
+    assert formatting._choose_best_eye(raw, *tables) == tables
+
+    raw.calibration = pl.DataFrame({"Calib_index": [1], "line": ["other"]})
+    assert formatting._choose_best_eye(raw, *tables) == tables
+    assert formatting._find_best_eye(
+        pl.DataFrame(
+            {
+                "line": [
+                    "CAL VALIDATION L ABORTED",
+                    "CAL VALIDATION R ABORTED",
+                ]
+            }
+        )
+    ) == "M"
+    assert formatting._find_best_eye(
+        pl.DataFrame({"line": ["CAL VALIDATION LEFT GOOD"]})
+    ) == "L"
+
+    raw.calibration = pl.DataFrame(
+        {
+            "Calib_index": [1, 2],
+            "line": [
+                "CAL VALIDATION LEFT GOOD ERROR 0.1",
+                "CAL VALIDATION L ABORTED",
+            ],
+        }
+    )
+    selected = formatting._choose_best_eye(raw, *tables)
+    assert selected[0].height == 1
+    assert selected[0]["X"].to_list() == [1.0]
+
+
+def test_default_trial_assignment_preserves_existing_trials():
+    preprocessing = SimpleNamespace(
+        samples=pl.DataFrame(
+            {
+                "tSample": [0.0, 10.0, 20.0],
+                "trial_number": [None, 2, 2],
+                "phase": ["", "search", "search"],
+            }
+        ),
+        fixations=pl.DataFrame({"tStart": [10.0], "tEnd": [20.0]}),
+        saccades=pl.DataFrame(),
+        blinks=pl.DataFrame(),
+    )
+    formatting._assign_default_trials(preprocessing)
+
+    assert preprocessing.samples["trial_number"].to_list() == [0, 2, 2]
+    assert preprocessing.fixations["trial_number"].to_list() == [2]
+    assert {"trial_number", "phase"} <= set(preprocessing.saccades.columns)

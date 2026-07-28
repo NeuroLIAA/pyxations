@@ -1,6 +1,7 @@
 import warnings
 import weakref
 from dataclasses import dataclass
+from importlib import import_module
 from math import hypot
 from pathlib import Path
 
@@ -67,13 +68,12 @@ _MULTIMATCH_DTYPE = np.dtype(
 def _load_multimatch():
     """Import the optional MultiMatch dependency with an actionable error."""
     try:
-        import multimatch_gaze
+        return import_module("multimatch_gaze")
     except ImportError as exc:
         raise ImportError(
             "MultiMatch support is optional. Install it with "
             "`pip install 'pyxations[multimatch]'`."
         ) from exc
-    return multimatch_gaze
 
 
 def _to_multimatch_scanpath(fixations: pl.DataFrame) -> np.ndarray:

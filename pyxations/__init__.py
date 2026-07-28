@@ -6,6 +6,7 @@ used without installing REMoDNaV, MultiMatch, or OpenCV.
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any
 
 from .analysis.generic import Experiment
@@ -40,7 +41,7 @@ def __getattr__(name: str) -> Any:
     """Load optional public objects only when they are requested."""
     if name == "RemodnavDetection":
         try:
-            from .methods.eyemovement.REMoDNaV import RemodnavDetection
+            module = import_module(".methods.eyemovement.REMoDNaV", __name__)
         except ImportError as exc:
             if exc.name and exc.name.startswith("remodnav"):
                 raise ImportError(
@@ -48,5 +49,5 @@ def __getattr__(name: str) -> Any:
                     "`pip install 'pyxations[remodnav]'`."
                 ) from exc
             raise
-        return RemodnavDetection
+        return module.RemodnavDetection
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

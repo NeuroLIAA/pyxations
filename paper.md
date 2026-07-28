@@ -19,7 +19,7 @@ affiliations:
   - name: "Departamento de Física, Facultad de Ciencias Exactas y Naturales, Universidad de Buenos Aires"
     index: 3
 
-date: "2025-12-18"
+date: "2026-07-28"
 bibliography: paper.bib
 ---
 
@@ -49,7 +49,7 @@ Therefore, Pyxations was designed as a reproducible and extensible framework tha
 
 Pyxations has already been deployed to standardize workflows in active research environments. It was utilized to process and analyze webcam-based eye-tracking data for a study on validation of an online antisaccade paradigm [@JuantorenaAntisaccade]. Moreover, source code was also utilized for EyeLink data in a study on hybrid search strategies, which combined Bayesian and neural network models [@ruarte2025integrating].
 
-The library's versatility has been further validated through the successful harmonization of diverse datasets. It has been used to process data from GazePoint 3 trackers, in-house web-based eye-trackers, and driving simulation experiments (courtesy of collaborators mentioned in the acknowledgements), demonstrating its capacity to handle real-world heterogeneity beyond standard laboratory tasks. Furthermore, we are currently collaborating with three additional research groups to integrate Pyxations into their data analysis pipelines, establishing it as a growing standard for reproducible eye-tracking research.
+The library's versatility has been further evaluated through the harmonization of diverse datasets. It has been used to process data from GazePoint 3 trackers, in-house web-based eye-trackers, and driving simulation experiments (courtesy of collaborators mentioned in the acknowledgements), demonstrating its capacity to handle real-world heterogeneity beyond standard laboratory tasks. Furthermore, we are currently collaborating with three additional research groups to integrate Pyxations into their data analysis pipelines, providing additional opportunities to evaluate its portability and reproducibility.
 
 # Software Design
 

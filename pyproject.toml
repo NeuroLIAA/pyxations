@@ -60,7 +60,7 @@ relative_files = true
 source = ["pyxations"]
 
 [tool.coverage.report]
-fail_under = 80
+fail_under = 95
 precision = 2
 show_missing = true
 skip_covered = true

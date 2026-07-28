@@ -1,9 +1,17 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 import pytest
 
+import pyxations.analysis.generic as generic_module
+import pyxations.analysis.visual_search as visual_search_module
 from pyxations import Experiment, VisualSearchExperiment
-from pyxations.analysis.generic import _find_fixation_cutoff
+from pyxations.analysis.generic import (
+    QualityFilterResult,
+    SessionQualityAssessment,
+    _find_fixation_cutoff,
+    _to_multimatch_scanpath,
+)
 from pyxations.visualization.visualization import Visualization
 
 
@@ -76,7 +84,11 @@ def test_visual_search_statistics_and_trial_accessors(generated_datasets):
     assert not experiment.search_fixations().is_empty()
     assert not experiment.search_saccades().is_empty()
     assert not subject.search_rts().is_empty()
+    assert not subject.search_fixations().is_empty()
+    assert not subject.search_saccades().is_empty()
     assert not session.search_rts().is_empty()
+    assert not session.search_fixations().is_empty()
+    assert not session.search_saccades().is_empty()
     assert experiment.scanpaths_by_stimuli().height == 2
 
     cutoffs = experiment.find_fixation_cutoff()
@@ -102,6 +114,7 @@ def test_visual_search_statistics_and_trial_accessors(generated_datasets):
         experiment.trials_by_rt_bins(10, 0)
 
     assert absent_trial.target_present is False
+    assert absent_trial.target == "rubik_cube.jpg"
     assert absent_trial.target_location is None
     assert present_trial.target_present is True
     assert len(present_trial.target_location) == 4
@@ -126,6 +139,8 @@ def test_visual_search_statistics_and_trial_accessors(generated_datasets):
         "memorization"
     }
     assert absent_trial.scanpath_by_stimuli()["stimulus"] == absent_trial.stimulus
+    assert not absent_trial._multimatch_fixations().is_empty()
+    absent_trial.save_rts()
     assert absent_trial.is_trial_longer_than(0, "search")
     assert not absent_trial.is_trial_longer_than(0, "missing")
 
@@ -275,6 +290,164 @@ def test_fixation_cutoff_is_a_count_not_an_index():
     assert _find_fixation_cutoff([3, 3], threshold=6, max_possible=3) == 3
     assert _find_fixation_cutoff([1, 3], threshold=3, max_possible=3) == 2
     assert _find_fixation_cutoff([], threshold=0, max_possible=0) == 0
+    assert _find_fixation_cutoff([1], threshold=10, max_possible=3) == 3
+
+
+def test_visual_search_empty_helpers_and_cutoff_validation():
+    assert visual_search_module._as("[1, 2]", list) == [1, 2]
+    assert visual_search_module._fixation_cutoffs([], 1).is_empty()
+
+    trial = type(
+        "TrialStub",
+        (),
+        {
+            "memory_set_size": 1,
+            "target_present": True,
+            "correct_response": True,
+            "search_fixations": lambda self: pl.DataFrame({"x": [1]}),
+        },
+    )()
+    with pytest.raises(ValueError, match="exactly one row"):
+        visual_search_module._cumulative_correct_by_fixation(
+            [trial],
+            pl.DataFrame(
+                schema={
+                    "memory_set_size": pl.Int64,
+                    "target_present": pl.Boolean,
+                    "fix_cutoff": pl.Int64,
+                }
+            ),
+        )
+
+    fig, ax = plt.subplots()
+    visual_search_module._plot_grouped_mean_with_se(
+        ax,
+        pl.DataFrame(),
+        x="x",
+        y="y",
+        group="group",
+    )
+    visual_search_module._plot_cumulative_mean_with_se(
+        ax, pl.DataFrame(), max_fixations=0
+    )
+    visual_search_module._plot_rt_bin_bars(
+        ax,
+        pl.DataFrame(),
+        value_column="value",
+        ylabel="Value",
+    )
+    plt.close(fig)
+    visual_search_module._plot_speed_accuracy_tradeoff(
+        pl.DataFrame(),
+        entity_column="subject",
+        title="Empty",
+    )
+
+
+def test_quality_result_and_multimatch_validation(monkeypatch):
+    assert SessionQualityAssessment((), 0).bad_trial_fraction == 0
+    with pytest.raises(TypeError):
+        QualityFilterResult() + 1
+    with pytest.raises(ValueError, match="missing fixation columns"):
+        _to_multimatch_scanpath(pl.DataFrame({"xAvg": [1.0]}))
+
+    def missing_multimatch(name):
+        raise ModuleNotFoundError("No module named 'multimatch_gaze'")
+
+    monkeypatch.setattr(generic_module, "import_module", missing_multimatch)
+    with pytest.raises(ImportError, match=r"pyxations\[multimatch\]"):
+        generic_module._load_multimatch()
+
+
+def test_generic_cleanup_and_plot_delegation(generated_datasets, monkeypatch, capsys):
+    case = generated_datasets["eyelink"]
+
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+    experiment.filter_fixations(min_fix_dur=0)
+    assert "shorter than 0 ms" in capsys.readouterr().out
+
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+    experiment.collapse_fixations(threshold_px=0)
+    assert "fixations that were merged" in capsys.readouterr().out
+
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+    calls = []
+    for trial in experiment["0001"]["second"].trials.values():
+        monkeypatch.setattr(
+            trial,
+            "plot_scanpath",
+            lambda *args, trial_number=trial.trial_number, **kwargs: calls.append(
+                trial_number
+            ),
+        )
+    experiment.plot_scanpaths(1080, 1920)
+    assert calls == [0, 1]
+
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+    experiment.drop_trials_longer_than(10_000, "search")
+    assert "longer than 10000 seconds" in capsys.readouterr().out
+
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+    experiment.drop_poor_or_non_calibrated_trials(100)
+    assert "poor calibration" in capsys.readouterr().out
+
+
+def test_generic_quality_prints_and_trial_edge_paths(
+    generated_datasets, monkeypatch, capsys
+):
+    case = generated_datasets["eyelink"]
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+    session = experiment["0001"]["second"]
+    monkeypatch.setattr(session[0], "is_trial_bad", lambda phase, threshold: False)
+    monkeypatch.setattr(session[1], "is_trial_bad", lambda phase, threshold: False)
+
+    result = experiment.remove_bad_trials_and_sessions("search")
+    assert result == QualityFilterResult()
+    assert "0 bad trials" in capsys.readouterr().out
+    session.remove_bad_trials("search")
+    assert "Removed 0 bad trials" in capsys.readouterr().out
+
+    trial = session[0]
+    trial._blink = None
+    assert trial.blinks().is_empty()
+    unchanged = trial.fixations().clone()
+    assert trial.filter_fixations(min_fix_dur=0) is None
+    assert trial.fixations().equals(unchanged)
+
+    trial._samples = pl.DataFrame(
+        {
+            "tSample": [0.0, 1.0, 2.0],
+            "phase": ["search"] * 3,
+            "X": [1.0, None, 2.0],
+            "Y": [1.0, None, 2.0],
+        }
+    )
+    trial._blink = pl.DataFrame(
+        {"tStart": [0.5], "tEnd": [1.5], "duration": [1.0]}
+    )
+    assert not trial.is_trial_bad("search", threshold=0)
+
+
+def test_generic_trial_animation_delegation(generated_datasets, monkeypatch):
+    case = generated_datasets["eyelink"]
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+    trial = experiment["0001"]["second"][0]
+    captured = {}
+
+    def fake_animation(self, **kwargs):
+        captured.update(kwargs)
+        return "animation"
+
+    monkeypatch.setattr(Visualization, "plot_animation", fake_animation)
+    assert trial.plot_animation(1080, 1920, display=False) == "animation"
+    assert captured["folder_path"] == trial.events_path
 
 
 def test_trial_filter_and_collapse_fixations(generated_datasets):

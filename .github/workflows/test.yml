@@ -40,15 +40,6 @@ jobs:
       - name: Install the official BIDS Validator
         run: deno install -ERWN -g -n bids-validator jsr:@bids/validator@3.0.1
 
-      # EDF conversion is not exercised by the committed ASC fixture. Keep the
-      # helper available on Linux without attempting to run a Linux binary on
-      # Windows or macOS.
-      - name: Install edf2asc (Linux only)
-        if: runner.os == 'Linux'
-        run: |
-          curl -L -o /usr/local/bin/edf2asc https://github.com/ihrke/pypillometry/raw/refs/heads/master/external/edf2asc-linux
-          chmod +x /usr/local/bin/edf2asc
-
       - name: Run tests
         if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.11'
         run: uv run --locked pytest -vv -ra
@@ -60,7 +51,7 @@ jobs:
           --cov=pyxations
           --cov-report=term-missing
           --cov-report=xml
-          --cov-fail-under=80
+          --cov-fail-under=95
 
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'

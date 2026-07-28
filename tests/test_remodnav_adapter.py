@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import namedtuple
 
 import numpy as np
 import polars as pl
@@ -103,3 +104,105 @@ def test_low_sample_rate_uses_nyquist_safe_lowpass(monkeypatch, tmp_path):
                 "lowpass_cutoff_freq": 2.5,
             },
         )
+
+
+def test_remodnav_helpers_accept_supported_event_containers():
+    values = (0.0, 0.1, "FIXA", 1, 2, 1.5, 2.5, 0.2, 3, 2, 2.5)
+    Event = namedtuple("Event", remodnav_module._EVENT_COLUMNS)
+    structured = np.array(
+        [values],
+        dtype=[
+            (name, "S8" if name == "label" else "f8")
+            for name in remodnav_module._EVENT_COLUMNS
+        ],
+    )[0]
+
+    records = remodnav_module._normalise_remodnav_events(
+        [
+            dict(zip(remodnav_module._EVENT_COLUMNS, values)),
+            Event(*values),
+            structured,
+            values,
+        ]
+    )
+    assert len(records) == 4
+    assert records[2]["label"] == "FIXA"
+
+    with pytest.raises(ValueError, match="expected"):
+        remodnav_module._normalise_remodnav_events([(1, 2)])
+    with pytest.raises(ValueError, match="missing fields"):
+        remodnav_module._normalise_remodnav_events([{"label": "FIXA"}])
+    with pytest.raises(ValueError, match="Missing required"):
+        remodnav_module._column_to_numpy(pl.DataFrame({"x": [1]}), "missing")
+    with pytest.raises(TypeError, match="Polars DataFrame"):
+        remodnav_module._make_frame({}, [], ["x"])
+    assert math.isnan(remodnav_module._nanmean_or_nan(np.array([np.nan])))
+
+
+def test_remodnav_constant_metadata_validation():
+    with pytest.raises(ValueError, match="empty chunk"):
+        remodnav_module._validate_constant(np.array([]), "metadata")
+    assert math.isnan(
+        remodnav_module._validate_constant(np.array([np.nan, np.nan]), "metadata")
+    )
+    assert remodnav_module._validate_constant(
+        np.array([None, None], dtype=object), "metadata"
+    ) is None
+    with pytest.raises(ValueError, match="constant"):
+        remodnav_module._validate_constant(np.array([1, 2]), "metadata")
+
+
+def test_remodnav_detector_validation_and_empty_paths(tmp_path):
+    empty_samples = pl.DataFrame(
+        schema={"tSample": pl.Float64, "Rate_recorded": pl.Float64}
+    )
+    detector = remodnav_module.RemodnavDetection(tmp_path, empty_samples)
+    fixations, saccades = detector.detect_eye_movements()
+    assert fixations.is_empty() and saccades.is_empty()
+
+    invalid_rate = pl.DataFrame(
+        {"tSample": [0.0], "Rate_recorded": [0.0], "X": [1.0], "Y": [1.0]}
+    )
+    with pytest.raises(ValueError, match="Rate_recorded"):
+        remodnav_module.RemodnavDetection(
+            tmp_path, invalid_rate
+        ).detect_eye_movements()
+
+    samples = pl.DataFrame({"tSample": [0.0], "X": [1.0], "Y": [1.0]})
+    detector = remodnav_module.RemodnavDetection(tmp_path, samples)
+    with pytest.raises(ValueError, match="sample_rate"):
+        detector.run_eye_movement_from_samples(0)
+    with pytest.raises(ValueError, match="sample_rate"):
+        detector.run_eye_movement([1], [1], 0)
+    with pytest.raises(ValueError, match="Screen size"):
+        detector.run_eye_movement([1], [1], 100, screen_size=0)
+    with pytest.raises(ValueError, match="equal lengths"):
+        detector.run_eye_movement([1], [1, 2], 100)
+    with pytest.raises(ValueError, match="times"):
+        detector.run_eye_movement([1], [1], 100, times=[0, 1])
+    with pytest.raises(ValueError, match="pupil_data"):
+        detector.run_eye_movement([1], [1], 100, pupil_data=[1, 2])
+
+
+def test_remodnav_chunk_validation_paths(tmp_path):
+    samples = pl.DataFrame(
+        {
+            "tSample": [0.0, 10.0],
+            "Rate_recorded": [100.0, 100.0],
+            "Calib_index": [1, 1],
+            "Eyes_recorded": ["M", "M"],
+            "other": [1.0, 2.0],
+        }
+    )
+    detector = remodnav_module.RemodnavDetection(tmp_path, samples)
+    fixations, saccades = detector.detect_on_chunk(np.array([], dtype=int))
+    assert fixations.is_empty() and saccades.is_empty()
+    with pytest.raises(ValueError, match="Samples must contain"):
+        detector.detect_on_chunk(np.array([0, 1]))
+
+    detector.samples = samples.with_columns(
+        pl.lit(float("nan")).alias("X"),
+        pl.lit(float("nan")).alias("Y"),
+    )
+    fixations, saccades = detector.detect_on_chunk(np.array([0, 1]))
+    assert fixations.is_empty() and saccades.is_empty()

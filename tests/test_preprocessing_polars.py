@@ -4,9 +4,8 @@ import json
 from pathlib import Path
 
 import numpy as np
+import polars as pl
 import pytest
-
-pl = pytest.importorskip("polars")
 
 from pyxations.pre_processing import PreProcessing, SessionMetadata
 

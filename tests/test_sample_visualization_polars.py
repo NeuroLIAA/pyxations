@@ -4,11 +4,10 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
+import polars as pl
 import pytest
 
 matplotlib.use("Agg")
-
-pl = pytest.importorskip("polars")
 
 from pyxations.visualization.samples import SampleVisualization
 

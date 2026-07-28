@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import re
 from concurrent.futures import ProcessPoolExecutor
+from importlib import import_module
 from pathlib import Path
 
 import polars as pl
@@ -23,7 +24,7 @@ def _detector_type(name):
 
     if name == "remodnav":
         try:
-            from pyxations.methods.eyemovement.REMoDNaV import RemodnavDetection
+            module = import_module("pyxations.methods.eyemovement.REMoDNaV")
         except ImportError as exc:
             if exc.name and exc.name.startswith("remodnav"):
                 raise ImportError(
@@ -31,7 +32,7 @@ def _detector_type(name):
                     "`pip install 'pyxations[remodnav]'`."
                 ) from exc
             raise
-        return RemodnavDetection
+        return module.RemodnavDetection
     return EYE_MOVEMENT_DETECTION_DICT.get(name)
 
 
@@ -83,25 +84,33 @@ def _assign_default_trials(pre_processing):
     pre_processing.samples = samples
 
     for table_name in ("fixations", "saccades", "blinks"):
-        table = getattr(pre_processing, table_name).with_columns(
+        table = getattr(pre_processing, table_name)
+        if table.is_empty():
+            table = table.with_columns(
+                pl.Series("trial_number", [], dtype=pl.Int64),
+                pl.Series("phase", [], dtype=pl.String),
+            )
+            setattr(pre_processing, table_name, table)
+            continue
+
+        table = table.with_columns(
             pl.lit(0, dtype=pl.Int64).alias("trial_number"),
             pl.lit("").alias("phase"),
         )
-        if not table.is_empty():
-            for trial_number, group in samples.partition_by(
-                "trial_number", as_dict=True
-            ).items():
-                trial_value = (
-                    trial_number[0] if isinstance(trial_number, tuple) else trial_number
-                )
-                start = group.get_column("tSample").min()
-                end = group.get_column("tSample").max()
-                table = table.with_columns(
-                    pl.when((pl.col("tStart") >= start) & (pl.col("tEnd") <= end))
-                    .then(pl.lit(int(trial_value)))
-                    .otherwise(pl.col("trial_number"))
-                    .alias("trial_number")
-                )
+        for trial_number, group in samples.partition_by(
+            "trial_number", as_dict=True
+        ).items():
+            trial_value = (
+                trial_number[0] if isinstance(trial_number, tuple) else trial_number
+            )
+            start = group.get_column("tSample").min()
+            end = group.get_column("tSample").max()
+            table = table.with_columns(
+                pl.when((pl.col("tStart") >= start) & (pl.col("tEnd") <= end))
+                .then(pl.lit(int(trial_value)))
+                .otherwise(pl.col("trial_number"))
+                .alias("trial_number")
+            )
         setattr(pre_processing, table_name, table)
 
 

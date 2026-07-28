@@ -104,6 +104,8 @@ def json_value(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, Mapping):
         return {str(key): json_value(item) for key, item in value.items()}
+    if isinstance(value, pl.Series):
+        return [json_value(item) for item in value.to_list()]
     if isinstance(value, (list, tuple)):
         return [json_value(item) for item in value]
     if isinstance(value, str):
