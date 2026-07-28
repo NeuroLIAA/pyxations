@@ -8,11 +8,14 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
+        # macos-15 is Apple Silicon; macos-15-intel retains x86_64 coverage.
+        os: [ubuntu-latest, windows-latest, macos-15, macos-15-intel]
         python-version: ["3.10", "3.11"]
 
     steps:
@@ -33,7 +36,12 @@ jobs:
       - name: Install the official BIDS Validator
         run: deno install -ERWN -g -n bids-validator jsr:@bids/validator@3.0.1
 
-      - run: |
+      # EDF conversion is not exercised by the committed ASC fixture. Keep the
+      # helper available on Linux without attempting to run a Linux binary on
+      # Windows or macOS.
+      - name: Install edf2asc (Linux only)
+        if: runner.os == 'Linux'
+        run: |
           curl -L -o /usr/local/bin/edf2asc https://github.com/ihrke/pypillometry/raw/refs/heads/master/external/edf2asc-linux
           chmod +x /usr/local/bin/edf2asc
 
