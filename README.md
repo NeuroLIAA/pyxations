@@ -42,7 +42,7 @@
   
 ## Requirements
 
-* `Python 3.10` or newer is required.
+* `Python 3.11` or newer is required.
 * EyeLink EDF input requires the `edf2asc` program from the EyeLink Developers
   Kit on `PATH`. Existing EyeLink ASC files can be read directly.
 

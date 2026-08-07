@@ -8,7 +8,7 @@ version = "0.3.0"
 description = "Pyxations: a Python-based toolbox to organize, parse, and analyse eye-movement data"
 authors = [{name = "NeuroLIAA"}]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 
 dependencies = [

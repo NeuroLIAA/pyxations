@@ -2,10 +2,10 @@
 
 ## Python
 
-Python **3.10** or newer.
+Python **3.11** or newer.
 
-Linux, macOS and Windows are all supported. The base package uses NumPy,
-Polars, and Matplotlib.
+Linux, macOS and Windows are all supported, and each release is tested on all
+three. The base package uses NumPy, Polars, and Matplotlib.
 
 ## edf2asc (only for EyeLink data)
 
