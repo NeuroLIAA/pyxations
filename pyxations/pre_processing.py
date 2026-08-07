@@ -5,7 +5,7 @@ import re
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -613,7 +613,7 @@ class PreProcessing:
                 {
                     "declared_recipe": functions_and_params,
                     "tool_version": self.VERSION,
-                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                    "timestamp_utc": datetime.now(UTC).isoformat(),
                     "session_path": str(self.session_path),
                 },
                 recipe_filename,
@@ -642,7 +642,7 @@ class PreProcessing:
                 {
                     "completed_recipe": list(functions_and_params.keys()),
                     "tool_version": self.VERSION,
-                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                    "timestamp_utc": datetime.now(UTC).isoformat(),
                     "metadata": self.metadata.to_dict(),
                 },
                 provenance_filename,
