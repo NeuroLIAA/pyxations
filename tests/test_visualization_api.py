@@ -93,6 +93,48 @@ def test_scanpath_handles_phases_images_and_validation(tmp_path):
         )
 
 
+def test_scanpath_plots_unsegmented_fixations_and_warns(tmp_path):
+    """Recordings with no named phase must still produce a figure."""
+    fixations, saccades, samples = _plot_tables()
+    unphased = {"phase": pl.lit("")}
+    output = tmp_path / "plots"
+    visualization = Visualization(tmp_path, "remodnav")
+
+    with pytest.warns(UserWarning, match="No named trial phase"):
+        visualization.scanpath(
+            fixations.with_columns(**unphased),
+            screen_height=100,
+            screen_width=100,
+            folder_path=output,
+            saccades=saccades.with_columns(**unphased),
+            samples=samples.with_columns(**unphased),
+            display=False,
+        )
+
+    # The rows are kept rather than filtered away, so a figure exists.
+    assert (output / "scanpath_0_unphased.png").exists()
+
+
+def test_scanpath_still_drops_unphased_rows_when_phases_exist(tmp_path):
+    """Rows between trials are skipped whenever the recording was segmented."""
+    fixations, _, _ = _plot_tables()
+    between_trials = fixations.head(1).with_columns(phase=pl.lit(""))
+    output = tmp_path / "plots"
+    visualization = Visualization(tmp_path, "remodnav")
+
+    visualization.scanpath(
+        pl.concat([fixations, between_trials]),
+        screen_height=100,
+        screen_width=100,
+        folder_path=output,
+        display=False,
+    )
+
+    assert (output / "scanpath_0_search.png").exists()
+    assert (output / "scanpath_0_memory.png").exists()
+    assert not (output / "scanpath_0_unphased.png").exists()
+
+
 def test_visualization_summary_plots_and_multipanel(tmp_path):
     fixations, saccades, _ = _plot_tables()
     visualization = Visualization(tmp_path, "engbert")

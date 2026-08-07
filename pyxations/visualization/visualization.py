@@ -1,3 +1,4 @@
+import warnings
 from collections import OrderedDict
 from importlib import import_module
 from pathlib import Path
@@ -104,6 +105,13 @@ class Visualization:
 
         display
             If *False* the figure canvas is never shown (faster for batch jobs).
+
+        Notes
+        -----
+        One figure is produced per named trial phase. Fixations that fall
+        outside every phase are skipped. If no fixation carries a phase name at
+        all, which happens when the recording was never segmented, they are all
+        drawn as a single unnamed phase and a :class:`UserWarning` is issued.
         """
         if fixations.is_empty():
             return
@@ -176,12 +184,28 @@ class Visualization:
             if plot_samples:
                 samples = samples.filter(pl.col("tSample").is_between(tmin, tmax))
 
-        # remove empty phase markings
-        fixations = fixations.filter(pl.col("phase") != "")
-        if plot_saccades:
-            saccades = saccades.filter(pl.col("phase") != "")
-        if plot_samples:
-            samples = samples.filter(pl.col("phase") != "")
+        # Rows outside any named phase carry an empty ``phase``. Dropping them
+        # is right for a segmented recording, where they fall between trials.
+        # But a recording with no named phase at all -- any format whose source
+        # carries no synchronisation messages, such as a plain Tobii or
+        # GazePoint export -- would then lose every row and plot nothing, with
+        # no clue as to why. Keep those rows as a single unnamed phase instead,
+        # and say what happened.
+        if fixations.get_column("phase").fill_null("").eq("").all():
+            warnings.warn(
+                "No named trial phase was found, so every fixation is plotted "
+                "as a single unnamed phase. Pass start_msgs and end_msgs to "
+                "compute_derivatives_for_dataset to segment the recording into "
+                "named phases.",
+                UserWarning,
+                stacklevel=2,
+            )
+        else:
+            fixations = fixations.filter(pl.col("phase") != "")
+            if plot_saccades:
+                saccades = saccades.filter(pl.col("phase") != "")
+            if plot_samples:
+                samples = samples.filter(pl.col("phase") != "")
 
         # ---- split once by phase --------------------------------------------------
         fix_by_phase = fixations.partition_by("phase", as_dict=True)
@@ -332,7 +356,7 @@ class Visualization:
                 scan_name = f"scanpath_{trial_idx}"
                 if tmin is not None and tmax is not None:
                     scan_name += f"_{tmin}_{tmax}"
-                out = Path(folder_path) / f"{scan_name}_{phase_name}.png"
+                out = Path(folder_path) / f"{scan_name}_{phase_name or 'unphased'}.png"
                 fig.savefig(out, dpi=150)
 
             if display:
