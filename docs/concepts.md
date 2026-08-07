@@ -114,6 +114,12 @@ supported:
 - `gaze`: Gazepoint exports.
 - `webgazer`: WebGazer.js browser-based recordings.
 
+`trial_number` is always `0, 1, 2, ...` in presentation order, whatever the
+source format. jsPsych numbers every screen it presents, including instructions
+and calibration, so WebGazer trials are renumbered on conversion and the
+original index is kept alongside them as `source_trial_index`, in both the gaze
+samples and the behavioral events.
+
 These tracker formats are independent of the behavioral source format.
 Associated CSV and TSV tables are preferred when present. Otherwise, a
 PsychoPy `.log` can supply trial conditions, displayed-component updates, and

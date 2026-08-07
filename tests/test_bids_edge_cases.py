@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -205,3 +206,62 @@ def test_validator_command_and_success_paths(tmp_path, monkeypatch):
     completed = subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
     monkeypatch.setattr(bids.subprocess, "run", lambda *args, **kwargs: completed)
     assert bids.validate_bids_dataset(tmp_path, command=["validator"]) is completed
+
+
+def _webgazer_export(folder: Path) -> Path:
+    """A jsPsych export whose gaze trials start late and skip an index."""
+    gaze = json.dumps([{"x": 1.0, "y": 2.0, "t": 0}, {"x": 3.0, "y": 4.0, "t": 17}])
+    path = folder / "s01_A_task-anti.csv"
+    pl.DataFrame(
+        {
+            # 0 and 1 are instruction screens, 32 is skipped by jsPsych.
+            "trial_index": [0, 1, 29, 30, 31, 33],
+            "time_elapsed": [10, 20, 1_000, 2_000, 3_000, 4_000],
+            "webgazer_data": [None, None, gaze, gaze, gaze, gaze],
+        }
+    ).write_csv(path)
+    return path
+
+
+def test_webgazer_trial_numbering_is_sequential_and_keeps_the_source_index(tmp_path):
+    source = pl.read_csv(_webgazer_export(tmp_path), infer_schema_length=None)
+
+    numbering = bids.webgazer_trial_numbering(source)
+
+    # Instruction screens carry no gaze, so they are not trials at all.
+    assert numbering == {29: 0, 30: 1, 31: 2, 33: 3}
+
+    recording = bids._read_webgazer(tmp_path / "s01_A_task-anti.csv", source=source)[0]
+    samples = recording.samples
+    assert sorted(samples.get_column("trial_number").unique().to_list()) == [0, 1, 2, 3]
+    assert sorted(samples.get_column("source_trial_index").unique().to_list()) == [
+        29,
+        30,
+        31,
+        33,
+    ]
+
+
+def test_webgazer_samples_and_events_share_one_numbering(tmp_path):
+    """A mismatch here would leave every trial without its behavioral row."""
+    source_path = _webgazer_export(tmp_path)
+
+    events = bids._prepare_task_events(
+        [source_path],
+        source_root=tmp_path,
+        primary_source=source_path,
+        format_name="webgazer",
+    )
+    samples = bids._read_webgazer(source_path)[0].samples
+
+    sample_trials = set(samples.get_column("trial_number").to_list())
+    event_trials = set(
+        events.filter(pl.col("trial_number").is_not_null())
+        .get_column("trial_number")
+        .to_list()
+    )
+    assert sample_trials == event_trials == {0, 1, 2, 3}
+
+    # The instruction screens survive as events but are not numbered as trials.
+    assert events.get_column("trial_number").null_count() == 2
+    assert events.get_column("source_trial_index").to_list() == [0, 1, 29, 30, 31, 33]

@@ -283,6 +283,53 @@ def _read_tobii(path: Path, *, data: pl.DataFrame | None = None) -> list[EyeReco
     return recordings
 
 
+def _webgazer_gaze_rows(source: pl.DataFrame) -> pl.DataFrame:
+    """Return the rows of a WebGazer export that actually carry gaze data."""
+
+    return source.filter(
+        pl.col("webgazer_data").is_not_null()
+        & (pl.col("webgazer_data").cast(pl.String).str.strip_chars() != "")
+    )
+
+
+def webgazer_trial_numbering(source: pl.DataFrame) -> dict[int, int]:
+    """Map jsPsych ``trial_index`` values to sequential trial numbers.
+
+    A jsPsych export numbers every screen it presented, including instructions
+    and calibration, so the trials that carry gaze are an arbitrary subset such
+    as ``29, 30, 31, 33``. Every other Pyxations input format numbers trials
+    ``0, 1, 2, ...`` in presentation order, so the raw jsPsych indices are
+    renumbered to match and the originals are kept in ``source_trial_index``.
+
+    The same mapping is applied to gaze samples and to the behavioral events
+    table, which are read from the same source file by different code paths;
+    were they to disagree, no trial would find its behavioral row.
+
+    Parameters
+    ----------
+    source : polars.DataFrame
+        The WebGazer export, read verbatim.
+
+    Returns
+    -------
+    dict
+        Mapping of original ``trial_index`` to sequential trial number. Screens
+        that carry no gaze data are absent, and therefore have no trial number.
+    """
+
+    if "trial_index" not in source or "webgazer_data" not in source:
+        return {}
+    indices = (
+        _webgazer_gaze_rows(source)
+        .get_column("trial_index")
+        .drop_nulls()
+        .unique()
+        .sort()
+        .to_list()
+    )
+    return {int(original): number for number, original in enumerate(indices)}
+
+
 def _read_webgazer(
     path: Path, *, source: pl.DataFrame | None = None
 ) -> list[EyeRecording]:
@@ -290,18 +337,19 @@ def _read_webgazer(
     if "webgazer_data" not in source:
         raise ValueError(f"{path} does not contain a webgazer_data column")
 
+    numbering = webgazer_trial_numbering(source)
     samples: list[dict[str, float]] = []
-    for row in source.filter(
-        pl.col("webgazer_data").is_not_null()
-        & (pl.col("webgazer_data").cast(pl.String).str.strip_chars() != "")
-    ).iter_rows(named=True):
+    for row in _webgazer_gaze_rows(source).iter_rows(named=True):
         payload = row["webgazer_data"]
         try:
             gaze_samples = json.loads(payload)
         except (TypeError, json.JSONDecodeError) as error:
             raise ValueError(f"Invalid WebGazer JSON in {path}") from error
         base_time = float(row.get("time_elapsed") or 0.0)
-        trial_number = row.get("trial_index")
+        source_index = row.get("trial_index")
+        trial_number = numbering.get(
+            int(source_index) if source_index is not None else None, source_index
+        )
         for sample in gaze_samples:
             if not {"t", "x", "y"}.issubset(sample):
                 continue
@@ -311,6 +359,7 @@ def _read_webgazer(
                     "x_coordinate": sample["x"],
                     "y_coordinate": sample["y"],
                     "trial_number": trial_number,
+                    "source_trial_index": source_index,
                 }
             )
     frame = pl.DataFrame(samples, strict=False)
@@ -894,6 +943,9 @@ def _prepare_task_events(
     candidate_groups = [tabular_candidates, log_candidates]
 
     tables = []
+    # Captured before the gaze payload is dropped below, since the numbering is
+    # derived from which screens actually carry gaze.
+    webgazer_numbering: dict[int, int] = {}
     for group in candidate_groups:
         for path in group:
             table = _read_behavioral_table(
@@ -903,6 +955,7 @@ def _prepare_task_events(
             if table is None or table.is_empty():
                 continue
             if format_name == "webgazer" and "webgazer_data" in table:
+                webgazer_numbering.update(webgazer_trial_numbering(table))
                 table = table.drop(
                     [
                         column
@@ -932,7 +985,21 @@ def _prepare_task_events(
         return None
     events = pl.concat(tables, how="diagonal_relaxed")
     if "trial_number" not in events and "trial_index" in events:
-        events = events.with_columns(pl.col("trial_index").alias("trial_number"))
+        if webgazer_numbering:
+            # Renumber through the same mapping used for the gaze samples, so a
+            # trial finds its behavioral row. Screens without gaze, such as
+            # instructions, are not trials and get no number.
+            events = events.with_columns(
+                pl.col("trial_index")
+                .cast(pl.Int64, strict=False)
+                .replace_strict(
+                    webgazer_numbering, default=None, return_dtype=pl.Int64
+                )
+                .alias("trial_number"),
+                pl.col("trial_index").alias("source_trial_index"),
+            )
+        else:
+            events = events.with_columns(pl.col("trial_index").alias("trial_number"))
     if "onset" not in events:
         if "time_elapsed" in events:
             events = events.with_columns(
