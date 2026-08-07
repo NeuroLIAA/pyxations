@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 from datetime import UTC, date, datetime
 
 import numpy as np
@@ -116,6 +117,28 @@ def test_tabular_conversion_and_tsv_io(tmp_path):
         has_header=True,
         schema_overrides={"finite": pl.Float64},
     ).shape == (2, 3)
+
+
+def test_compressed_tsv_is_a_valid_gzip_archive(tmp_path):
+    frame = pl.DataFrame({"a": [1, 2, None], "b": ["x", "y", "z"]})
+
+    path = write_tsv(
+        tmp_path / "table.tsv.gz", frame, include_header=True, compressed=True
+    )
+
+    # Decompress outside Polars: an archive that Polars happens to tolerate
+    # would still be unreadable by every other tool that consumes BIDS.
+    assert gzip.decompress(path.read_bytes()) == b"a\tb\n1\tx\n2\ty\nn/a\tz\n"
+
+
+def test_compressed_tsv_is_byte_reproducible(tmp_path):
+    frame = pl.DataFrame({"a": [1, 2], "b": ["x", "y"]})
+    kwargs = {"include_header": True, "compressed": True}
+
+    first = write_tsv(tmp_path / "first.tsv.gz", frame, **kwargs)
+    second = write_tsv(tmp_path / "second.tsv.gz", frame, **kwargs)
+
+    assert first.read_bytes() == second.read_bytes()
 
 
 def test_lazy_optional_public_import(monkeypatch):

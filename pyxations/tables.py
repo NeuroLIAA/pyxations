@@ -192,19 +192,25 @@ def write_tsv(
     table = tabular_frame(frame)
 
     if compressed:
-        with (
-            destination.open("wb") as binary_stream,
-            gzip.GzipFile(
-                filename="", fileobj=binary_stream, mode="wb", mtime=0
-            ) as gzip_stream,
-            io.TextIOWrapper(gzip_stream, encoding="utf-8", newline="") as text_stream,
-        ):
+        # Compress into memory rather than onto the open file. Polars writes
+        # straight to the file descriptor whenever the object it is given
+        # exposes fileno(), which a wrapper chain over a real file does, so
+        # writing through GzipFile that way silently bypasses compression and
+        # produces a corrupt archive. A BytesIO has no fileno(), so the text
+        # actually goes through the compressor.
+        buffer = io.BytesIO()
+        with gzip.GzipFile(
+            filename="", fileobj=buffer, mode="wb", mtime=0
+        ) as gzip_stream, io.TextIOWrapper(
+            gzip_stream, encoding="utf-8", newline=""
+        ) as text_stream:
             table.write_csv(
                 text_stream,
                 separator="\t",
                 include_header=include_header,
                 null_value="n/a",
             )
+        destination.write_bytes(buffer.getvalue())
     else:
         table.write_csv(
             destination,
