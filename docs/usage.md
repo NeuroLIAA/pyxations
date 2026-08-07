@@ -159,7 +159,7 @@ Pyxations accepts one of three segmentation strategies, picked by which kwargs y
 2. `start_msgs` + `durations`: fixed-duration trials anchored at each start message.
 3. `start_times` + `end_times`: explicit per-trial timestamps (typically loaded from a behavioral log).
 
-See [`pyxations.pre_processing`](api_reference.md#pre_processing) for the full segmentation API.
+See [`pyxations.pre_processing`](api/preprocessing.md) for the full segmentation API.
 
 ### Detection algorithms
 
@@ -168,7 +168,7 @@ See [`pyxations.pre_processing`](api_reference.md#pre_processing) for the full s
 - **`eyelink`**: reuses EyeLink-reported events and is available only for
   EyeLink source recordings.
 
-See [`pyxations.methods.eyemovement`](api_reference.md#methodseyemovement) for parameters specific to each algorithm.
+See [`pyxations.methods.eyemovement`](api/detection.md) for parameters specific to each algorithm.
 
 ## 3. Load and analyze derivatives
 
@@ -257,7 +257,7 @@ vis.sacc_amplitude(session.saccades())
 vis.sacc_main_sequence(session.saccades())
 ```
 
-See [`pyxations.visualization`](api_reference.md#visualization) for the full plot catalog.
+See [`pyxations.visualization`](api/visualization.md) for the full plot catalog.
 
 ## Worked examples
 

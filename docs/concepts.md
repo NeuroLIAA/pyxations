@@ -100,7 +100,7 @@ When the source is EyeLink, the tracker's own event reports are retained in the
 raw BIDS `physioevents.tsv.gz`, so they can be selected as the derivative event
 source or compared with another detector without reading the ASC/EDF again.
 
-See [`pyxations.methods.eyemovement`](api_reference.md#methodseyemovement) for each algorithm's parameters and references.
+See [`pyxations.methods.eyemovement`](api/detection.md) for each algorithm's parameters and references.
 
 ## Supported input formats
 

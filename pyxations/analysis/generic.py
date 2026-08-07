@@ -28,6 +28,14 @@ class SessionQualityAssessment:
 
     @property
     def bad_trial_fraction(self) -> float:
+        """Fraction of assessed trials that were flagged as bad.
+
+        Returns
+        -------
+        float
+            ``len(bad_trials) / total_trials``, or ``0.0`` when the session
+            holds no trials.
+        """
         if self.total_trials == 0:
             return 0.0
         return len(self.bad_trials) / self.total_trials
@@ -210,6 +218,51 @@ def _parse_validations(df: pl.DataFrame) -> pl.DataFrame:
 
 
 class Experiment:
+    """Top level of the analysis hierarchy for one BIDS dataset.
+
+    An ``Experiment`` reads ``participants.tsv`` from the raw BIDS dataset and
+    builds a :class:`Subject` for every participant that is not excluded. The
+    matching ``*_derivatives`` dataset is located automatically from
+    ``dataset_path``; the derivative tables themselves are only read once
+    :meth:`load_data` is called.
+
+    The hierarchy is ``Experiment -> Subject -> Session -> Trial``. Table
+    accessors such as :meth:`fixations` are available at every level and always
+    return a Polars DataFrame with the identifiers of that level attached.
+
+    Parameters
+    ----------
+    dataset_path : str
+        Path to the **raw** BIDS dataset. The derivatives dataset is expected
+        as a sibling directory with the ``_derivatives`` suffix.
+    excluded_subjects : list, optional
+        Subject identifiers to skip. Matched against both the BIDS
+        ``subject_id`` and the original ``old_subject_id``.
+    excluded_sessions : dict, optional
+        Mapping of ``subject_id`` to a list of session identifiers to skip.
+    excluded_trials : dict, optional
+        Mapping of ``subject_id`` to a ``{session_id: [trial_number, ...]}``
+        mapping of trials to skip.
+
+    Attributes
+    ----------
+    dataset_path : pathlib.Path
+        Root of the raw BIDS dataset.
+    derivatives_path : pathlib.Path
+        Root of the linked BIDS Derivatives dataset.
+    metadata : polars.DataFrame
+        Contents of ``participants.tsv``.
+    subjects : dict
+        Mapping of ``subject_id`` to :class:`Subject`.
+
+    Examples
+    --------
+    >>> exp = Experiment(dataset_path="generated/example_dataset")
+    >>> exp.load_data("eyelink")
+    >>> exp.fixations().height  # doctest: +SKIP
+    1234
+    """
+
     def __init__(
         self,
         dataset_path: str,
@@ -271,16 +324,54 @@ class Experiment:
         return f"Experiment = '{self.dataset_path.name}'"
 
     def load_data(self, detection_algorithm: str):
+        """Load derivative tables for every subject in the experiment.
+
+        Must be called once before any table accessor or plotting method. The
+        algorithm name selects which set of derivatives to read, so it has to
+        match the ``detection_algorithm`` used in
+        :func:`~pyxations.compute_derivatives_for_dataset`.
+
+        Parameters
+        ----------
+        detection_algorithm : str
+            Name of the eye-movement detection algorithm whose derivatives
+            should be loaded, such as ``"eyelink"``, ``"engbert"`` or
+            ``"remodnav"``.
+        """
         self.detection_algorithm = detection_algorithm
         for subject in self.subjects.values():
             subject.load_data(detection_algorithm)
 
     def plot_multipanel(self, display: bool):
+        """Plot summary panels of fixations and saccades for the whole dataset.
+
+        Renders fixation duration, saccade amplitude, saccade direction and
+        main-sequence panels from the pooled tables of every subject. The
+        figure is written under ``<derivatives>/figures/group/``.
+
+        Parameters
+        ----------
+        display : bool
+            Whether to show the figure interactively in addition to saving it.
+        """
         visualization_root = self.derivatives_path / "figures" / "group"
         vis = Visualization(visualization_root, self.detection_algorithm)
         vis.plot_multipanel(self.fixations(), self.saccades(), display)
 
     def filter_fixations(self, min_fix_dur=50, print_flag=True):
+        """Drop short fixations from every trial in the experiment.
+
+        Modifies the loaded tables in place. Saccades adjacent to the removed
+        fixations are updated accordingly at the trial level.
+
+        Parameters
+        ----------
+        min_fix_dur : int, default 50
+            Minimum fixation duration to keep, in milliseconds. Fixations
+            shorter than this are removed.
+        print_flag : bool, default True
+            Whether to print how many fixations were removed.
+        """
         amount_fix = self.fixations().shape[0]
         for subject in self.subjects.values():
             subject.filter_fixations(min_fix_dur)
@@ -291,6 +382,20 @@ class Experiment:
             )
 
     def collapse_fixations(self, threshold_px: float, print_flag=True):
+        """Merge consecutive fixations that fall close together in space.
+
+        Consecutive fixations separated by less than ``threshold_px`` are
+        merged into a single fixation whose duration spans both. Modifies the
+        loaded tables in place.
+
+        Parameters
+        ----------
+        threshold_px : float
+            Maximum distance, in pixels, between two consecutive fixations for
+            them to be merged.
+        print_flag : bool, default True
+            Whether to print how many fixations were merged away.
+        """
         amount_fix = self.fixations().shape[0]
         for subject in self.subjects.values():
             subject.collapse_fixations(threshold_px)
@@ -313,6 +418,25 @@ class Experiment:
         ``session_bad_trial_threshold``. Otherwise, only its bad trials are
         removed. Subjects left without sessions are removed from the
         experiment.
+
+        Parameters
+        ----------
+        phase : str
+            Name of the trial phase to assess, as defined by the
+            ``start_msgs``/``end_msgs`` used during segmentation.
+        trial_nan_threshold : float, default 0.1
+            Maximum fraction of bad samples a trial may contain before it is
+            considered bad.
+        session_bad_trial_threshold : float, default 0.1
+            Maximum fraction of bad trials a session may contain before the
+            whole session is removed instead of only its bad trials.
+        print_flag : bool, default True
+            Whether to print a summary of what was removed.
+
+        Returns
+        -------
+        QualityFilterResult
+            Counts of the trials, sessions and subjects that were removed.
         """
 
         result = QualityFilterResult()
@@ -335,6 +459,21 @@ class Experiment:
         return result
 
     def drop_trials_longer_than(self, seconds, phase, print_flag=True):
+        """Remove trials whose duration exceeds a limit.
+
+        Useful for discarding trials in which the participant did not respond
+        or the recording ran on past the end of the task.
+
+        Parameters
+        ----------
+        seconds : float
+            Maximum trial duration to keep, in seconds.
+        phase : str
+            Name of the trial phase whose duration is measured, as defined by
+            the ``start_msgs``/``end_msgs`` used during segmentation.
+        print_flag : bool, default True
+            Whether to print how many trials were removed.
+        """
         amount_trials_total = self.rts().shape[0]
         for subject in list(self.subjects.values()):
             subject.drop_trials_longer_than(seconds, phase, False)
@@ -344,14 +483,39 @@ class Experiment:
             )
 
     def plot_scanpaths(self, screen_height, screen_width, display: bool = False):
+        """Plot the scanpath of every trial of every subject.
+
+        Figures are written under ``<derivatives>/figures/`` following the
+        subject and session hierarchy.
+
+        Parameters
+        ----------
+        screen_height : int
+            Height of the stimulus screen in pixels, used to set the plot
+            limits.
+        screen_width : int
+            Width of the stimulus screen in pixels, used to set the plot
+            limits.
+        display : bool, default False
+            Whether to show each figure interactively in addition to saving it.
+        """
         for subject in self.subjects.values():
             subject.plot_scanpaths(screen_height, screen_width, display)
 
     def drop_poor_or_non_calibrated_trials(self, threshold=1.0, print_flag=True):
-        """
-        Drop trials that are not calibrated or have a poor calibration.
-        A trial is considered not calibrated if there is no validation data for its calibration index.
-        A trial is considered poorly calibrated if the average error is greater than the threshold.
+        """Drop trials that are uncalibrated or poorly calibrated.
+
+        A trial is considered uncalibrated when no validation data exists for
+        its calibration index, and poorly calibrated when the average
+        validation error exceeds ``threshold``.
+
+        Parameters
+        ----------
+        threshold : float, default 1.0
+            Maximum average validation error to keep, in degrees of visual
+            angle.
+        print_flag : bool, default True
+            Whether to print how many trials were removed.
         """
         amount_trials_total = self.rts().shape[0]
         for subject in list(self.subjects.values()):
@@ -362,23 +526,95 @@ class Experiment:
             )
 
     def rts(self):
+        """Return response times for every trial in the experiment.
+
+        Returns
+        -------
+        polars.DataFrame
+            One row per trial, with ``subject_id`` and ``session_id``
+            identifying its origin.
+        """
         return _collect_frames(self.subjects.values(), "rts")
 
     def get_subject(self, subject_id):
+        """Return one subject by identifier.
+
+        Parameters
+        ----------
+        subject_id : str
+            BIDS subject identifier, without the ``sub-`` prefix.
+
+        Returns
+        -------
+        Subject
+            The requested subject.
+
+        Raises
+        ------
+        KeyError
+            If the subject is not part of the experiment, for instance because
+            it was excluded at construction time.
+        """
         return self.subjects[subject_id]
 
     def get_session(self, subject_id, session_id):
+        """Return one session by subject and session identifier.
+
+        Parameters
+        ----------
+        subject_id : str
+            BIDS subject identifier, without the ``sub-`` prefix.
+        session_id : str
+            BIDS session identifier, without the ``ses-`` prefix.
+
+        Returns
+        -------
+        Session
+            The requested session.
+        """
         subject = self.get_subject(subject_id)
         return subject.get_session(session_id)
 
     def get_trial(self, subject_id, session_id, trial_number):
+        """Return one trial by subject, session and trial number.
+
+        Parameters
+        ----------
+        subject_id : str
+            BIDS subject identifier, without the ``sub-`` prefix.
+        session_id : str
+            BIDS session identifier, without the ``ses-`` prefix.
+        trial_number : int
+            Zero-based trial index within the session.
+
+        Returns
+        -------
+        Trial
+            The requested trial.
+        """
         session = self.get_session(subject_id, session_id)
         return session.get_trial(trial_number)
 
     def fixations(self):
+        """Return detected fixations from every loaded subject.
+
+        Returns
+        -------
+        polars.DataFrame
+            Pooled fixation table. Empty if :meth:`load_data` has not been
+            called or no fixations were detected.
+        """
         return _collect_frames(self.subjects.values(), "fixations")
 
     def saccades(self):
+        """Return detected saccades from every loaded subject.
+
+        Returns
+        -------
+        polars.DataFrame
+            Pooled saccade table. Empty if :meth:`load_data` has not been
+            called or no saccades were detected.
+        """
         return _collect_frames(self.subjects.values(), "saccades")
 
     def blinks(self):
@@ -390,19 +626,60 @@ class Experiment:
         return _collect_frames(self.subjects.values(), "pupil_samples")
 
     def samples(self):
+        """Return processed gaze samples from every loaded subject.
+
+        Returns
+        -------
+        polars.DataFrame
+            Pooled sample-level table. This is the largest table in the
+            hierarchy; prefer accessing it from a single session or trial when
+            working with big datasets.
+        """
         return _collect_frames(self.subjects.values(), "samples")
 
     def remove_subject(self, subject_id):
+        """Drop a subject from the experiment.
+
+        Does nothing if the subject is not present, so it is safe to call
+        repeatedly.
+
+        Parameters
+        ----------
+        subject_id : str
+            BIDS subject identifier, without the ``sub-`` prefix.
+        """
         if subject_id in self.subjects:
             del self.subjects[subject_id]
 
     def calib_data(self):
+        """Return parsed calibration validations for every subject.
+
+        Only meaningful for recordings that report calibration blocks, such as
+        EyeLink ``!CAL VALIDATION`` messages.
+
+        Returns
+        -------
+        calib_data : polars.DataFrame
+            One row per validation, with average and maximum error, offsets and
+            the recorded eye.
+        calib_indexes : polars.DataFrame
+            Mapping of each trial to the calibration block that applies to it.
+        """
         calib_data = [subject.calib_data() for subject in self.subjects.values()]
         calib_indexes = pl.concat([calib_data[1] for calib_data in calib_data])
         calib_data = pl.concat([calib_data[0] for calib_data in calib_data])
         return calib_data, calib_indexes
 
     def plot_calib_data(self):
+        """Plot a heatmap of calibration error per subject and trial.
+
+        Each cell shows the average validation error, in degrees, of the
+        best-calibrated eye for the calibration block that applies to that
+        trial. Trials without validation data are drawn in the ``under`` colour
+        so that uncalibrated stretches of a session are visible at a glance.
+
+        The figure is shown interactively and not saved to disk.
+        """
         # Step 0: Load and preprocess
         calib_data = self.calib_data()
         trial_numbers = calib_data[1]
@@ -526,6 +803,37 @@ class Experiment:
 
 
 class Subject:
+    """One participant of an :class:`Experiment`.
+
+    Sessions are discovered lazily from the subject's directory in the
+    derivatives dataset the first time :attr:`sessions` is accessed, so
+    constructing a ``Subject`` does not touch the filesystem beyond building
+    its paths.
+
+    Subjects are normally created by :class:`Experiment` rather than directly.
+
+    Parameters
+    ----------
+    subject_id : str
+        BIDS subject identifier, without the ``sub-`` prefix.
+    old_subject_id : str
+        Identifier the subject had in the original vendor recording, preserved
+        during conversion so results can be traced back to the source files.
+    experiment : Experiment
+        Parent experiment. Held as a weak reference to avoid a reference cycle.
+    excluded_sessions : list, optional
+        Session identifiers to skip.
+    excluded_trials : dict, optional
+        Mapping of ``session_id`` to a list of trial numbers to skip.
+
+    Attributes
+    ----------
+    subject_dataset_path : pathlib.Path
+        Subject directory inside the raw BIDS dataset.
+    subject_derivatives_path : pathlib.Path
+        Subject directory inside the derivatives dataset.
+    """
+
     def __init__(
         self,
         subject_id: str,
@@ -551,6 +859,15 @@ class Subject:
 
     @property
     def sessions(self):
+        """Sessions of this subject, discovered lazily on first access.
+
+        Returns
+        -------
+        dict
+            Mapping of ``session_id`` to :class:`Session`, ordered by the
+            ``ses-*`` directory names found in the derivatives dataset and
+            excluding any session listed in ``excluded_sessions``.
+        """
         if self._sessions is None:
             session_folders = sorted(self.subject_derivatives_path.glob("ses-*"))
             self._sessions = {
@@ -581,6 +898,17 @@ class Subject:
         return f"Subject = '{self.subject_id}', " + self.experiment().__repr__()
 
     def remove_session(self, session_id):
+        """Drop a session from this subject.
+
+        When the last session is removed, the subject removes itself from its
+        parent experiment, since a subject without sessions carries no data.
+
+        Parameters
+        ----------
+        session_id : str
+            BIDS session identifier, without the ``ses-`` prefix. Ignored if
+            the session is not present.
+        """
         if self._sessions and session_id in self._sessions:
             del self._sessions[session_id]
             if len(self._sessions) == 0:
@@ -591,15 +919,39 @@ class Subject:
                 self.experiment = lambda: None
 
     def load_data(self, detection_algorithm: str):
+        """Load derivative tables for every session of this subject.
+
+        Parameters
+        ----------
+        detection_algorithm : str
+            Name of the eye-movement detection algorithm whose derivatives
+            should be loaded, such as ``"eyelink"``, ``"engbert"`` or
+            ``"remodnav"``.
+        """
         self.detection_algorithm = detection_algorithm
         for session in self.sessions.values():
             session.load_data(detection_algorithm)
 
     def filter_fixations(self, min_fix_dur=50):
+        """Drop short fixations from every session of this subject.
+
+        Parameters
+        ----------
+        min_fix_dur : int, default 50
+            Minimum fixation duration to keep, in milliseconds.
+        """
         for session in self.sessions.values():
             session.filter_fixations(min_fix_dur)
 
     def collapse_fixations(self, threshold_px: float):
+        """Merge nearby consecutive fixations in every session of this subject.
+
+        Parameters
+        ----------
+        threshold_px : float
+            Maximum distance, in pixels, between two consecutive fixations for
+            them to be merged.
+        """
         for session in self.sessions.values():
             session.collapse_fixations(threshold_px)
 
@@ -610,7 +962,35 @@ class Subject:
         session_bad_trial_threshold=0.1,
         print_flag=True,
     ):
-        """Apply the session-or-trial quality policy to this subject."""
+        """Apply the session-or-trial quality policy to this subject.
+
+        Each session is assessed before it is modified. A session whose
+        fraction of bad trials exceeds ``session_bad_trial_threshold`` is
+        removed entirely; otherwise only its bad trials are dropped.
+
+        Parameters
+        ----------
+        phase : str
+            Name of the trial phase to assess.
+        trial_nan_threshold : float, default 0.1
+            Maximum fraction of bad samples a trial may contain before it is
+            considered bad.
+        session_bad_trial_threshold : float, default 0.1
+            Maximum fraction of bad trials a session may contain before the
+            whole session is removed.
+        print_flag : bool, default True
+            Whether to print a summary of what was removed.
+
+        Returns
+        -------
+        QualityFilterResult
+            Counts of the trials and sessions that were removed.
+
+        Raises
+        ------
+        ValueError
+            If ``session_bad_trial_threshold`` is outside ``[0, 1]``.
+        """
 
         if not 0 <= session_bad_trial_threshold <= 1:
             raise ValueError(
@@ -638,10 +1018,19 @@ class Subject:
         return result
 
     def drop_poor_or_non_calibrated_trials(self, threshold=1.0, print_flag=True):
-        """
-        Drop trials that are not calibrated or have a poor calibration.
-        A trial is considered not calibrated if there is no validation data for its calibration index.
-        A trial is considered poorly calibrated if the average error is greater than the threshold.
+        """Drop trials that are uncalibrated or poorly calibrated.
+
+        A trial is considered uncalibrated when no validation data exists for
+        its calibration index, and poorly calibrated when the average
+        validation error exceeds ``threshold``.
+
+        Parameters
+        ----------
+        threshold : float, default 1.0
+            Maximum average validation error to keep, in degrees of visual
+            angle.
+        print_flag : bool, default True
+            Whether to print how many trials were removed.
         """
         amount_trials_total = self.rts().shape[0]
         for session in list(self.sessions.values()):
@@ -652,6 +1041,17 @@ class Subject:
             )
 
     def drop_trials_longer_than(self, seconds, phase, print_flag=True):
+        """Remove trials of this subject whose duration exceeds a limit.
+
+        Parameters
+        ----------
+        seconds : float
+            Maximum trial duration to keep, in seconds.
+        phase : str
+            Name of the trial phase whose duration is measured.
+        print_flag : bool, default True
+            Whether to print how many trials were removed.
+        """
         amount_trials_total = self.rts().shape[0]
         for session in list(self.sessions.values()):
             session.drop_trials_longer_than(seconds, phase, False)
@@ -661,10 +1061,28 @@ class Subject:
             )
 
     def plot_scanpaths(self, screen_height, screen_width, display: bool = False):
+        """Plot the scanpath of every trial of this subject.
+
+        Parameters
+        ----------
+        screen_height : int
+            Height of the stimulus screen in pixels.
+        screen_width : int
+            Width of the stimulus screen in pixels.
+        display : bool, default False
+            Whether to show each figure interactively in addition to saving it.
+        """
         for session in self.sessions.values():
             session.plot_scanpaths(screen_height, screen_width, display)
 
     def rts(self):
+        """Return response times with the subject identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            One row per trial, with a ``subject_id`` column.
+        """
         return _collect_frames(
             self.sessions.values(),
             "rts",
@@ -672,13 +1090,52 @@ class Subject:
         )
 
     def get_session(self, session_id):
+        """Return one session by identifier.
+
+        Parameters
+        ----------
+        session_id : str
+            BIDS session identifier, without the ``ses-`` prefix.
+
+        Returns
+        -------
+        Session
+            The requested session.
+
+        Raises
+        ------
+        KeyError
+            If the session is not part of this subject.
+        """
         return self.sessions[session_id]
 
     def get_trial(self, session_id, trial_number):
+        """Return one trial by session identifier and trial number.
+
+        Parameters
+        ----------
+        session_id : str
+            BIDS session identifier, without the ``ses-`` prefix.
+        trial_number : int
+            Zero-based trial index within the session.
+
+        Returns
+        -------
+        Trial
+            The requested trial.
+        """
         session = self.get_session(session_id)
         return session.get_trial(trial_number)
 
     def fixations(self):
+        """Return fixations with the subject identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            Fixation table pooled across sessions, with a ``subject_id``
+            column.
+        """
         return _collect_frames(
             self.sessions.values(),
             "fixations",
@@ -686,6 +1143,13 @@ class Subject:
         )
 
     def saccades(self):
+        """Return saccades with the subject identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            Saccade table pooled across sessions, with a ``subject_id`` column.
+        """
         return _collect_frames(
             self.sessions.values(),
             "saccades",
@@ -709,6 +1173,14 @@ class Subject:
         )
 
     def samples(self):
+        """Return processed gaze samples with the subject identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            Sample-level table pooled across sessions, with a ``subject_id``
+            column.
+        """
         return _collect_frames(
             self.sessions.values(),
             "samples",
@@ -716,6 +1188,16 @@ class Subject:
         )
 
     def calib_data(self):
+        """Return parsed calibration validations for every session.
+
+        Returns
+        -------
+        calib_data : polars.DataFrame
+            One row per validation, with a ``subject_id`` column.
+        calib_indexes : polars.DataFrame
+            Mapping of each trial to its calibration block, with a
+            ``subject_id`` column.
+        """
         calib_data = [session.calib_data() for session in self.sessions.values()]
         calib_indexes = pl.concat(
             [calib_data[1] for calib_data in calib_data]
@@ -735,6 +1217,37 @@ class Subject:
 
 
 class Session:
+    """One recording session of a :class:`Subject`.
+
+    A session owns the derivative tables actually read from disk: processed
+    samples, fixations, saccades, blinks and messages. :meth:`load_data` reads
+    them once and splits them into :class:`Trial` objects, which then share
+    slices of the same tables.
+
+    Sessions are normally created by :class:`Subject` rather than directly.
+
+    Parameters
+    ----------
+    session_id : str
+        BIDS session identifier, without the ``ses-`` prefix.
+    subject : Subject
+        Parent subject. Held as a weak reference to avoid a reference cycle.
+    excluded_trials : list, optional
+        Trial numbers to skip when building the trial hierarchy.
+
+    Attributes
+    ----------
+    session_dataset_path : pathlib.Path
+        Session directory inside the raw BIDS dataset.
+    session_derivatives_path : pathlib.Path
+        Session directory inside the derivatives dataset.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the session directory does not exist in the derivatives dataset.
+    """
+
     def __init__(
         self,
         session_id: str,
@@ -760,6 +1273,18 @@ class Session:
 
     @property
     def trials(self):
+        """Trials of this session, keyed by trial number.
+
+        Returns
+        -------
+        dict
+            Mapping of ``trial_number`` to :class:`Trial`.
+
+        Raises
+        ------
+        ValueError
+            If :meth:`load_data` has not been called yet.
+        """
         if self._trials is None:
             raise ValueError("Trials not loaded. Please load data first.")
         return self._trials
@@ -770,10 +1295,29 @@ class Session:
     def assess_trial_quality(
         self, phase, trial_nan_threshold=0.1
     ) -> SessionQualityAssessment:
-        """Classify trials without modifying the session.
+        """Classify trials as good or bad without modifying the session.
 
-        ``trial_nan_threshold`` is the largest allowed fraction of invalid gaze
-        samples in an individual trial.
+        Assessing before removing keeps the bad-trial fraction meaningful: it
+        is computed against the original number of trials rather than against a
+        set that is shrinking as trials are dropped.
+
+        Parameters
+        ----------
+        phase : str
+            Name of the trial phase to assess.
+        trial_nan_threshold : float, default 0.1
+            Largest allowed fraction of invalid gaze samples in an individual
+            trial.
+
+        Returns
+        -------
+        SessionQualityAssessment
+            The trials flagged as bad and the total number assessed.
+
+        Raises
+        ------
+        ValueError
+            If ``trial_nan_threshold`` is outside ``[0, 1]``.
         """
 
         if not 0 <= trial_nan_threshold <= 1:
@@ -803,7 +1347,25 @@ class Session:
     def remove_bad_trials(
         self, phase, trial_nan_threshold=0.1, print_flag=True
     ) -> int:
-        """Remove individual bad trials without applying a session policy."""
+        """Remove individual bad trials without applying a session policy.
+
+        Unlike :meth:`Subject.remove_bad_trials_and_sessions`, this never
+        removes the session itself, however many trials turn out to be bad.
+
+        Parameters
+        ----------
+        phase : str
+            Name of the trial phase to assess.
+        trial_nan_threshold : float, default 0.1
+            Largest allowed fraction of invalid gaze samples in a trial.
+        print_flag : bool, default True
+            Whether to print how many trials were removed.
+
+        Returns
+        -------
+        int
+            Number of trials removed.
+        """
 
         assessment = self.assess_trial_quality(phase, trial_nan_threshold)
         removed = self._remove_assessed_bad_trials(assessment)
@@ -812,10 +1374,19 @@ class Session:
         return removed
 
     def drop_poor_or_non_calibrated_trials(self, threshold=1.0, print_flag=True):
-        """
-        Drop trials that are not calibrated or have a poor calibration.
-        A trial is considered not calibrated if there is no validation data for its calibration index.
-        A trial is considered poorly calibrated if the average error is greater than the threshold.
+        """Drop trials that are uncalibrated or poorly calibrated.
+
+        A trial is considered uncalibrated when no validation data exists for
+        its calibration index, and poorly calibrated when the average
+        validation error exceeds ``threshold``.
+
+        Parameters
+        ----------
+        threshold : float, default 1.0
+            Maximum average validation error to keep, in degrees of visual
+            angle.
+        print_flag : bool, default True
+            Whether to print how many trials were removed.
         """
         trial_numbers = list(self.trials)
         # Step 1: Get only rows with max validation_id per group
@@ -863,6 +1434,17 @@ class Session:
             print(f"Removed {len(bad_trials)} trials with poor calibration.")
 
     def drop_trials_longer_than(self, seconds, phase, print_flag=True):
+        """Remove trials of this session whose duration exceeds a limit.
+
+        Parameters
+        ----------
+        seconds : float
+            Maximum trial duration to keep, in seconds.
+        phase : str
+            Name of the trial phase whose duration is measured.
+        print_flag : bool, default True
+            Whether to print how many trials were removed.
+        """
 
         # Filter bad trials
 
@@ -878,6 +1460,22 @@ class Session:
             print(f"Removed {len(bad_trials)} trials longer than {seconds} seconds.")
 
     def load_data(self, detection_algorithm: str):
+        """Read this session's derivative tables and build its trials.
+
+        Reads the processed samples, fixations, saccades, blinks and
+        calibration report written by
+        :func:`~pyxations.compute_derivatives_for_dataset`, then partitions
+        them by trial number into :class:`Trial` objects. Trials listed in
+        ``excluded_trials`` and the ``-1`` bucket of samples that fall outside
+        any trial are dropped.
+
+        Parameters
+        ----------
+        detection_algorithm : str
+            Name of the eye-movement detection algorithm whose derivatives
+            should be loaded, such as ``"eyelink"``, ``"engbert"`` or
+            ``"remodnav"``.
+        """
         self.detection_algorithm = detection_algorithm
         bundle = BIDSDerivativeExport().read_session(
             self.session_derivatives_path, detection_algorithm
@@ -907,6 +1505,22 @@ class Session:
         self._init_trials(samples, fix, sacc, blink, events_path)
 
     def calib_data(self):
+        """Return parsed calibration validations for this session.
+
+        Returns
+        -------
+        calibration : polars.DataFrame
+            One row per validation, with average and maximum error, offsets,
+            the recorded eye and a ``session_id`` column.
+        calib_indexes : polars.DataFrame
+            Mapping of each trial to the calibration block that applies to it.
+
+        Raises
+        ------
+        ValueError
+            If :meth:`load_data` has not been called, or if the recording
+            contains no calibration report.
+        """
         if self._calib_data is None:
             raise ValueError(
                 f"Calibration data for session {self.session_id} and subject {self.subject().subject_id} not loaded. Please load data first."
@@ -957,6 +1571,17 @@ class Session:
         }
 
     def plot_scanpaths(self, screen_height, screen_width, display: bool = False):
+        """Plot the scanpath of every trial of this session.
+
+        Parameters
+        ----------
+        screen_height : int
+            Height of the stimulus screen in pixels.
+        screen_width : int
+            Width of the stimulus screen in pixels.
+        display : bool, default False
+            Whether to show each figure interactively in addition to saving it.
+        """
         for trial in self.trials.values():
             trial.plot_scanpath(screen_height, screen_width, display=display)
 
@@ -970,17 +1595,57 @@ class Session:
         return len(self.trials)
 
     def get_trial(self, trial_number):
+        """Return one trial by number.
+
+        Parameters
+        ----------
+        trial_number : int
+            Zero-based trial index within the session.
+
+        Returns
+        -------
+        Trial
+            The requested trial.
+
+        Raises
+        ------
+        KeyError
+            If the trial is not part of this session, for instance because it
+            was excluded or removed by a quality filter.
+        """
         return self._trials[trial_number]
 
     def filter_fixations(self, min_fix_dur=50):
+        """Drop short fixations from every trial of this session.
+
+        Parameters
+        ----------
+        min_fix_dur : int, default 50
+            Minimum fixation duration to keep, in milliseconds.
+        """
         for trial in self.trials.values():
             trial.filter_fixations(min_fix_dur)
 
     def collapse_fixations(self, threshold_px: float):
+        """Merge nearby consecutive fixations in every trial of this session.
+
+        Parameters
+        ----------
+        threshold_px : float
+            Maximum distance, in pixels, between two consecutive fixations for
+            them to be merged.
+        """
         for trial in self.trials.values():
             trial.collapse_fixations(threshold_px)
 
     def rts(self):
+        """Return response times with the session identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            One row per trial, with a ``session_id`` column.
+        """
         return _collect_frames(
             self.trials.values(),
             "rts",
@@ -988,6 +1653,13 @@ class Session:
         )
 
     def fixations(self):
+        """Return fixations with the session identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            Fixation table pooled across trials, with a ``session_id`` column.
+        """
         return _collect_frames(
             self.trials.values(),
             "fixations",
@@ -995,6 +1667,13 @@ class Session:
         )
 
     def saccades(self):
+        """Return saccades with the session identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            Saccade table pooled across trials, with a ``session_id`` column.
+        """
         return _collect_frames(
             self.trials.values(),
             "saccades",
@@ -1018,6 +1697,14 @@ class Session:
         )
 
     def samples(self):
+        """Return processed gaze samples with the session identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            Sample-level table pooled across trials, with a ``session_id``
+            column.
+        """
         return _collect_frames(
             self.trials.values(),
             "samples",
@@ -1025,6 +1712,17 @@ class Session:
         )
 
     def remove_trial(self, trial_number):
+        """Drop a trial from this session.
+
+        When the last trial is removed, the session removes itself from its
+        parent subject, which in turn may remove the subject from the
+        experiment.
+
+        Parameters
+        ----------
+        trial_number : int
+            Zero-based trial index. Ignored if the trial is not present.
+        """
         if self._trials and trial_number in self._trials:
             del self._trials[trial_number]
             if len(self._trials) == 0:
@@ -1036,6 +1734,45 @@ class Session:
 
 
 class Trial:
+    """One segmented trial of a :class:`Session`.
+
+    A trial holds slices of its session's tables. All timestamps are
+    normalized on construction so that the trial starts at ``t = 0``: the
+    timestamp of the first sample is subtracted from ``tSample`` and from the
+    ``tStart``/``tEnd`` of fixations, saccades and blinks. Values keep the
+    units reported by the source eye tracker.
+
+    Trials are normally created by :meth:`Session.load_data` rather than
+    directly.
+
+    Parameters
+    ----------
+    trial_number : int
+        Zero-based trial index within the session.
+    session : Session
+        Parent session.
+    samples : polars.DataFrame
+        Processed gaze samples.
+    fix : polars.DataFrame
+        Detected fixations.
+    sacc : polars.DataFrame
+        Detected saccades.
+    blink : polars.DataFrame or None
+        Detected blinks, or ``None`` when the recording reports none.
+    events_path : pathlib.Path
+        Directory where figures for this trial are written.
+    prefiltered : bool, default False
+        Whether the tables already contain only this trial's rows. When
+        ``False`` they are filtered by ``trial_number`` on construction.
+
+    Attributes
+    ----------
+    trial_number : int
+        Zero-based trial index within the session.
+    detection_algorithm : str
+        Name of the algorithm whose derivatives this trial was built from.
+    """
+
     def __init__(
         self,
         trial_number: int,
@@ -1114,13 +1851,37 @@ class Trial:
         self.detection_algorithm = events_path.name.removesuffix("_events")
 
     def fixations(self):
+        """Return the fixations detected in this trial.
+
+        Returns
+        -------
+        polars.DataFrame
+            Fixation table with ``tStart``/``tEnd`` relative to the start of
+            the trial.
+        """
         return self._fix
 
     @property
     def calib_index(self):
+        """Index of the calibration block that applies to this trial.
+
+        Returns
+        -------
+        int or None
+            The calibration index, or ``None`` when the recording reports no
+            calibration.
+        """
         return self._calib_index
 
     def saccades(self):
+        """Return the saccades detected in this trial.
+
+        Returns
+        -------
+        polars.DataFrame
+            Saccade table with ``tStart``/``tEnd`` relative to the start of the
+            trial.
+        """
         return self._sacc
 
     def blinks(self):
@@ -1163,12 +1924,37 @@ class Trial:
         return self._samples.filter(valid_pupil)
 
     def samples(self):
+        """Return the processed gaze samples of this trial.
+
+        Returns
+        -------
+        polars.DataFrame
+            Sample-level table with ``tSample`` relative to the start of the
+            trial.
+        """
         return self._samples
 
     def __repr__(self):
         return f"Trial = '{self.trial_number}', " + self.session.__repr__()
 
     def plot_scanpath(self, screen_height, screen_width, **kwargs):
+        """Plot the scanpath of this trial.
+
+        The figure is written under the trial's ``events_path``, inside the
+        derivatives ``figures/`` directory that the dataset's ``.bidsignore``
+        excludes from validation.
+
+        Parameters
+        ----------
+        screen_height : int
+            Height of the stimulus screen in pixels.
+        screen_width : int
+            Width of the stimulus screen in pixels.
+        **kwargs
+            Extra keyword arguments forwarded to
+            :meth:`~pyxations.Visualization.scanpath`, such as ``display`` or a
+            background image.
+        """
         vis = Visualization(self.events_path, self.detection_algorithm)
         self.events_path.mkdir(parents=True, exist_ok=True)
         vis.scanpath(
@@ -1189,39 +1975,55 @@ class Trial:
         background_image_path=None,
         **kwargs,
     ):
-        """
-        Create an animated visualization of eye-tracking data for this trial.
+        """Create an animated visualization of this trial's gaze data.
 
-        When a video is provided, the animation syncs gaze samples with video frames.
-        When no video is provided, gaze points are animated on a grey background or
-        a provided background image, using the sample timestamps for timing.
+        When a video is provided, gaze samples are synced with its frames. When
+        none is provided, gaze points are animated over a grey background or a
+        supplied background image, timed by the sample timestamps.
+
+        Requires the optional OpenCV dependency, installed with
+        ``pip install 'pyxations[video]'``.
 
         Parameters
         ----------
-        screen_height, screen_width
-            Stimulus resolution in pixels.
-        video_path
-            Path to a video file. If provided, gaze is overlaid on video frames.
-        background_image_path
-            Path to a background image. Only used when video_path is None.
-            If both are None, a grey background is used.
+        screen_height : int
+            Height of the stimulus screen in pixels.
+        screen_width : int
+            Width of the stimulus screen in pixels.
+        video_path : str or pathlib.Path, optional
+            Video over which gaze is overlaid.
+        background_image_path : str or pathlib.Path, optional
+            Background image, used only when ``video_path`` is omitted. With
+            neither, the background is grey.
         **kwargs
-            Additional arguments passed to Visualization.plot_animation():
-            - folder_path: Directory to save the animation
-            - tmin, tmax: Time window in ms
-            - seconds_to_show: Limit animation to first N seconds
-            - scale_factor: Resolution scaling (default 0.5)
-            - gaze_radius: Gaze point radius in pixels
-            - gaze_color: RGB tuple for gaze color
-            - fps: Animation frames per second
-            - output_format: "matplotlib" (default), "html", "mp4", or "gif"
-            - display: If True, return HTML for notebook display
+            Extra keyword arguments forwarded to
+            :meth:`~pyxations.Visualization.plot_animation`:
+
+            folder_path : str or pathlib.Path
+                Directory in which the animation is saved.
+            tmin, tmax : int
+                Time window to animate, in milliseconds.
+            seconds_to_show : float
+                Limit the animation to the first N seconds.
+            scale_factor : float, default 0.5
+                Resolution scaling applied to the output.
+            gaze_radius : int
+                Radius of the gaze marker, in pixels.
+            gaze_color : tuple of int
+                RGB colour of the gaze marker.
+            fps : int
+                Frames per second of the animation.
+            output_format : {"matplotlib", "html", "mp4", "gif"}
+                Output format, ``"matplotlib"`` by default.
+            display : bool
+                Whether to return HTML for display in a notebook.
 
         Returns
         -------
         IPython.display.HTML or None
-            Returns HTML animation if display=True and output_format="html".
-            For output_format="matplotlib", displays in a GUI window and returns None.
+            An HTML animation when ``display=True`` and
+            ``output_format="html"``. With ``output_format="matplotlib"`` the
+            animation is shown in a GUI window and ``None`` is returned.
         """
         vis = Visualization(self.events_path, self.detection_algorithm)
         self.events_path.mkdir(parents=True, exist_ok=True)
@@ -1512,6 +2314,12 @@ class Trial:
         self._sacc = new_sac
 
     def save_rts(self):
+        """Compute and cache the response time of each phase of this trial.
+
+        The response time of a phase is the span between its first and last
+        sample. Results are cached, so calling this repeatedly is cheap and
+        subsequent calls do nothing.
+        """
         if hasattr(self, "_rts"):
             return
 
@@ -1528,11 +2336,41 @@ class Trial:
         self._rts = rts
 
     def rts(self):
+        """Return the response time of each phase of this trial.
+
+        Computes them on first access via :meth:`save_rts`.
+
+        Returns
+        -------
+        polars.DataFrame
+            One row per phase, with the ``phase`` name, its ``rt`` in the time
+            units of the recording, and ``trial_number``.
+        """
         if not hasattr(self, "_rts"):
             self.save_rts()
         return self._rts
 
     def is_trial_bad(self, phase, threshold=0.1):
+        """Report whether a phase of this trial has too many invalid samples.
+
+        Samples that fall inside a detected blink are excluded before counting,
+        since a blink is expected data loss rather than a tracking failure. Of
+        the remaining samples, one counts as bad when no gaze pair is finite or
+        when the preprocessing step flagged it in the ``bad`` column.
+
+        Parameters
+        ----------
+        phase : str
+            Name of the trial phase to assess.
+        threshold : float, default 0.1
+            Maximum tolerated fraction of bad samples.
+
+        Returns
+        -------
+        bool
+            ``True`` when the bad-sample fraction exceeds ``threshold``, or
+            when the phase contains no samples at all outside blinks.
+        """
         samples = self._samples.filter(pl.col("phase") == phase)
 
         if self._blink is not None and self._blink.height > 0:
@@ -1574,6 +2412,22 @@ class Trial:
         return bad_samples / total_samples > threshold
 
     def is_trial_longer_than(self, seconds, phase):
+        """Report whether a phase of this trial lasted longer than a limit.
+
+        Parameters
+        ----------
+        seconds : float
+            Duration limit, in seconds.
+        phase : str
+            Name of the trial phase to measure.
+
+        Returns
+        -------
+        bool
+            ``True`` when the phase lasted longer than ``seconds``. Trials
+            without data for that phase are not considered long and return
+            ``False``.
+        """
         rt_row = self.rts().filter(pl.col("phase") == phase)
         if rt_row.is_empty():
             return False  # Or True if no data should be considered long
@@ -1583,6 +2437,34 @@ class Trial:
         return self.fixations()
 
     def compute_multimatch(self, other_trial: "Trial", screen_height, screen_width):
+        """Compare this trial's scanpath with another using MultiMatch.
+
+        Requires the optional MultiMatch dependency, installed with
+        ``pip install 'pyxations[multimatch]'``.
+
+        Parameters
+        ----------
+        other_trial : Trial
+            Trial whose scanpath is compared against this one.
+        screen_height : int
+            Height of the stimulus screen in pixels.
+        screen_width : int
+            Width of the stimulus screen in pixels.
+
+        Returns
+        -------
+        list of float
+            The five MultiMatch similarity dimensions: shape, direction,
+            length, position and duration.
+
+        Raises
+        ------
+        ImportError
+            If MultiMatch is not installed.
+        ValueError
+            If either trial lacks the ``xAvg``, ``yAvg`` or ``duration``
+            fixation columns.
+        """
         trial_scanpath = _to_multimatch_scanpath(self._multimatch_fixations())
         trial_to_compare_scanpath = _to_multimatch_scanpath(
             other_trial._multimatch_fixations()

@@ -64,7 +64,7 @@ See [Usage](usage.md) for an end-to-end walkthrough.
 - [Requirements](requirements.md): Python version, `edf2asc`, dependencies.
 - [Installation](installation.md): pip, uv, from source.
 - [Usage](usage.md): end-to-end pipeline with output layout.
-- [API reference](api_reference.md): public modules and functions.
+- [API reference](api/index.md): public modules and functions.
 - [Contributing](contributing.md): dev setup, tests, building the docs.
 
 ## Citation

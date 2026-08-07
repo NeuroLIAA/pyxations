@@ -53,6 +53,25 @@ class EyeRecording:
     manufacturer: str | None = None
 
     def normalized(self) -> EyeRecording:
+        """Validate the recording and return a canonical copy of it.
+
+        Checks that the required sample columns are present, that the recorded
+        eye is one of the accepted labels and that the sampling frequency is
+        positive, then returns an equivalent recording with a float sampling
+        frequency.
+
+        Returns
+        -------
+        EyeRecording
+            A validated copy, ready to be written to BIDS.
+
+        Raises
+        ------
+        ValueError
+            If the ``timestamp``, ``x_coordinate`` or ``y_coordinate`` columns
+            are missing, if ``recorded_eye`` is not ``"left"``, ``"right"`` or
+            ``"cyclopean"``, or if ``sampling_frequency`` is not positive.
+        """
         required = ["timestamp", "x_coordinate", "y_coordinate"]
         missing = [column for column in required if column not in self.samples]
         if missing:

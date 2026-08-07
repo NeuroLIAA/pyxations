@@ -24,6 +24,29 @@ def _load_cv2():
 
 
 class Visualization:
+    """Plotting utilities for detected eye movements.
+
+    Figures are written under ``derivatives_folder_path`` in a subdirectory
+    named after the detection algorithm, so results from different detectors
+    stay side by side without overwriting each other. The derivative dataset's
+    ``.bidsignore`` excludes ``figures/``, so plotting never invalidates the
+    dataset.
+
+    Parameters
+    ----------
+    derivatives_folder_path : str or pathlib.Path
+        Directory where figures are written.
+    events_detection_algorithm : str
+        Name of the detection algorithm, used as the subdirectory name. Must be
+        a bare name, not a path.
+
+    Raises
+    ------
+    ValueError
+        If ``events_detection_algorithm`` is empty or contains path
+        separators.
+    """
+
     def __init__(self, derivatives_folder_path, events_detection_algorithm):
         self.derivatives_folder_path = Path(derivatives_folder_path)
         algorithm = str(events_detection_algorithm).strip()
@@ -320,6 +343,15 @@ class Visualization:
             plt.ion()
 
     def fix_duration(self, fixations: pl.DataFrame, axs=None):
+        """Plot the distribution of fixation durations.
+
+        Parameters
+        ----------
+        fixations : polars.DataFrame
+            Fixation table containing a ``duration`` column, in milliseconds.
+        axs : matplotlib.axes.Axes, optional
+            Axes to draw on. A new figure is created when omitted.
+        """
 
         ax = axs
         if ax is None:
@@ -337,6 +369,18 @@ class Visualization:
         ax.set_ylabel("Density")
 
     def sacc_amplitude(self, saccades: pl.DataFrame, axs=None):
+        """Plot the distribution of saccade amplitudes.
+
+        Amplitudes are histogrammed over the 0-20 degree range.
+
+        Parameters
+        ----------
+        saccades : polars.DataFrame
+            Saccade table containing an ``ampDeg`` column, in degrees of visual
+            angle.
+        axs : matplotlib.axes.Axes, optional
+            Axes to draw on. A new figure is created when omitted.
+        """
 
         ax = axs
         if ax is None:
@@ -356,6 +400,29 @@ class Visualization:
         ax.set_ylabel("Density")
 
     def sacc_direction(self, saccades: pl.DataFrame, axs=None, figs=None):
+        """Plot saccade directions as a polar histogram.
+
+        Requires the direction columns produced by
+        :meth:`~pyxations.PreProcessing.saccades_direction`.
+
+        Parameters
+        ----------
+        saccades : polars.DataFrame
+            Saccade table containing the ``deg`` and ``dir`` columns.
+        axs : matplotlib.axes.Axes, optional
+            Axes to replace with a polar subplot. A new polar figure is created
+            when omitted.
+        figs : matplotlib.figure.Figure, optional
+            Figure in which the polar subplot is created. Required when ``axs``
+            is given, since polar axes cannot be added to existing Cartesian
+            ones.
+
+        Raises
+        ------
+        ValueError
+            If the ``deg`` or ``dir`` columns are missing, meaning saccade
+            directions were not computed yet.
+        """
 
         ax = axs
         if ax is None:
@@ -397,6 +464,22 @@ class Visualization:
             bar.set_facecolor(plt.cm.Blues(radius / maximum if maximum else 0))
 
     def sacc_main_sequence(self, saccades: pl.DataFrame, axs=None, hline=None):
+        """Plot the saccadic main sequence: peak velocity against amplitude.
+
+        Drawn as a 2D histogram on logarithmic axes. Saccades with
+        non-finite or non-positive amplitude or peak velocity are excluded,
+        since they cannot be placed on a log scale.
+
+        Parameters
+        ----------
+        saccades : polars.DataFrame
+            Saccade table containing ``ampDeg`` and ``vPeak`` columns.
+        axs : matplotlib.axes.Axes, optional
+            Axes to draw on. A new figure is created when omitted.
+        hline : float, optional
+            Peak-velocity value at which to draw a labelled horizontal
+            reference line, useful for marking a detection threshold.
+        """
 
         ax = axs
         if ax is None:

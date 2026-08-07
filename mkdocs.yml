@@ -33,7 +33,15 @@ nav:
   - Quickstart: quickstart.md
   - Usage: usage.md
   - Concepts: concepts.md
-  - API reference: api_reference.md
+  - API reference:
+      - Overview: api/index.md
+      - Conversion to BIDS: api/conversion.md
+      - Preprocessing: api/preprocessing.md
+      - Event detection: api/detection.md
+      - Analysis: api/analysis.md
+      - Visual search: api/visual_search.md
+      - Visualization: api/visualization.md
+      - Data storage: api/storage.md
   - Contributing: contributing.md
   - License: license.md
 

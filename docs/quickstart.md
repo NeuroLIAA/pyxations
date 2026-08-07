@@ -82,7 +82,7 @@ TSV.GZ/JSON outputs remain validator-compatible after plotting.
 
 - [Usage](usage.md): the same pipeline applied to your own data, with details on every parameter.
 - [Concepts](concepts.md): what the BIDS and derivatives folders actually contain, and how to pick a detection algorithm.
-- [API reference](api_reference.md): every public function and class.
+- [API reference](api/index.md): every public function and class.
 
 For longer walkthroughs see the notebooks in [`notebooks/`](https://github.com/NeuroLIAA/pyxations/tree/main/notebooks):
 
