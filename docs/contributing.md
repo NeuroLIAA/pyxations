@@ -27,23 +27,20 @@ loading, scanpath visualization, and multipanel plots. Small source-only
 fixtures live under `examples/`; pytest generates raw BIDS, derivatives, and
 figures in temporary directories.
 
-BIDS raw and derivative writer tests use the official validator. Install
+BIDS raw and derivative writer tests use the official validator, in
+`test_0001_dataset_to_bids.py`, `test_0002_compute_derivatives.py` and
+`test_bids_edge_cases.py`. Install
 [Deno](https://docs.deno.com/runtime/getting_started/installation/) and run:
 
 ```bash
 deno install -ERWN -g -n bids-validator jsr:@bids/validator@3.0.1
-uv run pytest tests/test_0001_dataset_to_bids.py
+uv run pytest
 ```
 
 Without Deno or an installed `bids-validator` command, structural writer tests
-still run but official validation tests are skipped. CI always installs and
-runs the pinned validator.
-
-For coverage:
-
-```bash
-uv run pytest --cov=pyxations --cov-report=term-missing --cov-report=xml --cov-fail-under=95
-```
+still run but official validation tests are skipped, and the run reports them
+as skipped rather than passed. CI always installs and runs the pinned
+validator, so those tests are never skipped there.
 
 ## Building the docs locally
 
@@ -52,14 +49,22 @@ uv pip install -e '.[docs]'
 mkdocs serve
 ```
 
-`mkdocs serve` watches `docs/` and `mkdocs.yml` and rebuilds on save. The API reference is generated from source docstrings via [mkdocstrings](https://mkdocstrings.github.io/) (NumPy style).
+`mkdocs serve` watches `docs/` and `mkdocs.yml` and rebuilds on save. Note that
+it does **not** watch the package source, so a change to a docstring only shows
+up after restarting the server.
+
+The API reference lives in `docs/api/`, one page per pipeline stage, and is
+generated from source docstrings via
+[mkdocstrings](https://mkdocstrings.github.io/) (NumPy style). A module is only
+rendered if some page includes a `::: pyxations.<module>` directive, so a new
+module needs an entry there as well as a `nav` entry in `mkdocs.yml`.
 
 ## Coverage
 
 Run the same coverage check used by CI:
 
 ```bash
-pytest --cov=pyxations --cov-report=term-missing --cov-report=xml --cov-fail-under=95
+uv run pytest --cov=pyxations --cov-report=term-missing --cov-report=xml --cov-fail-under=95
 ```
 
 CI enforces a 95% project-wide floor and uploads the report used by the
@@ -71,12 +76,14 @@ measurement; tests should assert behavior rather than merely execute lines.
 - `pyxations/`: the package source.
     - `bids_formatting.py`, `pre_processing.py`: high-level entry points.
     - `bids.py`: vendor readers and canonical raw BIDS conversion.
+    - `behavior.py`, `psychopy.py`: behavioral table and PsychoPy log readers.
+    - `tables.py`: the in-memory table container and BIDS TSV read/write.
     - `methods/eyemovement/`: REMoDNaV, Engbert–Kliegl detectors.
     - `analysis/`: `Experiment` and paradigm-specific helpers.
     - `visualization/`: plotting utilities.
     - `export/`: canonical BIDS derivative reader and writer.
 - `tests/`: pytest suite.
-- `docs/`: MkDocs sources for this site.
+- `docs/`: MkDocs sources for this site; `docs/api/` is the API reference.
 - `notebooks/`: runnable end-to-end examples.
 - `examples/`: small source recordings used by the quickstart and integration
   tests; generated datasets are intentionally not committed.
@@ -84,5 +91,12 @@ measurement; tests should assert behavior rather than merely execute lines.
 ## Coding style
 
 - Format with `black` and lint with `ruff` (both included in the `dev` extra).
-- Public functions should have NumPy-style docstrings so they render in the API reference.
 - Add or update a test when changing behavior; keep the existing tests green.
+- Every public class, function and method needs a NumPy-style docstring. This
+  is enforced by `tests/test_docstring_coverage.py`, which also checks that
+  section headings are underlined with dashes rather than followed by a colon,
+  and that no module with public API is missing from the API reference.
+
+Public API here means module-level classes and functions plus the public
+methods of those classes. Nested helper functions are excluded: they are an
+implementation detail and are never rendered.
