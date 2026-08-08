@@ -207,6 +207,32 @@ class Visualization:
             if plot_samples:
                 samples = samples.filter(pl.col("phase") != "")
 
+        # Rows the preprocessing step flagged as bad hold gaze that fell off
+        # the screen or was never tracked. Drawing them stretches the scanpath
+        # towards coordinates the participant never looked at, and joins them
+        # with lines that cross the whole stimulus.
+        def _drop_bad(frame: pl.DataFrame) -> pl.DataFrame:
+            if frame is None or "bad" not in frame.columns:
+                return frame
+            return frame.filter(
+                ~pl.col("bad").cast(pl.Boolean, strict=False).fill_null(False)
+            )
+
+        fixations = _drop_bad(fixations)
+        if plot_saccades:
+            saccades = _drop_bad(saccades)
+        if plot_samples:
+            samples = _drop_bad(samples)
+        if fixations.is_empty():
+            warnings.warn(
+                "Every fixation was flagged as bad, so there is nothing to "
+                "plot. Check the screen size passed to "
+                "compute_derivatives_for_dataset.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return
+
         # ---- split once by phase --------------------------------------------------
         fix_by_phase = fixations.partition_by("phase", as_dict=True)
         sac_by_phase = (
@@ -234,7 +260,13 @@ class Visualization:
             n_fix = fx.size
             fix_idx = np.arange(1, n_fix + 1)
 
-            norm = mplcolors.BoundaryNorm(np.arange(1, n_fix + 2), cmap.N)
+            # One colour band per fixation is only possible while the colormap
+            # has enough of them. Long recordings hold thousands of fixations,
+            # so fall back to a continuous scale instead of raising.
+            if n_fix < cmap.N:
+                norm = mplcolors.BoundaryNorm(np.arange(1, n_fix + 2), cmap.N)
+            else:
+                norm = mplcolors.Normalize(vmin=1, vmax=max(n_fix, 2))
 
             # saccades
             sac_t = (

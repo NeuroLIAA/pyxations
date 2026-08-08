@@ -362,31 +362,47 @@ def process_bids_session(
         screen_width=raw.screen_width or kwargs.get("screen_width"),
         screen_height=raw.screen_height or kwargs.get("screen_height"),
     )
+    # Quality marking and saccade direction depend only on gaze coordinates,
+    # so they apply to every input format rather than to EyeLink alone. Both
+    # are skipped when the screen size is unknown, since out-of-screen samples
+    # cannot be identified without it.
+    bad_parameters = {
+        key: kwargs[key]
+        for key in (
+            "screen_height",
+            "screen_width",
+            "mark_nan_as_bad",
+            "inclusive_bounds",
+        )
+        if key in kwargs
+    }
+    screen_is_known = (
+        pre_processing.metadata.screen_width is not None
+        and pre_processing.metadata.screen_height is not None
+    )
+    quality_steps: dict = {}
+    if screen_is_known:
+        quality_steps["bad_samples"] = bad_parameters
+    # Saccade direction needs endpoint coordinates, which vendor-reported event
+    # tables do not always carry.
+    direction_columns = {"xStart", "yStart", "xEnd", "yEnd"}
+    direction_step: dict = {}
+    if direction_columns.issubset(set(pre_processing.saccades.columns)):
+        direction_step["saccades_direction"] = (
+            {"tol_deg": kwargs["tol_deg"]} if "tol_deg" in kwargs else {}
+        )
+
     segmentation = _segmentation_recipe(pre_processing, kwargs)
     if segmentation:
         name, parameters = segmentation
-        recipe = {name: parameters}
-        if dataset_format == "eyelink":
-            bad_parameters = {
-                key: kwargs[key]
-                for key in (
-                    "screen_height",
-                    "screen_width",
-                    "mark_nan_as_bad",
-                    "inclusive_bounds",
-                )
-                if key in kwargs
-            }
-            recipe = {
-                "bad_samples": bad_parameters,
-                name: parameters,
-                "saccades_direction": (
-                    {"tol_deg": kwargs["tol_deg"]} if "tol_deg" in kwargs else {}
-                ),
-            }
+        recipe = {**quality_steps, name: parameters, **direction_step}
         pre_processing.process(recipe)
     else:
+        # Recordings without synchronisation messages still deserve quality
+        # marking and saccade direction; only the segmentation step is skipped.
         _assign_default_trials(pre_processing)
+        if quality_steps or direction_step:
+            pre_processing.process({**quality_steps, **direction_step})
 
     behavioral_columns = kwargs.get("behavioral_columns")
     if behavioral_columns and not raw.behavioral_events.is_empty():
