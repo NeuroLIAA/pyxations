@@ -1,0 +1,93 @@
+name: release
+
+# Publishing is driven by GitHub Releases: tag the commit, write the notes,
+# publish, and this uploads to PyPI. Run it by hand first with dry_run to see
+# what would be uploaded without uploading it.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and check the distributions without publishing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      # The version lives in pyproject.toml and the tag is written by hand, so
+      # they can disagree. PyPI would then serve a version nobody tagged, and
+      # the release notes would describe different code.
+      - name: Check the tag against the packaged version
+        if: github.event_name == 'release'
+        run: |
+          packaged=$(uv run --no-project python -c \
+            "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          tagged="${GITHUB_REF_NAME#v}"
+          if [ "$packaged" != "$tagged" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $packaged in pyproject.toml"
+            exit 1
+          fi
+          echo "Releasing version $packaged"
+
+      - name: Build
+        run: uv build
+
+      - name: Check the metadata PyPI will read
+        run: uvx twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+  # A release that fails its own test suite should not reach PyPI. This repeats
+  # what runs on every push, against the exact commit being released.
+  test:
+    name: Test before publishing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install the official BIDS Validator
+        run: deno install -ERWN -g -n bids-validator jsr:@bids/validator@3.0.1
+
+      - run: uv sync --locked --extra dev
+
+      - run: uv run --locked pytest -vv -ra
+
+  publish:
+    name: Publish to PyPI
+    needs: [build, test]
+    if: github.event_name == 'release' || inputs.dry_run == false
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pyxations
+    permissions:
+      # Required by PyPI trusted publishing, which uploads with a short-lived
+      # OIDC token instead of a stored API token.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
