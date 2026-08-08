@@ -280,6 +280,14 @@ def _read_tobii(path: Path, *, data: pl.DataFrame | None = None) -> list[EyeReco
                     manufacturer="Tobii",
                 )
             )
+    if not recordings:
+        raise ValueError(
+            f"{path} has no Tobii gaze columns. The tobii reader expects the "
+            "tab-separated export, with Gaze2d_Left/Gaze2d_Right columns and a "
+            "recording or eyetracker timestamp. HDF5 containers written by "
+            "Titta or PsychoPy's ioHub are a different format and are not "
+            "supported yet."
+        )
     return recordings
 
 

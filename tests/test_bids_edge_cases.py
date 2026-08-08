@@ -265,3 +265,18 @@ def test_webgazer_samples_and_events_share_one_numbering(tmp_path):
     # The instruction screens survive as events but are not numbered as trials.
     assert events.get_column("trial_number").null_count() == 2
     assert events.get_column("source_trial_index").to_list() == [0, 1, 29, 30, 31, 33]
+
+
+def test_unsupported_gaze_exports_name_the_format_that_is_expected(tmp_path):
+    """A Titta or Gorilla user should learn why their file was rejected."""
+    tobii_path = tmp_path / "s01_A_task-look.txt"
+    pl.DataFrame({"Recording timestamp": [0, 1], "something_else": [1.0, 2.0]}).write_csv(
+        tobii_path, separator="\t"
+    )
+    with pytest.raises(ValueError, match="Titta"):
+        bids._read_tobii(tobii_path)
+
+    webgazer_path = tmp_path / "s01_A_task-look.csv"
+    pl.DataFrame({"trial_index": [0], "gaze": ["[]"]}).write_csv(webgazer_path)
+    with pytest.raises(ValueError, match="Gorilla"):
+        bids._read_webgazer(webgazer_path)

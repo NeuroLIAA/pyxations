@@ -130,7 +130,9 @@ supported:
 
 - `eyelink`: EDF or ASC files; EDF conversion requires `edf2asc` (see
   [Requirements](requirements.md)).
-- `tobii`: Tobii native exports.
+- `tobii`: Tobii tab-separated text exports, carrying `Gaze2d_Left`/
+  `Gaze2d_Right` columns. HDF5 containers written by Titta or PsychoPy's ioHub
+  are a different format and are not supported yet.
 - `gaze`: Gazepoint exports.
 - `webgazer`: WebGazer.js recordings exported by jsPsych, where the gaze
   samples of each trial arrive as JSON in a `webgazer_data` column. Gorilla
