@@ -60,14 +60,13 @@ subject/session tree:
 └── ...
 ```
 
-Two preprocessing steps run for every input format, not only for EyeLink.
-Samples whose gaze fell outside the screen, or was never tracked, are flagged
-in a `bad` column, provided the screen size is known either from the recording
-or from the `screen_width`/`screen_height` arguments; plotting skips them.
-Saccades gain `deg` and `dir` columns classifying their direction, whenever the
-event table carries endpoint coordinates. Both steps also run for recordings
-that carry no synchronisation messages, where only trial segmentation is
-skipped.
+Two preprocessing steps run for every input format. Samples whose gaze fell
+outside the screen, or was never tracked, are flagged in a `bad` column, which
+plotting skips; this needs the screen size, taken from the recording or from
+the `screen_width`/`screen_height` arguments. Saccades gain `deg` and `dir`
+columns classifying their direction, where the event table carries endpoint
+coordinates. Recordings without synchronisation messages get both steps; only
+trial segmentation is skipped.
 
 The processed sample stream is stored as `physio.tsv.gz`; detected fixations,
 saccades, blinks, and retained messages share its time axis in

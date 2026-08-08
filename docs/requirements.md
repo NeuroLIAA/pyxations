@@ -31,12 +31,9 @@ The default installation declares only direct dependencies shared across the pac
 - `matplotlib>=3.9.2`
 
 Raw conversion, BIDS TSV/JSON I/O, preprocessing, and analysis all use Polars
-tables. Pandas, PyArrow, and Seaborn are not direct requirements. Transitive
-dependencies are resolved by the installer and are not repeated in Pyxations
-metadata.
+tables.
 
-PsychoPy text logs are parsed directly and do not require PsychoPy to be
-installed.
+PsychoPy text logs are parsed directly, without PsychoPy installed.
 
 ## Optional feature dependencies
 
@@ -62,10 +59,9 @@ Saving an animation as MP4 also requires an `ffmpeg` executable available on
 
 ## Version policy
 
-Runtime dependencies use minimum supported versions rather than exact pins.
-This allows Pyxations to coexist with newer compatible releases and other
-scientific packages. The committed `uv.lock` records a cross-platform,
-reproducible development and release environment without enforcing those
-exact versions on library users.
+Runtime dependencies declare a minimum supported version, so Pyxations can
+coexist with newer releases of the scientific stack. The committed `uv.lock`
+pins a cross-platform development environment; it does not constrain installs
+of the library.
 
 Development and documentation tools are installed through the `dev` and `docs` optional groups.

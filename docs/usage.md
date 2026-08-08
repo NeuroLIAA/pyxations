@@ -202,9 +202,9 @@ The same `blinks()` and `pupil_samples()` accessors are available at the
 experiment, subject, session, and trial levels. `pupil_samples()` preserves
 the source tracker's pupil columns and units; consult the recording's BIDS
 JSON sidecar to determine whether the values represent diameter or area and
-which units were reported. Pyxations exposes these measurements for analysis
-but does not currently implement a complete pupillometry preprocessing
-pipeline (for example, deblinking, interpolation, or baseline correction).
+which units were reported. Pyxations exposes these measurements for analysis;
+pupillometry preprocessing such as deblinking, interpolation or baseline
+correction is left to a dedicated package.
 
 ### Trial and session quality filtering
 

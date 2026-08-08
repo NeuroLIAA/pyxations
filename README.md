@@ -62,11 +62,10 @@ Feature-specific packages are optional:
   image backgrounds.
 - `pyxations[all]` installs all three feature groups.
 
-Packages used internally by these libraries are resolved transitively and are not pinned by Pyxations. Test and documentation tools are kept in optional dependency groups.
+Test and documentation tools are kept in optional dependency groups.
 
 Canonical raw and derivative data are stored as compressed BIDS TSV/JSON, and
-the complete tabular pipeline uses Polars in memory. Pandas, PyArrow, and
-Seaborn are not direct dependencies.
+the complete tabular pipeline uses Polars in memory.
 
 
 ## Installation
