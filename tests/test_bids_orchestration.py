@@ -478,3 +478,68 @@ def test_low_rate_warning_names_the_detector_and_the_measured_rate():
     message = str(records[0].message)
     assert "5.9 Hz" in message
     assert "engbert" in message
+
+
+@pytest.mark.parametrize("rate", [5.2, 29.97, 60.0, 60.4, 250.0, 298.418, 1000.0])
+def test_savgol_window_satisfies_remodnav_at_any_rate(rate):
+    """REMoDNaV rejects a window that is not an odd number of samples."""
+    length = formatting._savgol_length_for_rate(0.19, rate)
+
+    samples = int(length * rate)
+    assert samples % 2 == 1
+    assert samples > 2  # must exceed the polynomial order
+
+
+def test_savgol_window_stays_close_to_the_requested_duration():
+    length = formatting._savgol_length_for_rate(0.19, 298.418)
+
+    assert abs(length - 0.19) < 0.01
+
+
+def test_detector_rate_prefers_the_recording_over_any_default(tmp_path, monkeypatch):
+    """A rate assumed per format put Tobii events far outside the recording."""
+    calls = {}
+
+    class FakeDetector:
+        def __init__(self, session_folder_path, samples):
+            pass
+
+        def run_eye_movement(
+            self, gazex_data, gazey_data, sample_rate, savgol_length=0.19
+        ):
+            raise AssertionError("Only the adapter should invoke this method")
+
+        def run_eye_movement_from_samples(self, sample_rate, config):
+            calls["sample_rate"] = sample_rate
+            calls["config"] = config
+            empty = pl.DataFrame(
+                schema={
+                    "tStart": pl.Float64,
+                    "tEnd": pl.Float64,
+                    "duration": pl.Float64,
+                }
+            )
+            return empty, empty
+
+    monkeypatch.setattr(formatting, "_detector_type", lambda name: FakeDetector)
+    raw = SimpleNamespace(
+        samples=pl.DataFrame({"tSample": [0.0, 5.0], "X": [1.0, 2.0], "Y": [3.0, 4.0]}),
+        fixations=pl.DataFrame(),
+        saccades=pl.DataFrame(),
+        blinks=pl.DataFrame(
+            schema={"tStart": pl.Float64, "tEnd": pl.Float64, "duration": pl.Float64}
+        ),
+        sampling_frequency=298.418,
+    )
+
+    formatting._detect_from_bids(
+        raw,
+        dataset_format="tobii",
+        detection_algorithm="remodnav",
+        session_folder_path=tmp_path,
+        kwargs={},
+    )
+
+    assert calls["sample_rate"] == pytest.approx(298.418)
+    # ... and the window follows that rate, so REMoDNaV accepts it.
+    assert int(calls["config"]["savgol_length"] * 298.418) % 2 == 1

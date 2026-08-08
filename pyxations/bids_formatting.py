@@ -27,6 +27,25 @@ EYE_MOVEMENT_DETECTION_DICT = {"engbert": EngbertDetection}
 MINIMUM_DETECTION_FREQUENCY_HZ = 50.0
 
 
+def _savgol_length_for_rate(target_seconds, sample_rate):
+    """Return a Savitzky-Golay window valid at ``sample_rate``.
+
+    REMoDNaV requires ``int(savgol_length * sample_rate)`` to be odd and
+    greater than the polynomial order, and raises otherwise. The window that
+    suits one rate therefore fails at another, so it is derived from the rate
+    rather than fixed per input format: the requested duration is rounded to
+    the nearest odd number of samples.
+    """
+
+    samples = round(float(target_seconds) * float(sample_rate))
+    if samples % 2 == 0:
+        samples += 1
+    samples = max(samples, 3)
+    # Nudge inside the sample so truncation cannot round back down to an even
+    # count, which is what the check actually looks at.
+    return (samples + 0.5) / float(sample_rate)
+
+
 def _warn_if_rate_is_too_low_to_detect(sampling_frequency, detection_algorithm):
     """Warn when a recording is too slow for velocity-based event detection."""
 
@@ -194,20 +213,20 @@ def _detect_from_bids(
         config.update(
             {key: value for key, value in kwargs.items() if key in accepted_config}
         )
-        format_rate = {
-            "webgazer": 30.0,
-            "gaze": 60.0,
-            "tobii": 60.0,
-        }.get(dataset_format)
         detector_rate = (
             kwargs.get("sample_rate")
             or kwargs.get("sampling_frequency")
-            or format_rate
             or raw.sampling_frequency
         )
         if detector_rate is None:
             raise ValueError(
                 "Sampling frequency is required for sample-based event detection"
+            )
+        # The window has to suit the rate of this recording, so it is derived
+        # from it unless the caller asked for a specific one.
+        if "savgol_length" not in kwargs:
+            config["savgol_length"] = _savgol_length_for_rate(
+                config.get("savgol_length", 0.19), detector_rate
             )
         fixations, saccades = detector.run_eye_movement_from_samples(
             detector_rate,
