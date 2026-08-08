@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import re
+import warnings
 from concurrent.futures import ProcessPoolExecutor
 from importlib import import_module
 from pathlib import Path
@@ -17,6 +18,32 @@ from pyxations.pre_processing import PreProcessing
 from pyxations.tables import SessionTables, read_tsv
 
 EYE_MOVEMENT_DETECTION_DICT = {"engbert": EngbertDetection}
+
+# A saccade lasts roughly 30 to 80 ms, so a recording needs several samples
+# within that span for a velocity-based detector to resolve one. Below this
+# rate a saccade falls between one or two samples and the detected events say
+# more about the sampling than about the eye. Webcam recordings routinely land
+# here: their rate is set by the participant's browser and machine.
+MINIMUM_DETECTION_FREQUENCY_HZ = 50.0
+
+
+def _warn_if_rate_is_too_low_to_detect(sampling_frequency, detection_algorithm):
+    """Warn when a recording is too slow for velocity-based event detection."""
+
+    if sampling_frequency is None:
+        return
+    frequency = float(sampling_frequency)
+    if not frequency > 0 or frequency >= MINIMUM_DETECTION_FREQUENCY_HZ:
+        return
+    warnings.warn(
+        f"This recording is sampled at {frequency:.1f} Hz, below the "
+        f"{MINIMUM_DETECTION_FREQUENCY_HZ:.0f} Hz that velocity-based detection "
+        f"needs to resolve a saccade, so the events {detection_algorithm} "
+        "reports will be unreliable. Consider analysing the gaze samples "
+        "directly instead of the detected events.",
+        UserWarning,
+        stacklevel=2,
+    )
 
 
 def _detector_type(name):
@@ -139,6 +166,7 @@ def _detect_from_bids(
     detector_type = _detector_type(detection_algorithm)
     if detector_type is None:
         raise ValueError(f"Unknown eye-movement detector: {detection_algorithm}")
+    _warn_if_rate_is_too_low_to_detect(raw.sampling_frequency, detection_algorithm)
     if dataset_format != "eyelink" and not {"X", "Y"}.issubset(samples.columns):
         eye_prefix = "L" if {"LX", "LY"}.issubset(samples.columns) else "R"
         expressions = [

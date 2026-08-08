@@ -1,3 +1,4 @@
+import warnings
 from types import SimpleNamespace
 
 import polars as pl
@@ -445,3 +446,35 @@ def test_default_trial_assignment_preserves_existing_trials():
     assert preprocessing.samples["trial_number"].to_list() == [0, 2, 2]
     assert preprocessing.fixations["trial_number"].to_list() == [2]
     assert {"trial_number", "phase"} <= set(preprocessing.saccades.columns)
+
+
+@pytest.mark.parametrize(
+    ("frequency", "expected"),
+    [
+        (5.9, True),  # a webcam recording
+        (49.9, True),
+        (50.0, False),  # the threshold itself is acceptable
+        (298.4, False),  # a Tobii recording
+        (None, False),  # unknown rate: nothing to judge
+        (0.0, False),  # invalid rate: reported elsewhere
+    ],
+)
+def test_low_sampling_rate_warns_before_event_detection(frequency, expected):
+    """Detected events mean little when a saccade spans barely one sample."""
+    if expected:
+        with pytest.warns(UserWarning, match="velocity-based detection"):
+            formatting._warn_if_rate_is_too_low_to_detect(frequency, "remodnav")
+        return
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        formatting._warn_if_rate_is_too_low_to_detect(frequency, "remodnav")
+
+
+def test_low_rate_warning_names_the_detector_and_the_measured_rate():
+    with pytest.warns(UserWarning) as records:
+        formatting._warn_if_rate_is_too_low_to_detect(5.92, "engbert")
+
+    message = str(records[0].message)
+    assert "5.9 Hz" in message
+    assert "engbert" in message

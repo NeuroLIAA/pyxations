@@ -111,6 +111,15 @@ source or compared with another detector without reading the ASC/EDF again.
 `remodnav` needs the optional extra of the same name; `engbert` and `eyelink`
 need nothing beyond the base install.
 
+`remodnav` and `engbert` classify events from gaze velocity, which needs
+several samples inside a saccade to work: a saccade lasts roughly 30 to 80 ms.
+Pyxations warns when a recording is sampled below 50 Hz, since at that rate a
+saccade falls between one or two samples and the detected events describe the
+sampling more than the eye. Webcam recordings can land there, because their
+rate is set by the participant's browser and machine rather than by the
+experimenter. For such recordings, analyse the gaze samples directly, as
+[`SampleVisualization`](api/visualization.md) does.
+
 See [`pyxations.methods.eyemovement`](api/detection.md) for each algorithm's parameters and references.
 
 ## Supported input formats
