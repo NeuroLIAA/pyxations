@@ -335,7 +335,12 @@ def _read_webgazer(
 ) -> list[EyeRecording]:
     source = pl.read_csv(path, infer_schema_length=None) if source is None else source
     if "webgazer_data" not in source:
-        raise ValueError(f"{path} does not contain a webgazer_data column")
+        raise ValueError(
+            f"{path} has no webgazer_data column. The webgazer reader expects "
+            "the export written by jsPsych, which carries each trial's gaze "
+            "samples as JSON in that column. Other platforms, such as Gorilla, "
+            "structure WebGazer data differently and are not supported yet."
+        )
 
     numbering = webgazer_trial_numbering(source)
     samples: list[dict[str, float]] = []

@@ -132,7 +132,9 @@ supported:
   [Requirements](requirements.md)).
 - `tobii`: Tobii native exports.
 - `gaze`: Gazepoint exports.
-- `webgazer`: WebGazer.js browser-based recordings.
+- `webgazer`: WebGazer.js recordings exported by jsPsych, where the gaze
+  samples of each trial arrive as JSON in a `webgazer_data` column. Gorilla
+  writes WebGazer data with a different structure and is not supported yet.
 
 `trial_number` is always `0, 1, 2, ...` in presentation order, whatever the
 source format. jsPsych numbers every screen it presents, including instructions
