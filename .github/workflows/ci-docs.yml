@@ -38,6 +38,13 @@ jobs:
       - name: Build the documentation
         run: uv run --locked mkdocs build --strict
 
+      # gh-pages holds a single site, so whichever branch deploys last is what
+      # the world sees. reviewer-changes is allowed to deploy while the JOSS
+      # review is open, so reviewers read the current docs rather than the
+      # revision they commented on. Drop it from this list once it merges.
       - name: Deploy
-        if: github.ref == 'refs/heads/main'
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.ref == 'refs/heads/main' ||
+           github.ref == 'refs/heads/reviewer-changes')
         run: uv run --locked mkdocs gh-deploy --force
