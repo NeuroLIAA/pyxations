@@ -59,6 +59,23 @@ generated from source docstrings via
 rendered if some page includes a `::: pyxations.<module>` directive, so a new
 module needs an entry there as well as a `nav` entry in `mkdocs.yml`.
 
+### Tutorials
+
+The notebooks under `notebooks/` are **executed on every build**, so their
+figures and tables are real output rather than something committed by hand.
+That makes them an end-to-end test: if a change breaks a tutorial, the docs
+build fails. Notebooks are therefore committed without stored outputs.
+
+`docs/tutorials` is a symlink to `notebooks/`, because MkDocs only serves files
+under `docs/`. Every notebook it reaches is executed whether or not it appears
+in the `nav`, so one that cannot run unattended has to be listed under
+`exclude_docs` in `mkdocs.yml`; `driving_animation.ipynb` is excluded because
+it needs a dataset that is not committed.
+
+Do **not** cache the executed notebooks in CI. The cache is keyed on notebook
+content, so a tutorial broken by a change in the package would still be served
+from cache and the build would pass. A full build takes about 20 seconds.
+
 ## Coverage
 
 Run the same coverage check used by CI:

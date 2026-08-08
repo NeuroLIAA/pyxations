@@ -31,3 +31,6 @@ dist/
 /.vscode 
 
 .blackignore
+
+# mkdocs-jupyter caches executed notebooks here
+.cache/

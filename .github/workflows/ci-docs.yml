@@ -5,12 +5,17 @@ on:
   push:
     branches:
       - main
+      - reviewer-changes
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  deploy:
+  docs:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,29 +26,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
 
-      - name: Install MkDocs + plugins
-        run: |
-          pip install mkdocs-material
-          pip install "mkdocstrings[python]"
-          pip install mkdocs
-          pip install mkdocs-material-extensions
+      # The tutorials are executed during the build, so the optional features
+      # they exercise have to be installed alongside the documentation tools.
+      - name: Install the package with its docs and feature extras
+        run: uv sync --locked --extra docs --extra all
 
-      - name: Install pyxations package
-        run: |
-          pip install .
+      # A build failure here means a tutorial stopped working, which is the
+      # point: they are executed on every push rather than trusted.
+      - name: Build the documentation
+        run: uv run --locked mkdocs build --strict
 
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          key: mkdocs-material-${{ github.ref }}-${{ github.run_id }}
-          path: .cache
-          restore-keys: |
-            mkdocs-material-
-
-      - name: Build and deploy docs
-        run: mkdocs gh-deploy --force
+      - name: Deploy
+        if: github.ref == 'refs/heads/main'
+        run: uv run --locked mkdocs gh-deploy --force
