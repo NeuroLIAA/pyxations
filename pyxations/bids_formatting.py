@@ -1,214 +1,752 @@
-from pathlib import Path
-import shutil
-import pandas as pd
+"""Raw-to-BIDS conversion and Polars-native derivative orchestration."""
+
+from __future__ import annotations
+
+import inspect
+import re
+import warnings
 from concurrent.futures import ProcessPoolExecutor
-from pyxations.methods.eyemovement.REMoDNaV import RemodnavDetection
+from importlib import import_module
+from pathlib import Path
+
+import polars as pl
+
+from pyxations.bids import bids_label, read_raw_bids_session, write_bids_dataset
+from pyxations.export.bids import BIDSDerivativeExport, initialize_bids_derivative
 from pyxations.methods.eyemovement.engbert import EngbertDetection
+from pyxations.pre_processing import PreProcessing
+from pyxations.tables import SessionTables, read_tsv
 
-from pyxations.formats.webgazer.bids import WebGazerBidsConverter
-from pyxations.formats.eyelink.bids import EyeLinkBidsConverter
-import pyxations.formats.eyelink.parse as eyelink_parser 
-import pyxations.formats.webgazer.parse as webgazer_parser
-import pyxations.formats.tobii.parse as tobii_parser
-import pyxations.formats.gazepoint.parse as gaze_parser
-from pyxations.formats.tobii.bids import TobiiBidsConverter
-from pyxations.formats.gazepoint.bids import GazepointBidsConverter
-from pyxations.export import FEATHER_EXPORT
+EYE_MOVEMENT_DETECTION_DICT = {"engbert": EngbertDetection}
 
-EYE_MOVEMENT_DETECTION_DICT = {'remodnav': RemodnavDetection, 'engbert': EngbertDetection}
-
-
-def find_besteye(df_cal):
-    if df_cal[df_cal['line'].str.contains('CAL VALIDATION')].index.empty:
-        return 'M'
-    last_index = df_cal[df_cal['line'].str.contains('CAL VALIDATION')].index[-1]
-    last_val_msg = df_cal.loc[last_index].values[0]
-    second_to_last_index = last_index - 1
-    if 'ABORTED' in last_val_msg:
-        if not second_to_last_index in df_cal.index or 'CAL VALIDATION' not in df_cal.loc[second_to_last_index].values[0] or 'ABORTED' in df_cal.loc[second_to_last_index].values[0]:
-            return 'L' if 'L ABORTED' in last_val_msg else 'R'
-        last_val_msg = df_cal.loc[second_to_last_index].values[0]
-        return 'L' if ('LEFT' in last_val_msg or 'L ABORTED' in last_val_msg) else 'R'
-    
-    if not second_to_last_index in df_cal.index or 'CAL VALIDATION' not in df_cal.loc[second_to_last_index].values[0] or 'ABORTED' in df_cal.loc[second_to_last_index].values[0]:
-        return 'L' if 'LEFT' in last_val_msg else 'R'    
-    left_index = last_index if 'LEFT' in last_val_msg else second_to_last_index
-    right_index = last_index if 'RIGHT' in last_val_msg else second_to_last_index
-    right_msg = df_cal.loc[right_index].values[0]
-    left_msg = df_cal.loc[left_index].values[0]
-    lefterror_index, righterror_index = left_msg.split().index('ERROR'), right_msg.split().index('ERROR')
-    left_error = float(left_msg.split()[lefterror_index + 1])
-    right_error = float(right_msg.split()[righterror_index + 1])
-
-    return 'L' if left_error < right_error else 'R'
+# A saccade lasts roughly 30 to 80 ms, so a recording needs several samples
+# within that span for a velocity-based detector to resolve one. Below this
+# rate a saccade falls between one or two samples and the detected events say
+# more about the sampling than about the eye. Webcam recordings routinely land
+# here: their rate is set by the participant's browser and machine.
+MINIMUM_DETECTION_FREQUENCY_HZ = 50.0
 
 
-def keep_eye(eye, df_samples, df_fix, df_blink, df_sacc):
-    if eye == 'R':
-        df_samples = df_samples[['tSample', 'RX', 'RY', 'RPupil', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].copy()
-        df_fix = df_fix[df_fix['eye'] == 'R'].reset_index(drop=True)
-        df_blink = df_blink[df_blink['eye'] == 'R'].reset_index(drop=True)
-        df_sacc = df_sacc[df_sacc['eye'] == 'R'].reset_index(drop=True)
-        df_samples.rename(columns={'RX': 'X', 'RY': 'Y', 'RPupil': 'Pupil'}, inplace=True)
-    else:
-        df_samples = df_samples[['tSample', 'LX', 'LY', 'LPupil', 'Line_number', 'Eyes_recorded', 'Rate_recorded', 'Calib_index']].copy()
-        df_fix = df_fix[df_fix['eye'] == 'L'].reset_index(drop=True)
-        df_blink = df_blink[df_blink['eye'] == 'L'].reset_index(drop=True)
-        df_sacc = df_sacc[df_sacc['eye'] == 'L'].reset_index(drop=True)
-        df_samples.rename(columns={'LX': 'X', 'LY': 'Y', 'LPupil': 'Pupil'}, inplace=True)
-    df_blink.dropna(inplace=True)
-    df_fix.dropna(inplace=True)
-    df_sacc.dropna(inplace=True)
-    return df_samples, df_fix, df_blink, df_sacc
+def _savgol_length_for_rate(target_seconds, sample_rate):
+    """Return a Savitzky-Golay window valid at ``sample_rate``.
 
-
-def get_converter(format_name):
-    if format_name == 'webgazer':
-        return WebGazerBidsConverter()
-    elif format_name == 'eyelink':
-        return EyeLinkBidsConverter()
-    elif format_name == 'tobii':
-        return TobiiBidsConverter()
-    elif format_name == 'gaze':
-        return GazepointBidsConverter()
-    return None
-
-
-def dataset_to_bids(target_folder_path, files_folder_path, dataset_name, session_substrings=1, format_name='eyelink'):
+    REMoDNaV requires ``int(savgol_length * sample_rate)`` to be odd and
+    greater than the polynomial order, and raises otherwise. The window that
+    suits one rate therefore fails at another, so it is derived from the rate
+    rather than fixed per input format: the requested duration is rounded to
+    the nearest odd number of samples.
     """
-    Convert a dataset to BIDS format.
 
-    Args:
-        target_folder_path (str): Path to the folder where the BIDS dataset will be created.
-        files_folder_path (str): Path to the folder containing the EDF files.
-        The EDF files are assumed to have the ID of the subject at the beginning of the file name, separated by an underscore.
-        dataset_name (str): Name of the BIDS dataset.
-        session_substrings (int): Number of substrings to use for the session ID. Default is 1.
-
-    Returns:
-        None
-    """
-    converter = get_converter(format_name)
-    
-    # Create a metadata tsv file
-    metadata = pd.DataFrame(columns=['subject_id', 'old_subject_id'])
-    files_folder_path = Path(files_folder_path)
-    # List all file paths in the folder
-    file_paths = []
-    for file_path in files_folder_path.rglob('*'):  # Recursively go through all files
-        if file_path.is_file():
-            file_paths.append(file_path)
-    
-    file_paths = [file for file in file_paths if file.suffix.lower() in converter.relevant_extensions()]
-
-    bids_folder_path = Path(target_folder_path) / dataset_name
-    bids_folder_path.mkdir(parents=True, exist_ok=True)
-
-    subj_ids = converter.get_subject_ids(file_paths)
-
-    # If all of the subjects have numerical IDs, sort them numerically, else sort them alphabetically
-    if all(subject_id.isdigit() for subject_id in subj_ids):
-        subj_ids.sort(key=int)
-    else:
-        subj_ids.sort()
-    new_subj_ids = [str(subject_index).zfill(4) for subject_index in range(1, len(subj_ids) + 1)]
-
-    # Create subfolders for each session for each subject
-    for subject_id in new_subj_ids:
-        old_subject_id = subj_ids[int(subject_id) - 1]
-        for file in file_paths:
-            file_name = Path(file).name
-            session_id = "_".join("".join(file_name.split(".")[:-1]).split("_")[1:session_substrings + 1])
-            converter.move_file_to_bids_folder(file, bids_folder_path, subject_id, old_subject_id, session_id)
-
-        metadata.loc[len(metadata.index)] = [subject_id, old_subject_id]
-    # Save metadata to tsv file
-    metadata.to_csv(bids_folder_path / "participants.tsv", sep="\t", index=False)
-    return bids_folder_path
+    samples = round(float(target_seconds) * float(sample_rate))
+    if samples % 2 == 0:
+        samples += 1
+    samples = max(samples, 3)
+    # Nudge inside the sample so truncation cannot round back down to an even
+    # count, which is what the check actually looks at.
+    return (samples + 0.5) / float(sample_rate)
 
 
-def move_file_to_bids_folder(file_path, bids_folder_path, subject_id, session_id, tag):
-    session_folder_path = bids_folder_path / ("sub-" + subject_id) / ("ses-" + session_id) / tag
-    session_folder_path.mkdir(parents=True, exist_ok=True)
-    new_file_path = session_folder_path / file_path.name
-    if not new_file_path.exists():
-        shutil.copy(file_path, session_folder_path)
+def _warn_if_rate_is_too_low_to_detect(sampling_frequency, detection_algorithm):
+    """Warn when a recording is too slow for velocity-based event detection."""
 
-
-def process_session(eye_tracking_data_path, dataset_format, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs):
-    # If session folder path has files and overwrite is False, return
-    if not overwrite and session_folder_path.exists() and any(session_folder_path.iterdir()):
+    if sampling_frequency is None:
         return
-    
-    if dataset_format == 'eyelink':
-        eyelink_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
-        
-    elif dataset_format == 'webgazer':
-        webgazer_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, exp_format, **kwargs)
-    elif dataset_format == 'tobii':
-        tobii_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, overwrite, exp_format, **kwargs)
-    elif dataset_format == 'gaze':
-        gaze_parser.process_session(eye_tracking_data_path, detection_algorithm, session_folder_path, force_best_eye, keep_ascii, overwrite, exp_format, **kwargs)
+    frequency = float(sampling_frequency)
+    if not frequency > 0 or frequency >= MINIMUM_DETECTION_FREQUENCY_HZ:
+        return
+    warnings.warn(
+        f"This recording is sampled at {frequency:.1f} Hz, below the "
+        f"{MINIMUM_DETECTION_FREQUENCY_HZ:.0f} Hz that velocity-based detection "
+        f"needs to resolve a saccade, so the events {detection_algorithm} "
+        "reports will be unreliable. Consider analysing the gaze samples "
+        "directly instead of the detected events.",
+        UserWarning,
+        stacklevel=2,
+    )
+
+
+def _detector_type(name):
+    """Load optional detectors only when the corresponding feature is used."""
+
+    if name == "remodnav":
+        try:
+            module = import_module("pyxations.methods.eyemovement.remodnav_detector")
+        except ImportError as exc:
+            if exc.name and exc.name.startswith("remodnav"):
+                raise ImportError(
+                    "REMoDNaV support is optional. Install it with "
+                    "`pip install 'pyxations[remodnav]'`."
+                ) from exc
+            raise
+        return module.RemodnavDetection
+    return EYE_MOVEMENT_DETECTION_DICT.get(name)
+
+
+def _segmentation_recipe(pre_processing, kwargs):
+    prefer_durations = kwargs.get("prefer_durations", False)
+    have_explicit_times = "start_times" in kwargs and "end_times" in kwargs
+    have_durations = "start_msgs" in kwargs and "durations" in kwargs
+    have_message_times = "start_msgs" in kwargs and "end_msgs" in kwargs
+    if not (have_explicit_times or have_durations or have_message_times):
+        return None
+    if have_explicit_times:
+        function_name = "split_all_into_trials"
+    elif have_durations and (prefer_durations or not have_message_times):
+        function_name = "split_all_into_trials_by_durations"
     else:
+        function_name = "split_all_into_trials_by_msgs"
+    allowed = set(inspect.signature(getattr(pre_processing, function_name)).parameters)
+    candidates = {
+        "trial_labels",
+        "start_times",
+        "end_times",
+        "allow_open_last",
+        "require_nonoverlap",
+        "start_msgs",
+        "end_msgs",
+        "durations",
+        "case_insensitive",
+        "use_regex",
+        "return_match_token",
+    }
+    return function_name, {
+        key: value
+        for key, value in kwargs.items()
+        if key in candidates and key in allowed
+    }
+
+
+def _assign_default_trials(pre_processing):
+    samples = pre_processing.samples.with_columns(
+        (
+            pl.col("trial_number").cast(pl.Int64, strict=False).fill_null(0)
+            if "trial_number" in pre_processing.samples.columns
+            else pl.lit(0, dtype=pl.Int64)
+        ).alias("trial_number"),
+        (
+            pl.col("phase") if "phase" in pre_processing.samples.columns else pl.lit("")
+        ).alias("phase"),
+    )
+    pre_processing.samples = samples
+
+    for table_name in ("fixations", "saccades", "blinks"):
+        table = getattr(pre_processing, table_name)
+        if table.is_empty():
+            table = table.with_columns(
+                pl.Series("trial_number", [], dtype=pl.Int64),
+                pl.Series("phase", [], dtype=pl.String),
+            )
+            setattr(pre_processing, table_name, table)
+            continue
+
+        table = table.with_columns(
+            pl.lit(0, dtype=pl.Int64).alias("trial_number"),
+            pl.lit("").alias("phase"),
+        )
+        for trial_number, group in samples.partition_by(
+            "trial_number", as_dict=True
+        ).items():
+            trial_value = (
+                trial_number[0] if isinstance(trial_number, tuple) else trial_number
+            )
+            start = group.get_column("tSample").min()
+            end = group.get_column("tSample").max()
+            table = table.with_columns(
+                pl.when((pl.col("tStart") >= start) & (pl.col("tEnd") <= end))
+                .then(pl.lit(int(trial_value)))
+                .otherwise(pl.col("trial_number"))
+                .alias("trial_number")
+            )
+        setattr(pre_processing, table_name, table)
+
+
+def _detect_from_bids(
+    raw,
+    *,
+    dataset_format,
+    detection_algorithm,
+    session_folder_path,
+    kwargs,
+):
+    samples = raw.samples.clone()
+    blinks = raw.blinks.clone()
+    if detection_algorithm == "eyelink":
+        if dataset_format != "eyelink":
+            raise ValueError(
+                "The eyelink detector requires tracker-reported EyeLink events"
+            )
+        return (
+            samples,
+            raw.fixations.clone(),
+            raw.saccades.clone(),
+            blinks,
+        )
+
+    detector_type = _detector_type(detection_algorithm)
+    if detector_type is None:
+        raise ValueError(f"Unknown eye-movement detector: {detection_algorithm}")
+    _warn_if_rate_is_too_low_to_detect(raw.sampling_frequency, detection_algorithm)
+    if dataset_format != "eyelink" and not {"X", "Y"}.issubset(samples.columns):
+        eye_prefix = "L" if {"LX", "LY"}.issubset(samples.columns) else "R"
+        expressions = [
+            pl.col(f"{eye_prefix}X").alias("X"),
+            pl.col(f"{eye_prefix}Y").alias("Y"),
+            pl.lit(eye_prefix).alias("eye"),
+        ]
+        pupil_column = f"{eye_prefix}Pupil"
+        if pupil_column in samples:
+            expressions.append(pl.col(pupil_column).alias("Pupil"))
+        samples = samples.with_columns(expressions)
+    detector = detector_type(
+        session_folder_path=session_folder_path,
+        samples=samples,
+    )
+    if detection_algorithm == "remodnav" and {"X", "Y"}.issubset(samples.columns):
+        config = {
+            "webgazer": {"savgol_length": 0.195, "max_pso_dur": 0.1},
+            "gaze": {"savgol_length": 0.19, "max_pso_dur": 0.4},
+            "tobii": {"savgol_length": 0.195, "max_pso_dur": 0.3},
+        }.get(dataset_format, {})
+        accepted_config = set(
+            inspect.signature(detector.run_eye_movement).parameters
+        ) - {"self", "gazex_data", "gazey_data", "sample_rate"}
+        config.update(
+            {key: value for key, value in kwargs.items() if key in accepted_config}
+        )
+        detector_rate = (
+            kwargs.get("sample_rate")
+            or kwargs.get("sampling_frequency")
+            or raw.sampling_frequency
+        )
+        if detector_rate is None:
+            raise ValueError(
+                "Sampling frequency is required for sample-based event detection"
+            )
+        # The window has to suit the rate of this recording, so it is derived
+        # from it unless the caller asked for a specific one.
+        if "savgol_length" not in kwargs:
+            config["savgol_length"] = _savgol_length_for_rate(
+                config.get("savgol_length", 0.19), detector_rate
+            )
+        fixations, saccades = detector.run_eye_movement_from_samples(
+            detector_rate,
+            config=config,
+        )
+    else:
+        detection_method = detector.detect_eye_movements
+        accepted = set(inspect.signature(detection_method).parameters)
+        detection_kwargs = {
+            key: value for key, value in kwargs.items() if key in accepted
+        }
+        fixations, saccades = detection_method(**detection_kwargs)
+    return samples, fixations, saccades, blinks
+
+
+def _find_best_eye(calibration: pl.DataFrame) -> str:
+    """Return the eye with the best final EyeLink validation."""
+
+    if "line" not in calibration:
+        return "M"
+    lines = [
+        str(value)
+        for value in calibration.get_column("line").drop_nulls().to_list()
+        if "CAL VALIDATION" in str(value)
+    ]
+    if not lines:
+        return "M"
+    candidates: dict[str, float] = {}
+    aborted: set[str] = set()
+    for line in lines:
+        upper = line.upper()
+        eye = "L" if "LEFT" in upper or "L ABORTED" in upper else "R"
+        if "ABORTED" in upper:
+            aborted.add(eye)
+            continue
+        match = re.search(r"\bERROR\s+([-+]?[0-9]*\.?[0-9]+)", upper)
+        candidates[eye] = float(match.group(1)) if match else float("inf")
+    valid = {eye: error for eye, error in candidates.items() if eye not in aborted}
+    if valid:
+        return min(valid, key=valid.get)
+    if len(aborted) == 1:
+        return "R" if "L" in aborted else "L"
+    return "M"
+
+
+def _keep_eye(
+    eye: str,
+    samples: pl.DataFrame,
+    fixations: pl.DataFrame,
+    blinks: pl.DataFrame,
+    saccades: pl.DataFrame,
+):
+    prefix = "R" if eye == "R" else "L"
+    source_columns = [f"{prefix}X", f"{prefix}Y", f"{prefix}Pupil"]
+    target_columns = ["X", "Y", "Pupil"]
+    retained = [
+        column
+        for column in (
+            "tSample",
+            *source_columns,
+            "Line_number",
+            "Eyes_recorded",
+            "Rate_recorded",
+            "Calib_index",
+        )
+        if column in samples
+    ]
+    rename = {
+        source: target
+        for source, target in zip(source_columns, target_columns)
+        if source in retained
+    }
+    samples = (
+        samples.select(retained).rename(rename).with_columns(pl.lit(eye).alias("eye"))
+    )
+
+    def selected(table):
+        if "eye" in table:
+            table = table.filter(
+                pl.col("eye").cast(pl.String).str.to_uppercase() == eye
+            )
+        required = [column for column in ("tStart", "tEnd") if column in table]
+        return table.drop_nulls(subset=required) if required else table
+
+    return samples, selected(fixations), selected(blinks), selected(saccades)
+
+
+def _choose_best_eye(raw, samples, fixations, blinks, saccades):
+    required = {"Calib_index", "line"}
+    if raw.calibration.is_empty() or not required.issubset(raw.calibration.columns):
+        return samples, fixations, blinks, saccades
+    if (
+        not raw.calibration.get_column("line")
+        .cast(pl.String)
+        .str.contains("CAL VALIDATION")
+        .any()
+    ):
+        return samples, fixations, blinks, saccades
+
+    selected = []
+    for calibration_index, group in raw.calibration.partition_by(
+        "Calib_index", as_dict=True, maintain_order=True
+    ).items():
+        index = (
+            calibration_index[0]
+            if isinstance(calibration_index, tuple)
+            else calibration_index
+        )
+        eye = _find_best_eye(group)
+        if eye not in {"L", "R"}:
+            continue
+
+        def calibration_rows(table, calibration_value=index):
+            return (
+                table.filter(pl.col("Calib_index") == calibration_value)
+                if "Calib_index" in table
+                else table
+            )
+
+        selected.append(
+            _keep_eye(
+                eye,
+                calibration_rows(samples),
+                calibration_rows(fixations),
+                calibration_rows(blinks),
+                calibration_rows(saccades),
+            )
+        )
+    if not selected:
+        return samples, fixations, blinks, saccades
+    return tuple(
+        pl.concat([frames[position] for frames in selected], how="diagonal_relaxed")
+        for position in range(4)
+    )
+
+
+def process_bids_session(
+    raw_session_path,
+    dataset_format,
+    detection_algorithm,
+    session_folder_path,
+    force_best_eye,
+    **kwargs,
+):
+    """Compute and write one derivative session from normalized raw BIDS.
+
+    Parameters
+    ----------
+    raw_session_path : str or pathlib.Path
+        Raw BIDS session directory to process.
+    dataset_format : {"eyelink", "gaze", "tobii", "webgazer"}
+        Source format recorded in the raw dataset.
+    detection_algorithm : {"eyelink", "engbert", "remodnav"}
+        Event source or detector used for the derivative.
+    session_folder_path : str or pathlib.Path
+        Destination derivative session directory.
+    force_best_eye : bool
+        Whether to retain only the eye with the best EyeLink validation.
+    **kwargs : object
+        Detector, trial-segmentation, quality, and behavioral options.
+    """
+
+    raw = read_raw_bids_session(raw_session_path)
+    session_folder_path = Path(session_folder_path)
+    session_folder_path.mkdir(parents=True, exist_ok=True)
+
+    messages = raw.messages.clone()
+    message_keywords = kwargs.pop("msg_keywords", None)
+    if message_keywords and not messages.is_empty() and "message" in messages:
+        pattern = "(?i)" + "|".join(re.escape(keyword) for keyword in message_keywords)
+        messages = messages.filter(
+            pl.col("message").cast(pl.String).str.contains(pattern).fill_null(False)
+        )
+
+    samples, fixations, saccades, blinks = _detect_from_bids(
+        raw,
+        dataset_format=dataset_format,
+        detection_algorithm=detection_algorithm,
+        session_folder_path=session_folder_path,
+        kwargs=kwargs,
+    )
+    if force_best_eye:
+        samples, fixations, blinks, saccades = _choose_best_eye(
+            raw, samples, fixations, blinks, saccades
+        )
+
+    pre_processing = PreProcessing(
+        samples,
+        fixations,
+        saccades,
+        blinks,
+        messages,
+        session_folder_path,
+    )
+    pre_processing.set_metadata(
+        screen_width=raw.screen_width or kwargs.get("screen_width"),
+        screen_height=raw.screen_height or kwargs.get("screen_height"),
+    )
+    # Quality marking and saccade direction depend only on gaze coordinates,
+    # so they apply to every input format rather than to EyeLink alone. Both
+    # are skipped when the screen size is unknown, since out-of-screen samples
+    # cannot be identified without it.
+    bad_parameters = {
+        key: kwargs[key]
+        for key in (
+            "screen_height",
+            "screen_width",
+            "mark_nan_as_bad",
+            "inclusive_bounds",
+        )
+        if key in kwargs
+    }
+    screen_is_known = (
+        pre_processing.metadata.screen_width is not None
+        and pre_processing.metadata.screen_height is not None
+    )
+    quality_steps: dict = {}
+    if screen_is_known:
+        quality_steps["bad_samples"] = bad_parameters
+    # Saccade direction needs endpoint coordinates, which vendor-reported event
+    # tables do not always carry.
+    direction_columns = {"xStart", "yStart", "xEnd", "yEnd"}
+    direction_step: dict = {}
+    if direction_columns.issubset(set(pre_processing.saccades.columns)):
+        direction_step["saccades_direction"] = (
+            {"tol_deg": kwargs["tol_deg"]} if "tol_deg" in kwargs else {}
+        )
+
+    segmentation = _segmentation_recipe(pre_processing, kwargs)
+    if segmentation:
+        name, parameters = segmentation
+        recipe = {**quality_steps, name: parameters, **direction_step}
+        pre_processing.process(recipe)
+    else:
+        # Recordings without synchronisation messages still deserve quality
+        # marking and saccade direction; only the segmentation step is skipped.
+        _assign_default_trials(pre_processing)
+        if quality_steps or direction_step:
+            pre_processing.process({**quality_steps, **direction_step})
+
+    behavioral_columns = kwargs.get("behavioral_columns")
+    if behavioral_columns and not raw.behavioral_events.is_empty():
+        if "trial_number" in raw.behavioral_events:
+            metadata = raw.behavioral_events.rename({"trial_number": "trial_index"})
+        else:
+            metadata = raw.behavioral_events
+        if "trial_index" in metadata:
+            pre_processing.add_trial_metadata(metadata, behavioral_columns)
+
+    processed = SessionTables(
+        samples=pre_processing.samples,
+        fixations=pre_processing.fixations,
+        saccades=pre_processing.saccades,
+        blinks=pre_processing.blinks,
+        messages=pre_processing.user_messages,
+        calibration=raw.calibration,
+        header=raw.header,
+        behavioral_events=raw.behavioral_events,
+        sampling_frequency=raw.sampling_frequency,
+        screen_width=pre_processing.metadata.screen_width,
+        screen_height=pre_processing.metadata.screen_height,
+    )
+    BIDSDerivativeExport().write_session(
+        session_folder_path,
+        processed,
+        detection_algorithm=detection_algorithm,
+    )
+
+
+def dataset_to_bids(
+    target_folder_path,
+    files_folder_path,
+    dataset_name,
+    session_substrings=1,
+    format_name="eyelink",
+    *,
+    task_name="eyetracking",
+    authors=None,
+    behavioral_column_map=None,
+    overwrite=False,
+):
+    """Convert vendor recordings and associated behavior to raw BIDS.
+
+    PsychoPy logs are used when no behavioral CSV or TSV exists for the
+    recording. ``behavioral_column_map`` can map fields from any behavioral
+    source onto experiment-level names without changing the archived source.
+
+    Parameters
+    ----------
+    target_folder_path : str or pathlib.Path
+        Parent directory in which to create the dataset.
+    files_folder_path : str or pathlib.Path
+        Directory containing vendor recordings and associated behavior.
+    dataset_name : str
+        Output directory and BIDS dataset name.
+    session_substrings : int, default 1
+        Number of underscore-separated filename tokens used for the session.
+    format_name : {"eyelink", "gaze", "tobii", "webgazer"}
+        Vendor reader used for the source recordings.
+    task_name : str, default "eyetracking"
+        Fallback BIDS task label.
+    authors : sequence of str, optional
+        Dataset authors stored in BIDS metadata.
+    behavioral_column_map : mapping of str to str, optional
+        Mapping from source behavioral fields to experiment concepts.
+    overwrite : bool, default False
+        Whether to replace an existing non-empty output dataset.
+
+    Returns
+    -------
+    pathlib.Path
+        Root of the generated raw BIDS dataset.
+    """
+
+    return write_bids_dataset(
+        target_folder_path,
+        files_folder_path,
+        dataset_name,
+        session_substrings=session_substrings,
+        format_name=format_name,
+        task_name=task_name,
+        authors=authors,
+        behavioral_column_map=behavioral_column_map,
+        overwrite=overwrite,
+    )
+
+
+def process_session(
+    raw_session_path,
+    dataset_format,
+    detection_algorithm,
+    session_folder_path,
+    force_best_eye,
+    overwrite,
+    **kwargs,
+):
+    """Process one raw BIDS session unless its requested output already exists.
+
+    Parameters
+    ----------
+    raw_session_path : str or pathlib.Path
+        Raw BIDS session directory.
+    dataset_format : {"eyelink", "gaze", "tobii", "webgazer"}
+        Source format recorded in the raw dataset.
+    detection_algorithm : {"eyelink", "engbert", "remodnav"}
+        Event source or detector to use.
+    session_folder_path : str or pathlib.Path
+        Destination derivative session directory.
+    force_best_eye : bool
+        Whether to retain only the best validated EyeLink eye.
+    overwrite : bool
+        Whether to replace an existing derivative session.
+    **kwargs : object
+        Options forwarded to :func:`process_bids_session`.
+
+    Raises
+    ------
+    ValueError
+        If ``dataset_format`` is unsupported.
+    """
+
+    session_folder_path = Path(session_folder_path)
+    label = bids_label(detection_algorithm.lower(), fallback="pyxations")
+    if not overwrite and session_folder_path.exists():
+        existing = (session_folder_path / "beh").glob(
+            f"*_recording-eye1{label}_physio.tsv.gz"
+        )
+        if next(existing, None) is not None:
+            return
+    if dataset_format not in {"eyelink", "webgazer", "tobii", "gaze"}:
         raise ValueError(f"Dataset format {dataset_format} not found.")
+    process_bids_session(
+        raw_session_path,
+        dataset_format,
+        detection_algorithm,
+        session_folder_path,
+        force_best_eye,
+        **kwargs,
+    )
 
 
-def compute_derivatives_for_dataset(bids_dataset_folder, dataset_format, detection_algorithm='remodnav', num_processes=4,
-                                    force_best_eye=True, keep_ascii=True, overwrite=False, exp_format=FEATHER_EXPORT,
-                                    behavioral_columns=None, **kwargs):
-    derivatives_folder = Path(str(bids_dataset_folder) + "_derivatives")
+def compute_derivatives_for_dataset(
+    bids_dataset_folder,
+    dataset_format,
+    detection_algorithm="remodnav",
+    num_processes: int = 1,
+    force_best_eye=True,
+    overwrite=False,
+    behavioral_columns=None,
+    **kwargs,
+):
+    """Compute canonical BIDS derivatives for every raw BIDS session.
+
+    Processing is serial by default to avoid process-startup and serialization
+    costs for small datasets. Set ``num_processes`` above one for large
+    collections of independent sessions.
+
+    Parameters
+    ----------
+    bids_dataset_folder : str or pathlib.Path
+        Root of the raw BIDS dataset.
+    dataset_format : {"eyelink", "gaze", "tobii", "webgazer"}
+        Source format represented by the dataset.
+    detection_algorithm : {"eyelink", "engbert", "remodnav"}, default "remodnav"
+        Event source or detector used for every session.
+    num_processes : int, default 1
+        Number of independent session workers.
+    force_best_eye : bool, default True
+        Whether to retain only the best validated EyeLink eye.
+    overwrite : bool, default False
+        Whether to replace existing derivative sessions.
+    behavioral_columns : sequence of str, optional
+        Behavioral fields propagated into trial-level derivative tables.
+    **kwargs : object
+        Detector, segmentation, quality, and metadata options.
+
+    Returns
+    -------
+    pathlib.Path
+        Root of the generated BIDS Derivatives dataset.
+
+    Raises
+    ------
+    TypeError
+        If ``num_processes`` is not an integer.
+    ValueError
+        If ``num_processes`` is less than one.
+    """
+
     bids_dataset_folder = Path(bids_dataset_folder)
-    derivatives_folder.mkdir(exist_ok=True)
+    if isinstance(num_processes, bool) or not isinstance(num_processes, int):
+        raise TypeError("num_processes must be an integer")
+    if num_processes < 1:
+        raise ValueError("num_processes must be at least 1")
+    derivatives_folder = Path(f"{bids_dataset_folder}_derivatives")
+    initialize_bids_derivative(bids_dataset_folder, derivatives_folder)
 
-    # Extract and remove start_times and end_times from kwargs if present
     start_times = kwargs.pop("start_times", None)
     end_times = kwargs.pop("end_times", None)
-
     if behavioral_columns is not None:
         kwargs["behavioral_columns"] = behavioral_columns
 
-    bids_folders = [
-        folder for folder in bids_dataset_folder.iterdir()
-        if folder.is_dir() and folder.name.startswith("sub-")
-    ]
+    participants = read_tsv(
+        bids_dataset_folder / "participants.tsv", has_header=True
+    ).with_columns(
+        pl.col("subject_id").cast(pl.String).str.pad_start(4, "0"),
+        pl.col("old_subject_id").cast(pl.String),
+    )
+    subject_lookup = dict(
+        participants.select("subject_id", "old_subject_id").iter_rows()
+    )
 
-    participants_file = bids_dataset_folder / "participants.tsv"
-    participants_tsv = pd.read_csv(participants_file, sep="\t",dtype={'subject_id': str, 'old_subject_id': str})
+    jobs = []
+    for subject in sorted(bids_dataset_folder.glob("sub-*")):
+        if not subject.is_dir():
+            continue
+        subject_name = subject_lookup[subject.name[4:]]
+        for session in sorted(subject.glob("ses-*")):
+            if not session.is_dir():
+                continue
+            session_name = session.name[4:]
+            session_kwargs = dict(kwargs)
+            if (
+                start_times
+                and subject_name in start_times
+                and session_name in start_times[subject_name]
+            ):
+                session_kwargs["start_times"] = start_times[subject_name][session_name]
+            if (
+                end_times
+                and subject_name in end_times
+                and session_name in end_times[subject_name]
+            ):
+                session_kwargs["end_times"] = end_times[subject_name][session_name]
+            jobs.append(
+                (
+                    session,
+                    dataset_format,
+                    detection_algorithm,
+                    derivatives_folder / subject.name / session.name,
+                    force_best_eye,
+                    overwrite,
+                    session_kwargs,
+                )
+            )
 
-    with ProcessPoolExecutor(max_workers=num_processes) as executor:
-        futures = []
-        for subject in bids_folders:
-            # To get subject_name go to the bids_dataset_folder and open the "participants.tsv" file
-            # There are two columns: subject_id and old_subject_id
-            # subject_id equals subject.name[4:] and old_subject_id is the one we want to use in this case
-
-
-            subject_name = participants_tsv.loc[participants_tsv['subject_id'] == subject.name[4:], 'old_subject_id'].values[0]
-            subject_path = bids_dataset_folder / subject.name
-
-            for session in subject_path.iterdir():
-                if session.name.startswith("ses-") and session.is_dir():
-                    session_name = session.name[4:]  # Remove "ses-" prefix
-
-                    # Build per-session kwargs
-                    session_kwargs = dict(kwargs)  # base kwargs
-                    if start_times and subject_name in start_times and session_name in start_times[subject_name]:
-                        session_kwargs["start_times"] = start_times[subject_name][session_name]
-                    if end_times and subject_name in end_times and session_name in end_times[subject_name]:
-                        session_kwargs["end_times"] = end_times[subject_name][session_name]
-
-                    futures.append(
-                        executor.submit(
-                            process_session,
-                            session / "ET", dataset_format, detection_algorithm,
-                            derivatives_folder / subject.name / session.name,
-                            force_best_eye, keep_ascii, overwrite, exp_format,
-                            **session_kwargs
-                        )
-                    )
-
-        for future in futures:
-            future.result()
-
+    if num_processes == 1:
+        for (
+            source,
+            format_name,
+            algorithm,
+            destination,
+            choose_eye,
+            replace,
+            options,
+        ) in jobs:
+            process_session(
+                source,
+                format_name,
+                algorithm,
+                destination,
+                choose_eye,
+                replace,
+                **options,
+            )
+    else:
+        with ProcessPoolExecutor(max_workers=num_processes) as executor:
+            futures = [
+                executor.submit(
+                    process_session,
+                    source,
+                    format_name,
+                    algorithm,
+                    destination,
+                    choose_eye,
+                    replace,
+                    **options,
+                )
+                for source, format_name, algorithm, destination, choose_eye, replace, options in jobs
+            ]
+            for future in futures:
+                future.result()
     return derivatives_folder
-        

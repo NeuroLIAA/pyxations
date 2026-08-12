@@ -1,6 +1,5 @@
-# Ignore all derivatives
-example_dataset_derivatives/
-example_dataset/
+# Locally generated example datasets
+/generated/
 *.pyc
 
 
@@ -12,8 +11,17 @@ example_dataset/
 vend/
 env/
 .pytest_cache/
+.ruff_cache/
+.coverage
+coverage.json
+coverage.xml
+htmlcov/
+site/
+.migration-*/
+.bids-first-*/
 
 *.log
+!examples/eyelink_target_absent/*.log
 *pyxations.egg-info
 */build
 *.ipynb_checkpoints
@@ -23,3 +31,6 @@ dist/
 /.vscode 
 
 .blackignore
+
+# mkdocs-jupyter caches executed notebooks here
+.cache/

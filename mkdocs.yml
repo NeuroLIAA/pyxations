@@ -26,6 +26,12 @@ theme:
     - search.highlight
     - search.share
 
+# driving_animation needs an eye-tracking dataset that is not committed, so it
+# cannot be executed at build time. Excluded rather than listed, since every
+# notebook under docs/ is executed whether or not it appears in the nav.
+exclude_docs: |
+  tutorials/driving_animation.ipynb
+
 nav:
   - Home: index.md
   - Requirements: requirements.md
@@ -33,7 +39,21 @@ nav:
   - Quickstart: quickstart.md
   - Usage: usage.md
   - Concepts: concepts.md
-  - API reference: api_reference.md
+  - Tutorials:
+      - EyeLink: tutorials/eyelink_example.ipynb
+      - Tobii: tutorials/tobii_example.ipynb
+      - GazePoint: tutorials/gazepoint_example.ipynb
+      - Webcam (WebGazer): tutorials/webgazer_example.ipynb
+      - MultiMatch scanpath comparison: tutorials/multimatch_example.ipynb
+  - API reference:
+      - Overview: api/index.md
+      - Conversion to BIDS: api/conversion.md
+      - Preprocessing: api/preprocessing.md
+      - Event detection: api/detection.md
+      - Analysis: api/analysis.md
+      - Visual search: api/visual_search.md
+      - Visualization: api/visualization.md
+      - Data storage: api/storage.md
   - Contributing: contributing.md
   - License: license.md
 
@@ -65,6 +85,13 @@ extra:
       link: https://github.com/NeuroLIAA/pyxations
 
 plugins:
+  - mkdocs-jupyter:
+      execute: true
+      allow_errors: false
+      include_source: true
+      remove_tag_config:
+        remove_input_tags:
+          - hide_code
   - mkdocstrings:
       handlers:
         python:
@@ -73,4 +100,4 @@ plugins:
 
   - search
 
-copyright: Copyright &copy; 2025 Laboratorio de Inteligencia Artificial Aplicada (ICC-UBA-CONICET)
+copyright: Copyright &copy; 2026 Laboratorio de Inteligencia Artificial Aplicada (ICC-UBA-CONICET)

@@ -1,0 +1,3 @@
+trial_number,stimulus,stimulus_coords,memory_set,memory_set_locations,target_present,target,target_location,correct_response,was_answered
+0,0167.jpg,"(448, 156, 1472, 924)",['rubik_cube.jpg'],"[(868, 448, 1052, 632)]",0,rubik_cube.jpg,"(718, 767, 803, 821)",1,1
+1,0166.jpg,"(448, 156, 1472, 924)",['watch.jpg'],"[(868, 448, 1052, 632)]",1,watch.jpg,"(1313, 643, 1349, 684)",1,1

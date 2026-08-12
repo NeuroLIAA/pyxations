@@ -1,189 +1,151 @@
-import unittest
-from pyxations import compute_derivatives_for_dataset
-import os
-from pyxations.export import FEATHER_EXPORT, HDF5_EXPORT
-from pathlib import Path
-import shutil
+import json
+
+import pytest
+
+import pyxations.analysis.generic as generic_analysis
+from pyxations import Experiment, VisualSearchExperiment
+from pyxations.bids import validate_bids_dataset, validator_command
+from pyxations.export.bids import BIDSDerivativeExport
 
 
-current_path = Path(__file__).resolve()
-data_folder = os.path.join(current_path.parent, 'data')
+@pytest.mark.parametrize("format_name", ["eyelink", "webgazer", "tobii", "gaze"])
+def test_examples_generate_canonical_bids_derivatives(generated_datasets, format_name):
+    case = generated_datasets[format_name]
+    derivatives = case["derivatives"]
+    description = json.loads(
+        (derivatives / "dataset_description.json").read_text(encoding="utf-8")
+    )
 
-class TestComputeDerivatives(unittest.TestCase):
-    def test_compute_derivatives_eyelink(self):
-        bids_dataset_folder = os.path.join(data_folder,"example_dataset")
-        derivatives_path = os.path.join(data_folder, "example_dataset_derivatives")
-        
-        # Remove the target directory to ensure a clean test environment.
-        if os.path.exists(derivatives_path):
-            shutil.rmtree(derivatives_path)
+    assert description["DatasetType"] == "derivative"
+    assert description["GeneratedBy"][0]["Name"] == "Pyxations"
+    assert (derivatives / ".bidsignore").read_text(encoding="utf-8") == (
+        "figures\nfigures/**\n"
+    )
+    assert not list(derivatives.rglob("*.feather"))
+    assert not list(derivatives.rglob("*.hdf5"))
 
-        
-        msg_keywords = ["begin","end","press"]
-        start_msgs = {'search':['beginning_of_stimuli']}
-        end_msgs = {'search':['end_of_stimuli']}
-        detection_algorithm = 'eyelink'
-        compute_derivatives_for_dataset(bids_dataset_folder, 'eyelink', detection_algorithm, msg_keywords=msg_keywords, 
-                                        start_msgs=start_msgs, end_msgs=end_msgs, overwrite=False, exp_format=HDF5_EXPORT)
-        self.assertTrue(os.path.exists(derivatives_path))
-        self.assertTrue(os.path.exists(os.path.join(derivatives_path, "sub-0001")))
-        self.assertTrue(os.path.exists(os.path.join(derivatives_path, "sub-0001", "ses-second")))
-        self.assertTrue(os.path.exists(os.path.join(derivatives_path, "sub-0001", "ses-second", "samples.hdf5")))
+    session = derivatives / "sub-0001" / f"ses-{case['session']}"
+    assert {path.name for path in session.iterdir()} == {"beh"}
+    assert len(list((session / "beh").glob("*_physio.tsv.gz"))) == 1
+    assert len(list((session / "beh").glob("*_physioevents.tsv.gz"))) == 1
 
+    bundle = BIDSDerivativeExport().read_session(session, case["algorithm"])
+    assert not bundle.samples.is_empty()
+    assert {
+        "samples",
+        "fixations",
+        "saccades",
+        "blinks",
+        "messages",
+        "calibration",
+        "header",
+        "behavioral_events",
+    } <= set(bundle.__dataclass_fields__)
 
-    def test_compute_derivatives_eyelink_remodnav(self):
-        bids_dataset_folder = os.path.join(data_folder,"example_dataset")
-        derivatives_path = os.path.join(data_folder, "example_dataset_derivatives")
-        
-        # Remove the target directory to ensure a clean test environment.
-        if os.path.exists(derivatives_path):
-            shutil.rmtree(derivatives_path)
-
-
-
-        msg_keywords = ["begin","end","press"]
-        start_msgs = {'search':['beginning_of_stimuli']}
-        end_msgs = {'search':['end_of_stimuli']}
-        detection_algorithm = 'remodnav'
-        compute_derivatives_for_dataset(
-            bids_dataset_folder, 'eyelink', detection_algorithm, msg_keywords=msg_keywords, 
-            start_msgs=start_msgs, end_msgs=end_msgs, overwrite=True,
-            max_pso_dur=0, min_fix_dur=0, sac_max_vel=999, savgol_length= 0.195
-        )
-        self.assertTrue(os.path.exists(derivatives_path))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001", "ses-second")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001", "ses-second", "samples.feather")))
+    sample_start = bundle.samples.get_column("tSample").min()
+    sample_end = bundle.samples.get_column("tSample").max()
+    for events in (bundle.fixations, bundle.saccades):
+        if events.is_empty():
+            continue
+        assert events.get_column("tStart").min() >= sample_start
+        assert events.get_column("tEnd").max() <= sample_end
 
 
-    def test_compute_derivatives_webgazer(self):
-        bids_dataset_folder = os.path.join(data_folder,"antisacadas_dataset")
-        derivatives_path = os.path.join(data_folder, "antisacadas_dataset_derivatives")
-        
-        # Remove the target directory to ensure a clean test environment.
-        if os.path.exists(derivatives_path):
-            shutil.rmtree(derivatives_path)
+@pytest.mark.parametrize("format_name", ["eyelink", "webgazer", "tobii", "gaze"])
+def test_generated_examples_pass_official_bids_validator(
+    generated_datasets, format_name
+):
+    command = validator_command()
+    if command is None:
+        pytest.skip("Official BIDS Validator or Deno is not installed")
 
-        
-        start_times = {
-            0: [100, 501, 1001],
-        }
-        end_times = {
-            0: [500, 1000, 2000],
-        }
-        trial_labels = {0:['first', 'second', 'third'], 1: ['fourth']}
-        
-        detection_algorithm = 'remodnav'
-        compute_derivatives_for_dataset(
-            bids_dataset_folder, 'webgazer', detection_algorithm, overwrite=True, 
-            exp_format=HDF5_EXPORT, screen_height=768, screen_width=1024,
-            start_times=start_times, end_times=end_times, trial_labels=trial_labels)
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas", "samples.hdf5")))
-
-    def test_compute_derivatives_tobii(self):
-        bids_dataset_folder = os.path.join(data_folder,"tobii_dataset")
-        derivatives_path = os.path.join(data_folder, "tobii_dataset_derivatives")
-        
-        # Remove the target directory to ensure a clean test environment.
-        if os.path.exists(derivatives_path):
-            shutil.rmtree(derivatives_path)
-        
-        detection_algorithm = 'remodnav'
-        compute_derivatives_for_dataset(
-            bids_dataset_folder, 'tobii', detection_algorithm, exp_format=HDF5_EXPORT, overwrite=True)
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "tobii_dataset_derivatives")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "tobii_dataset_derivatives", "sub-0001")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "tobii_dataset_derivatives", "sub-0001", "ses-sceneviewing")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "tobii_dataset_derivatives", "sub-0001", "ses-sceneviewing", "samples.hdf5")))
-
-    def test_compute_derivatives_gazepoint(self):
-        bids_dataset_folder = os.path.join(data_folder,"gazepoint_dataset")
-        derivatives_path = os.path.join(data_folder, "gazepoint_dataset_derivatives")
-
-        # Remove the target directory to ensure a clean test environment.
-        if os.path.exists(derivatives_path):
-            shutil.rmtree(derivatives_path)
-
-        detection_algorithm = 'remodnav'
-        compute_derivatives_for_dataset(bids_dataset_folder, 'gaze', detection_algorithm, 
-                                        overwrite=True, exp_format=HDF5_EXPORT)
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "gazepoint_dataset_derivatives")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "gazepoint_dataset_derivatives", "sub-0001")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A", "samples.hdf5")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "gazepoint_dataset_derivatives", "sub-0001", "ses-ses-A", "remodnav_events", "blink.hdf5")))
-
-    def test_compute_derivatives_feather_format(self):
-        bids_dataset_folder = os.path.join(data_folder,"example_dataset")
-        msg_keywords = ["begin","end","press"]
-        start_msgs = {'search':['beginning_of_stimuli']}
-        end_msgs = {'search':['end_of_stimuli']}
-        detection_algorithm = 'eyelink'
-        dataset_type = 'eyelink'
-        compute_derivatives_for_dataset(bids_dataset_folder, dataset_type, detection_algorithm, 
-                                        msg_keywords=msg_keywords,start_msgs=start_msgs, 
-                                        end_msgs=end_msgs, overwrite=True, export_format=FEATHER_EXPORT)
-
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "example_dataset_derivatives", "sub-0001", "ses-second", "samples.feather")))
-
-    def test_compute_derivatives_webgazer_feather(self):
-        data_folder = os.path.join(current_path.parent, 'data')
-        bids_dataset_folder = os.path.join(data_folder,"antisacadas_dataset")
-        derivatives_path = os.path.join(data_folder, "antisacadas_dataset_derivatives")
-        
-        # Remove the target directory to ensure a clean test environment.
-        if os.path.exists(derivatives_path):
-            shutil.rmtree(derivatives_path)
-
-        
-        dataset_type = 'webgazer'
-        detection_algorithm = 'remodnav'
-        compute_derivatives_for_dataset(bids_dataset_folder, dataset_type, detection_algorithm, 
-                                        export_format=FEATHER_EXPORT, screen_height=768, screen_width=1024)
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas")))
-        self.assertTrue(os.path.exists(os.path.join(data_folder, "antisacadas_dataset_derivatives", "sub-0001", "ses-antisacadas", "samples.feather")))
+    case = generated_datasets[format_name]
+    validate_bids_dataset(case["raw"], command=command)
+    validate_bids_dataset(case["derivatives"], command=command)
 
 
-    def test_compute_derivatives_webgazer_behavioral_columns(self):
-        data_folder = os.path.join(current_path.parent, 'data')
-        bids_dataset_folder = os.path.join(data_folder, "antisacadas_dataset")
-        derivatives_path = os.path.join(data_folder, "antisacadas_dataset_derivatives")
+def test_generic_analysis_hierarchy_uses_generated_bids(generated_datasets):
+    case = generated_datasets["eyelink"]
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
 
-        if os.path.exists(derivatives_path):
-            shutil.rmtree(derivatives_path)
+    assert len(experiment) == 1
+    subject = experiment["0001"]
+    assert len(subject) == 1
+    session = subject["second"]
+    assert len(session) == 2
+    trial = session[0]
 
-        session_path = os.path.join(
-            derivatives_path, "sub-0001", "ses-antisacadas"
-        )
-
-        compute_derivatives_for_dataset(
-            bids_dataset_folder, 'webgazer', 'remodnav',
-            overwrite=True, exp_format=FEATHER_EXPORT,
-            screen_height=768, screen_width=1024,
-            behavioral_columns=['typeOfSaccade', 'cueShownAtLeft', 'rt'],
-        )
-
-        import pandas as pd
-
-        samples_path = os.path.join(session_path, "samples.feather")
-        self.assertTrue(os.path.exists(samples_path), "samples.feather not found")
-
-        df = pd.read_feather(samples_path)
-        self.assertIn("typeOfSaccade", df.columns, "typeOfSaccade not propagated to samples")
-        self.assertIn("cueShownAtLeft", df.columns, "cueShownAtLeft not propagated to samples")
-
-        events_path = os.path.join(session_path, "events.tsv")
-        self.assertTrue(os.path.exists(events_path), "events.tsv not created")
-
-        df_events = pd.read_csv(events_path, sep="\t")
-        self.assertIn("onset", df_events.columns)
-        self.assertIn("typeOfSaccade", df_events.columns)
+    assert trial.trial_number == 0
+    assert not trial.samples().is_empty()
+    assert not trial.fixations().is_empty()
+    assert not trial.blinks().is_empty()
+    assert not trial.pupil_samples().is_empty()
+    assert {"LPupil", "RPupil"}.issubset(trial.pupil_samples().columns)
+    assert set(experiment.samples()["subject_id"].unique()) == {"0001"}
+    assert set(experiment.blinks()["subject_id"].unique()) == {"0001"}
+    assert set(experiment.pupil_samples()["subject_id"].unique()) == {"0001"}
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_pupil_accessor_does_not_invent_webcam_measurements(
+    generated_datasets,
+):
+    case = generated_datasets["webgazer"]
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+
+    assert experiment.pupil_samples().is_empty()
+
+
+def test_webgazer_hierarchy_uses_sequential_trial_numbers(generated_datasets):
+    """Raw jsPsych indices must not leak into the public trial lookup API."""
+    case = generated_datasets["webgazer"]
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+
+    session = experiment["0001"][case["session"]]
+    trial = session.get_trial(0)
+
+    assert trial.trial_number == 0
+    assert not trial.samples().is_empty()
+    assert trial.samples().get_column("source_trial_index").n_unique() == 1
+    assert trial.samples().get_column("source_trial_index")[0] != 0
+
+
+def test_generic_trials_support_optional_multimatch(generated_datasets, monkeypatch):
+    case = generated_datasets["eyelink"]
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+    session = experiment["0001"]["second"]
+
+    class FakeMultimatch:
+        @staticmethod
+        def docomparison(first, second, screen):
+            return len(first), len(second), first.dtype.names, screen
+
+    monkeypatch.setattr(generic_analysis, "_load_multimatch", lambda: FakeMultimatch)
+    result = session[0].compute_multimatch(session[1], 1080, 1920)
+
+    assert result[0] > 0
+    assert result[1] > 0
+    assert result[2] == ("start_x", "start_y", "duration")
+    assert result[3] == (1920, 1080)
+
+
+def test_visual_search_hierarchy_uses_bids_events(generated_datasets):
+    case = generated_datasets["eyelink"]
+    experiment = VisualSearchExperiment(
+        case["raw"],
+        search_phase_name="search",
+        memorization_phase_name="memorization",
+    )
+    experiment.load_data(case["algorithm"])
+
+    subject = experiment["0001"]
+    session = subject["second"]
+    trial = session[0]
+
+    assert len(session) == 2
+    assert trial.stimulus.endswith(".jpg")
+    assert isinstance(trial.target_present, bool)
+    assert not trial.search_samples().is_empty()
