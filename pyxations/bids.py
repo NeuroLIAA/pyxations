@@ -138,7 +138,20 @@ class SourceRecordingBundle:
 
 
 def bids_label(value: str, *, fallback: str) -> str:
-    """Normalize a value for use as a BIDS entity label."""
+    """Normalize a value for use as a BIDS entity label.
+
+    Parameters
+    ----------
+    value : str
+        Candidate entity value.
+    fallback : str
+        Value used when normalization removes every character.
+
+    Returns
+    -------
+    str
+        Alphanumeric BIDS entity label.
+    """
 
     label = re.sub(r"[^A-Za-z0-9]+", "", str(value))
     return label or fallback
@@ -1005,9 +1018,7 @@ def _prepare_task_events(
             events = events.with_columns(
                 pl.col("trial_index")
                 .cast(pl.Int64, strict=False)
-                .replace_strict(
-                    webgazer_numbering, default=None, return_dtype=pl.Int64
-                )
+                .replace_strict(webgazer_numbering, default=None, return_dtype=pl.Int64)
                 .alias("trial_number"),
                 pl.col("trial_index").alias("source_trial_index"),
             )
@@ -1123,6 +1134,43 @@ def write_bids_dataset(
 
     Original vendor files are retained under ``sourcedata``. Standardized
     sample-level recordings are emitted as per-eye physiological files.
+
+    Parameters
+    ----------
+    target_folder_path : str or pathlib.Path
+        Parent directory in which to create the dataset.
+    files_folder_path : str or pathlib.Path
+        Directory containing vendor recordings and associated behavior.
+    dataset_name : str
+        Name of the output dataset directory and BIDS dataset.
+    session_substrings : int, default 1
+        Number of underscore-separated filename tokens used for the session.
+    format_name : {"eyelink", "gaze", "tobii", "webgazer"}
+        Vendor input reader to use.
+    task_name : str, default "eyetracking"
+        Fallback BIDS task label when the filename has no ``task-`` entity.
+    authors : sequence of str, optional
+        Dataset authors stored in ``dataset_description.json``.
+    behavioral_column_map : mapping of str to str, optional
+        Source-independent mapping from behavioral columns to task concepts.
+    overwrite : bool, default False
+        Whether to replace an existing non-empty output dataset.
+
+    Returns
+    -------
+    pathlib.Path
+        Root of the generated raw BIDS dataset.
+
+    Raises
+    ------
+    ValueError
+        If the format, session configuration, source recordings, or overwrite
+        relationship is invalid.
+    FileNotFoundError
+        If the source directory does not exist or EyeLink conversion is needed
+        but ``edf2asc`` is unavailable.
+    FileExistsError
+        If the output exists and ``overwrite`` is false.
     """
 
     format_name = format_name.lower()
@@ -1328,7 +1376,18 @@ def _milliseconds_per_unit(unit: str | None) -> float:
 
 
 def read_bids_task_events(session_path: str | Path) -> pl.DataFrame:
-    """Read and combine BIDS task-event tables for one raw session."""
+    """Read and combine BIDS task-event tables for one raw session.
+
+    Parameters
+    ----------
+    session_path : str or pathlib.Path
+        Raw BIDS session directory containing ``beh``.
+
+    Returns
+    -------
+    polars.DataFrame
+        Combined event rows, including their source BIDS filenames.
+    """
 
     behavior = Path(session_path) / "beh"
     tables = []
@@ -1341,7 +1400,25 @@ def read_bids_task_events(session_path: str | Path) -> pl.DataFrame:
 
 
 def read_raw_bids_session(session_path: str | Path) -> SessionTables:
-    """Load normalized samples and source events from a raw BIDS session."""
+    """Load normalized samples and source events from a raw BIDS session.
+
+    Parameters
+    ----------
+    session_path : str or pathlib.Path
+        Raw BIDS session directory containing physiological recordings.
+
+    Returns
+    -------
+    SessionTables
+        Samples, tracker events, behavior, metadata, and recording properties.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the session contains no raw BIDS physiological recordings.
+    ValueError
+        If per-eye streams disagree about their sampling frequency.
+    """
 
     session = Path(session_path)
     behavior = session / "beh"
@@ -1402,17 +1479,25 @@ def read_raw_bids_session(session_path: str | Path) -> SessionTables:
                     .cast(pl.Float64, strict=False)
                     .alias("Pupil")
                 )
-        auxiliary = {
+        auxiliary_names = {
             "calibration_index": "Calib_index",
             "line_number": "Line_number",
             "trial_number": "trial_number",
         }
-        for source_column, target_column in auxiliary.items():
+        canonical_source_columns = {
+            "timestamp",
+            "x_coordinate",
+            "y_coordinate",
+            "pupil_size",
+        }
+        auxiliary_columns = [
+            column for column in frame.columns if column not in canonical_source_columns
+        ]
+        for source_column in auxiliary_columns:
+            target_column = auxiliary_names.get(source_column, source_column)
             if source_column in frame and target_column not in stream:
                 stream = stream.with_columns(
-                    frame.get_column(source_column)
-                    .cast(pl.Float64, strict=False)
-                    .alias(target_column)
+                    frame.get_column(source_column).alias(target_column)
                 )
         sample_streams.append(stream)
 
@@ -1420,8 +1505,8 @@ def read_raw_bids_session(session_path: str | Path) -> SessionTables:
     for stream in sample_streams[1:]:
         duplicate_auxiliary = [
             column
-            for column in ("Calib_index", "Line_number", "trial_number")
-            if column in stream and column in samples
+            for column in stream.columns
+            if column != "tSample" and column in samples.columns
         ]
         stream = stream.drop(duplicate_auxiliary)
         if samples.height == stream.height and samples.get_column("tSample").equals(
@@ -1575,7 +1660,14 @@ def read_raw_bids_session(session_path: str | Path) -> SessionTables:
 
 
 def validator_command() -> list[str] | None:
-    """Return the available official BIDS Validator command."""
+    """Return the available official BIDS Validator command.
+
+    Returns
+    -------
+    list of str or None
+        Native validator command, Deno invocation, or ``None`` when neither is
+        installed.
+    """
 
     executable = shutil.which("bids-validator")
     if executable:
@@ -1596,12 +1688,27 @@ def validate_bids_dataset(
 ) -> subprocess.CompletedProcess[str]:
     """Validate a dataset with the official BIDS Validator.
 
+    Parameters
+    ----------
+    dataset_path : str or pathlib.Path
+        BIDS dataset root to validate.
+    command : sequence of str, optional
+        Explicit validator command. By default, discover a native validator or
+        use the pinned Deno invocation.
+
+    Returns
+    -------
+    subprocess.CompletedProcess
+        Successful validator process result.
+
     Raises
     ------
     RuntimeError
         If no validator executable or Deno runtime is available.
     BIDSValidationError
         If validation reports one or more errors.
+    FileNotFoundError
+        If ``dataset_path`` is not an existing directory.
     """
 
     dataset = Path(dataset_path)

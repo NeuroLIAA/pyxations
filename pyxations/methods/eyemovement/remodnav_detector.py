@@ -205,6 +205,48 @@ class RemodnavDetection(EyeMovementDetection):
 
         Input timestamps are expected in milliseconds.  The returned dataframe
         type matches ``self.samples``.
+
+        Parameters
+        ----------
+        min_pursuit_dur : float, default 10.0
+            Minimum pursuit duration in seconds.
+        max_pso_dur : float, default 0.0
+            Maximum post-saccadic oscillation duration in seconds.
+        min_fix_dur : float, default 0.05
+            Minimum fixation duration in seconds.
+        sac_max_vel : float, default 1000.0
+            Maximum retained saccade peak velocity in degrees per second.
+        fix_max_amp : float, default 1.5
+            Maximum retained fixation amplitude in degrees.
+        sac_time_thresh : float, default 0.002
+            Temporal tolerance in seconds when associating fixations with
+            preceding saccades.
+        drop_fix_from_blink : bool, default True
+            Whether to retain only fixations adjacent to a detected saccade.
+        screen_size : float, default 38.0
+            Physical screen width in centimetres.
+        screen_width : int, default 1920
+            Screen width in pixels.
+        screen_distance : float, default 60.0
+            Viewing distance in centimetres.
+        savgol_length : float, default 0.195
+            Savitzky-Golay filter window length in seconds.
+        lowpass_cutoff_freq : float, optional
+            Low-pass cutoff in hertz. By default, use the smaller of 4 Hz and
+            40 percent of the measured sample rate.
+
+        Returns
+        -------
+        fixations : DataFrame-like
+            Detected fixation events, using the input dataframe library.
+        saccades : DataFrame-like
+            Detected saccade events, using the input dataframe library.
+
+        Raises
+        ------
+        ValueError
+            If timestamps and rates differ in length, or a recorded rate is
+            non-finite or non-positive.
         """
         self.out_folder.mkdir(parents=True, exist_ok=True)
 
@@ -271,6 +313,34 @@ class RemodnavDetection(EyeMovementDetection):
 
         Missing pupil measurements remain missing (NaN); they are no longer
         represented by synthetic zeros.
+
+        Parameters
+        ----------
+        sample_rate : float
+            Sampling rate in hertz.
+        x_label : str, default "X"
+            Name of the horizontal gaze-coordinate column.
+        y_label : str, default "Y"
+            Name of the vertical gaze-coordinate column.
+        config : mapping, optional
+            Detector options forwarded to :meth:`run_eye_movement`.
+        **kwargs : object
+            Additional detector options forwarded to
+            :meth:`run_eye_movement`. These override neither duplicate
+            entries nor Python's duplicate-key checks.
+
+        Returns
+        -------
+        fixations : DataFrame-like
+            Detected fixation events, using the input dataframe library.
+        saccades : DataFrame-like
+            Detected saccade events, using the input dataframe library.
+
+        Raises
+        ------
+        ValueError
+            If the rate is not positive or the gaze and timestamp columns
+            differ in length.
         """
         if sample_rate <= 0:
             raise ValueError("sample_rate must be greater than zero.")
@@ -287,7 +357,7 @@ class RemodnavDetection(EyeMovementDetection):
         if pupil_data is None:
             pupil_data = np.full(gazex_data.size, np.nan, dtype=float)
 
-        times = np.arange(gazex_data.size, dtype=float) / float(sample_rate)
+        times = (timestamps - starting_time) / 1_000.0
         return self.run_eye_movement(
             gazex_data,
             gazey_data,
@@ -324,7 +394,68 @@ class RemodnavDetection(EyeMovementDetection):
         eye: Any = None,
         lowpass_cutoff_freq: float | None = None,
     ) -> tuple[Any, Any]:
-        """Run REMoDNaV for one eye stream and return event tables."""
+        """Run REMoDNaV for one eye stream and return event tables.
+
+        Parameters
+        ----------
+        gazex_data : array-like
+            Horizontal gaze coordinates.
+        gazey_data : array-like
+            Vertical gaze coordinates.
+        sample_rate : float
+            Sampling rate in hertz.
+        min_pursuit_dur : float, default 10.0
+            Minimum pursuit duration in seconds.
+        max_pso_dur : float, default 0.0
+            Maximum post-saccadic oscillation duration in seconds.
+        min_fix_dur : float, default 0.05
+            Minimum fixation duration in seconds.
+        min_saccade_duration : float, default 0.04
+            Minimum saccade duration in seconds.
+        sac_max_vel : float, default 1000.0
+            Maximum retained saccade peak velocity in degrees per second.
+        fix_max_amp : float, default 1.5
+            Maximum retained fixation amplitude in degrees.
+        sac_time_thresh : float, default 0.002
+            Temporal tolerance in seconds for fixation-saccade adjacency.
+        drop_fix_from_blink : bool, default True
+            Whether to retain only fixations adjacent to a detected saccade.
+        screen_size : float, default 38.0
+            Physical screen width in centimetres.
+        screen_width : int, default 1920
+            Screen width in pixels.
+        screen_distance : float, default 60.0
+            Viewing distance in centimetres.
+        calib_index : object, default 0
+            Calibration-block identifier copied to event rows.
+        savgol_length : float, default 0.19
+            Savitzky-Golay filter window length in seconds.
+        eyes_recorded : object, optional
+            Source eye-recording label copied to event rows.
+        starting_time : float, optional
+            Recording-time offset in milliseconds.
+        times : array-like, optional
+            Per-sample times in seconds relative to ``starting_time``.
+        pupil_data : array-like, optional
+            Pupil measurements aligned with the gaze arrays.
+        eye : object, optional
+            Eye label copied to event rows.
+        lowpass_cutoff_freq : float, optional
+            Low-pass cutoff in hertz. It must be below Nyquist.
+
+        Returns
+        -------
+        fixations : DataFrame-like
+            Detected fixation events, using the input dataframe library.
+        saccades : DataFrame-like
+            Detected saccade events, using the input dataframe library.
+
+        Raises
+        ------
+        ValueError
+            If configuration values are invalid or the sample arrays have
+            inconsistent lengths.
+        """
         if sample_rate <= 0:
             raise ValueError("sample_rate must be greater than zero.")
         if screen_size <= 0 or screen_width <= 0 or screen_distance <= 0:
@@ -385,6 +516,23 @@ class RemodnavDetection(EyeMovementDetection):
         events = _normalise_remodnav_events(
             classifier(preprocessed, classify_isp=True, sort_events=True)
         )
+
+        finite_times = sample_times[np.isfinite(sample_times)]
+        if finite_times.size:
+            recording_start = float(np.min(finite_times))
+            recording_end = float(np.max(finite_times))
+            bounded_events = []
+            for event in events:
+                bounded = dict(event)
+                bounded["start_time"] = float(
+                    np.clip(bounded["start_time"], recording_start, recording_end)
+                )
+                bounded["end_time"] = float(
+                    np.clip(bounded["end_time"], recording_start, recording_end)
+                )
+                if bounded["end_time"] >= bounded["start_time"]:
+                    bounded_events.append(bounded)
+            events = bounded_events
 
         fixation_events = [event for event in events if event["label"] == "FIXA"]
         saccade_events = [
@@ -504,7 +652,50 @@ class RemodnavDetection(EyeMovementDetection):
         savgol_length: float = 0.19,
         lowpass_cutoff_freq: float | None = None,
     ) -> tuple[Any, Any]:
-        """Detect events for a continuous set of sample row indices."""
+        """Detect events for a continuous set of sample row indices.
+
+        Parameters
+        ----------
+        indices : numpy.ndarray
+            Row indices defining one continuous sample chunk.
+        min_pursuit_dur : float, default 10.0
+            Minimum pursuit duration in seconds.
+        max_pso_dur : float, default 0.0
+            Maximum post-saccadic oscillation duration in seconds.
+        min_fix_dur : float, default 0.05
+            Minimum fixation duration in seconds.
+        sac_max_vel : float, default 1000.0
+            Maximum retained saccade peak velocity in degrees per second.
+        fix_max_amp : float, default 1.5
+            Maximum retained fixation amplitude in degrees.
+        sac_time_thresh : float, default 0.002
+            Temporal tolerance in seconds for fixation-saccade adjacency.
+        drop_fix_from_blink : bool, default True
+            Whether to retain only fixations adjacent to a detected saccade.
+        screen_size : float, default 38.0
+            Physical screen width in centimetres.
+        screen_width : int, default 1920
+            Screen width in pixels.
+        screen_distance : float, default 60.0
+            Viewing distance in centimetres.
+        savgol_length : float, default 0.19
+            Savitzky-Golay filter window length in seconds.
+        lowpass_cutoff_freq : float, optional
+            Low-pass cutoff in hertz. By default, choose a Nyquist-safe value.
+
+        Returns
+        -------
+        fixations : DataFrame-like
+            Detected fixation events for the chunk.
+        saccades : DataFrame-like
+            Detected saccade events for the chunk.
+
+        Raises
+        ------
+        ValueError
+            If the chunk metadata are not constant or no supported gaze
+            coordinate columns are available.
+        """
         indices = np.asarray(indices, dtype=int)
         if indices.size == 0:
             return (
@@ -521,7 +712,7 @@ class RemodnavDetection(EyeMovementDetection):
         calib_index = _validate_constant(calib_values, "Calib_index")
         eyes_recorded = _validate_constant(eyes_values, "Eyes_recorded")
         starting_time = float(timestamps[0])
-        times = np.arange(indices.size, dtype=float) / sample_rate
+        times = (timestamps - starting_time) / 1_000.0
 
         columns = set(_column_names(self.samples))
         streams: list[tuple[str, str, str, str | None]] = []

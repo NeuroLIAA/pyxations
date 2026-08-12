@@ -78,20 +78,20 @@ class Visualization:
 
         Parameters
         ----------
-        fixations
+        fixations : polars.DataFrame
             Polars DataFrame with at least `tStart`, `duration`, `xAvg`, `yAvg`, `phase`.
-        screen_height, screen_width
+        screen_height, screen_width : int
             Stimulus resolution in pixels.
-        folder_path
+        folder_path : str or pathlib.Path, optional
             Directory where 1 PNG per phase will be stored.  If *None*, nothing is saved.
-        tmin, tmax
+        tmin, tmax : int, optional
             Time window in **ms**.  If both `None`, the whole trial is plotted.
-        saccades
+        saccades : polars.DataFrame, optional
             Polars DataFrame with `tStart`, `phase`, …  (optional).
-        samples
+        samples : polars.DataFrame, optional
             Polars DataFrame with gaze traces (`tSample`, `LX`, `LY`, `RX`, `RY` or
             `X`, `Y`) (optional).
-        phase_data
+        phase_data : dict, optional
             Per‑phase extras::
 
                 {
@@ -103,7 +103,7 @@ class Visualization:
                     ...
                 }
 
-        display
+        display : bool, default True
             If *False* the figure canvas is never shown (faster for batch jobs).
 
         Notes
@@ -583,10 +583,20 @@ class Visualization:
     def plot_multipanel(
         self, fixations: pl.DataFrame, saccades: pl.DataFrame, display: bool = True
     ) -> None:
-        """
-        Create a 2×2 multi‑panel diagnostic plot for every non‑empty
-        phase label and save it as PNG in
-        <derivatives_folder_path>/<events_detection_folder>/.
+        """Create and save a diagnostic plot for every non-empty phase.
+
+        Each 2-by-2 figure contains fixation-duration, saccade-amplitude,
+        saccade-direction and main-sequence panels and is saved below the
+        configured derivatives and detector directories.
+
+        Parameters
+        ----------
+        fixations : polars.DataFrame
+            Fixation events containing ``trial_number`` and ``phase``.
+        saccades : polars.DataFrame
+            Saccade events containing ``trial_number`` and ``phase``.
+        display : bool, default True
+            Whether to show each figure interactively in addition to saving it.
         """
         # ── paths & matplotlib style ────────────────────────────────
         folder_path: Path = self.derivatives_folder_path / self.events_detection_folder
@@ -650,40 +660,40 @@ class Visualization:
 
         Parameters
         ----------
-        samples
+        samples : polars.DataFrame
             Polars DataFrame with gaze samples. Must contain 'tSample' and gaze
             position columns ('X', 'Y' or 'LX', 'LY', 'RX', 'RY').
-        screen_height, screen_width
+        screen_height, screen_width : int
             Stimulus resolution in pixels.
-        video_path
+        video_path : str or pathlib.Path, optional
             Path to a video file. If provided, gaze is overlaid on video frames.
-        background_image_path
+        background_image_path : str or pathlib.Path, optional
             Path to a background image. Only used when video_path is None.
             If both are None, a grey background is used.
-        folder_path
+        folder_path : str or pathlib.Path, optional
             Directory where the animation will be saved. If None, nothing is saved.
             The file format depends on `output_format`.
-        tmin, tmax
+        tmin, tmax : int, optional
             Time window in **ms**. If both None, the whole trial is plotted.
-        seconds_to_show
+        seconds_to_show : float, optional
             Limit the animation to the first N seconds. If None, shows all available data.
-        scale_factor
+        scale_factor : float, default 0.5
             Resolution scaling factor (1.0 = original, 0.5 = half resolution).
-        gaze_radius
+        gaze_radius : int, default 10
             Radius of the gaze point circle in pixels (before scaling).
-        gaze_color
+        gaze_color : tuple of int, default (255, 0, 0)
             RGB tuple for gaze point color.
-        fps
+        fps : float, optional
             Frames per second for the animation. If None:
             - With video: uses the video's native FPS
             - Without video: defaults to 60 FPS
-        output_format
+        output_format : {"matplotlib", "html", "mp4", "gif"}, default "matplotlib"
             Output format for saved animations:
             - "matplotlib": Show in matplotlib GUI window (default, blocking)
             - "html": Interactive HTML file (works in browsers)
             - "mp4": Video file (requires ffmpeg)
             - "gif": Animated GIF file (requires pillow)
-        display
+        display : bool, default True
             If True and output_format is "html", returns an HTML object for notebooks.
             If output_format is "matplotlib", this is ignored (always shows window).
             If False, only saves to file (if folder_path is provided).

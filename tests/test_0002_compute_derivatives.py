@@ -42,6 +42,14 @@ def test_examples_generate_canonical_bids_derivatives(generated_datasets, format
         "behavioral_events",
     } <= set(bundle.__dataclass_fields__)
 
+    sample_start = bundle.samples.get_column("tSample").min()
+    sample_end = bundle.samples.get_column("tSample").max()
+    for events in (bundle.fixations, bundle.saccades):
+        if events.is_empty():
+            continue
+        assert events.get_column("tStart").min() >= sample_start
+        assert events.get_column("tEnd").max() <= sample_end
+
 
 @pytest.mark.parametrize("format_name", ["eyelink", "webgazer", "tobii", "gaze"])
 def test_generated_examples_pass_official_bids_validator(
@@ -87,6 +95,21 @@ def test_pupil_accessor_does_not_invent_webcam_measurements(
     experiment.load_data(case["algorithm"])
 
     assert experiment.pupil_samples().is_empty()
+
+
+def test_webgazer_hierarchy_uses_sequential_trial_numbers(generated_datasets):
+    """Raw jsPsych indices must not leak into the public trial lookup API."""
+    case = generated_datasets["webgazer"]
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+
+    session = experiment["0001"][case["session"]]
+    trial = session.get_trial(0)
+
+    assert trial.trial_number == 0
+    assert not trial.samples().is_empty()
+    assert trial.samples().get_column("source_trial_index").n_unique() == 1
+    assert trial.samples().get_column("source_trial_index")[0] != 0
 
 
 def test_generic_trials_support_optional_multimatch(generated_datasets, monkeypatch):

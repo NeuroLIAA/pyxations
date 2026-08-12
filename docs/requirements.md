@@ -50,7 +50,7 @@ The minimum optional versions are:
 
 - `remodnav>=1.1.2`
 - `multimatch-gaze>=0.1.3`
-- `opencv-python>=4.9.0.80`
+- `opencv-python-headless>=4.9.0.80`
 
 Optional modules are imported lazily. Importing the base package does not load these libraries; requesting an unavailable feature raises an error containing the relevant installation command.
 

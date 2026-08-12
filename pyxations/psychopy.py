@@ -101,8 +101,9 @@ def psychopy_log_to_events(
 
     Parameters
     ----------
-    log_file_path
+    log_file_path : str or pathlib.Path
         PsychoPy text log to parse.
+
     Returns
     -------
     polars.DataFrame

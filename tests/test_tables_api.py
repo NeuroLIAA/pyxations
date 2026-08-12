@@ -75,7 +75,9 @@ def test_json_values_and_payload_round_trip():
     }
     assert payload_frame(payload).equals(frame)
     assert payload_frame(None).is_empty()
-    assert payload_frame({"Columns": ["a", "missing"], "Records": [{"a": 1}]}).columns == [
+    assert payload_frame(
+        {"Columns": ["a", "missing"], "Records": [{"a": 1}]}
+    ).columns == [
         "a",
         "missing",
     ]
@@ -128,7 +130,10 @@ def test_compressed_tsv_is_a_valid_gzip_archive(tmp_path):
 
     # Decompress outside Polars: an archive that Polars happens to tolerate
     # would still be unreadable by every other tool that consumes BIDS.
-    assert gzip.decompress(path.read_bytes()) == b"a\tb\n1\tx\n2\ty\nn/a\tz\n"
+    archive = path.read_bytes()
+    assert archive[:2] == b"\x1f\x8b"
+    assert gzip.decompress(archive) == b"a\tb\n1\tx\n2\ty\nn/a\tz\n"
+    assert read_tsv(path, has_header=True).equals(frame)
 
 
 def test_compressed_tsv_is_byte_reproducible(tmp_path):

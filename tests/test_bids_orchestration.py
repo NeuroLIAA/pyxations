@@ -400,19 +400,23 @@ def test_best_eye_fallbacks_and_calibration_groups():
 
     raw.calibration = pl.DataFrame({"Calib_index": [1], "line": ["other"]})
     assert formatting._choose_best_eye(raw, *tables) == tables
-    assert formatting._find_best_eye(
-        pl.DataFrame(
-            {
-                "line": [
-                    "CAL VALIDATION L ABORTED",
-                    "CAL VALIDATION R ABORTED",
-                ]
-            }
+    assert (
+        formatting._find_best_eye(
+            pl.DataFrame(
+                {
+                    "line": [
+                        "CAL VALIDATION L ABORTED",
+                        "CAL VALIDATION R ABORTED",
+                    ]
+                }
+            )
         )
-    ) == "M"
-    assert formatting._find_best_eye(
-        pl.DataFrame({"line": ["CAL VALIDATION LEFT GOOD"]})
-    ) == "L"
+        == "M"
+    )
+    assert (
+        formatting._find_best_eye(pl.DataFrame({"line": ["CAL VALIDATION LEFT GOOD"]}))
+        == "L"
+    )
 
     raw.calibration = pl.DataFrame(
         {

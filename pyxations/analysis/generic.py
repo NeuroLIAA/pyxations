@@ -618,11 +618,24 @@ class Experiment:
         return _collect_frames(self.subjects.values(), "saccades")
 
     def blinks(self):
-        """Return blink events from every loaded subject."""
+        """Return blink events from every loaded subject.
+
+        Returns
+        -------
+        polars.DataFrame
+            Pooled blink-event table.
+        """
         return _collect_frames(self.subjects.values(), "blinks")
 
     def pupil_samples(self):
-        """Return samples containing pupil measurements from every subject."""
+        """Return samples containing pupil measurements from every subject.
+
+        Returns
+        -------
+        polars.DataFrame
+            Pooled sample table containing at least one valid pupil value per
+            row.
+        """
         return _collect_frames(self.subjects.values(), "pupil_samples")
 
     def samples(self):
@@ -1157,7 +1170,14 @@ class Subject:
         )
 
     def blinks(self):
-        """Return blink events with the subject identifier attached."""
+        """Return blink events with the subject identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            Blink-event table pooled across sessions, with a ``subject_id``
+            column.
+        """
         return _collect_frames(
             self.sessions.values(),
             "blinks",
@@ -1165,7 +1185,14 @@ class Subject:
         )
 
     def pupil_samples(self):
-        """Return pupil samples with the subject identifier attached."""
+        """Return pupil samples with the subject identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            Pupil-sample table pooled across sessions, with a ``subject_id``
+            column.
+        """
         return _collect_frames(
             self.sessions.values(),
             "pupil_samples",
@@ -1333,9 +1360,7 @@ class Session:
             total_trials=len(self.trials),
         )
 
-    def _remove_assessed_bad_trials(
-        self, assessment: SessionQualityAssessment
-    ) -> int:
+    def _remove_assessed_bad_trials(self, assessment: SessionQualityAssessment) -> int:
         removed = 0
         for trial_number in assessment.bad_trials:
             if self._trials is None or trial_number not in self._trials:
@@ -1344,9 +1369,7 @@ class Session:
             removed += 1
         return removed
 
-    def remove_bad_trials(
-        self, phase, trial_nan_threshold=0.1, print_flag=True
-    ) -> int:
+    def remove_bad_trials(self, phase, trial_nan_threshold=0.1, print_flag=True) -> int:
         """Remove individual bad trials without applying a session policy.
 
         Unlike :meth:`Subject.remove_bad_trials_and_sessions`, this never
@@ -1681,7 +1704,14 @@ class Session:
         )
 
     def blinks(self):
-        """Return blink events with the session identifier attached."""
+        """Return blink events with the session identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            Blink-event table pooled across trials, with a ``session_id``
+            column.
+        """
         return _collect_frames(
             self.trials.values(),
             "blinks",
@@ -1689,7 +1719,14 @@ class Session:
         )
 
     def pupil_samples(self):
-        """Return pupil samples with the session identifier attached."""
+        """Return pupil samples with the session identifier attached.
+
+        Returns
+        -------
+        polars.DataFrame
+            Pupil-sample table pooled across trials, with a ``session_id``
+            column.
+        """
         return _collect_frames(
             self.trials.values(),
             "pupil_samples",
@@ -1888,6 +1925,12 @@ class Trial:
         """Return blink events for this trial.
 
         Times and durations retain the units used by the source eye tracker.
+
+        Returns
+        -------
+        polars.DataFrame
+            Blink events for the trial, or an empty table with the canonical
+            blink schema when the source contains no blink events.
         """
         if self._blink is None:
             return pl.DataFrame(
@@ -1905,6 +1948,13 @@ class Trial:
         Pupil values retain the units reported by the source eye tracker.
         Depending on the recording, the columns are ``Pupil`` or the
         eye-specific ``LPupil`` and ``RPupil``.
+
+        Returns
+        -------
+        polars.DataFrame
+            Rows from the trial sample table that contain at least one valid
+            pupil measurement. If pupil data were not recorded, an empty table
+            with the sample schema is returned.
         """
         pupil_columns = [
             column
@@ -1950,7 +2000,7 @@ class Trial:
             Height of the stimulus screen in pixels.
         screen_width : int
             Width of the stimulus screen in pixels.
-        **kwargs
+        **kwargs : object
             Extra keyword arguments forwarded to
             :meth:`~pyxations.Visualization.scanpath`, such as ``display`` or a
             background image.
@@ -1995,7 +2045,7 @@ class Trial:
         background_image_path : str or pathlib.Path, optional
             Background image, used only when ``video_path`` is omitted. With
             neither, the background is grey.
-        **kwargs
+        **kwargs : object
             Extra keyword arguments forwarded to
             :meth:`~pyxations.Visualization.plot_animation`:
 
@@ -2039,15 +2089,15 @@ class Trial:
         )
 
     def filter_fixations(self, min_fix_dur: int = 50):
-        """
-        1.  Delete fixations shorter than `min_fix_dur` (ms).
-        2.  Merge the two saccades that flank each deleted fixation
-            into one longer saccade, always staying inside a single
-            (“phase”, “eye”) stream.
+        """Delete short fixations and merge their flanking saccades.
 
-        Returns
-        -------
-        self   # so you can do:  trial.filter_fixations().is_trial_bad()
+        Processing stays within each phase and eye stream and modifies the
+        trial's fixation and saccade tables in place.
+
+        Parameters
+        ----------
+        min_fix_dur : int, default 50
+            Minimum fixation duration to retain, in milliseconds.
         """
         # ─────────────────────── 0 · split keep / drop ──────────────────────
         short_fix = self._fix.filter(pl.col("duration") < min_fix_dur)
@@ -2105,7 +2155,7 @@ class Trial:
         if short_fix_pairs.is_empty():
             # we could not build any (prev,next) pair → only delete fixations
             self._fix = keep_fix.sort(["phase", "tStart"])
-            return self
+            return
 
         # ───────────────────── 3 · join the two saccades ────────────────────
         pair_df = (
@@ -2174,19 +2224,18 @@ class Trial:
         self._sacc = new_sacc
 
     def collapse_fixations(self, threshold_px: float) -> None:
-        """
-        Collapse consecutive fixations that lie ≤ `threshold_px` apart
-        *within each phase separately*.  Saccades whose whole time‑span
-        falls between the first and last fixation of a pool are discarded.
-        The saccade immediately before the pool has its (xEnd, yEnd)
-        adjusted to the merged‑fixation centroid; the saccade immediately
-        after the pool has its (xStart, yStart) adjusted likewise.
+        """Collapse spatially adjacent fixations within each phase and eye.
 
-        After running:
-            self._fix   → collapsed fixations
-            self._sacc  → original saccades minus the discarded ones,
-                        plus the updated coordinates for the two
-                        bordering saccades.
+        Saccades wholly between the first and last fixation in a merged group
+        are discarded. The bordering saccades are adjusted to the merged
+        fixation centroid. The trial's fixation and saccade tables are
+        modified in place.
+
+        Parameters
+        ----------
+        threshold_px : float
+            Maximum Euclidean distance, in pixels, between consecutive
+            fixations that should be merged.
         """
 
         # ────────────────── 0 · prepare helpers ──────────────────

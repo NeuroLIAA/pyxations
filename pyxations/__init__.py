@@ -45,7 +45,7 @@ def __getattr__(name: str) -> Any:
     """Load optional public objects only when they are requested."""
     if name == "RemodnavDetection":
         try:
-            module = import_module(".methods.eyemovement.REMoDNaV", __name__)
+            module = import_module(".methods.eyemovement.remodnav_detector", __name__)
         except ImportError as exc:
             if exc.name and exc.name.startswith("remodnav"):
                 raise ImportError(

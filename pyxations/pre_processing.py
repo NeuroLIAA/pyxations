@@ -32,7 +32,13 @@ class SessionMetadata:
     extra: dict[str, str | int | float | bool | None] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        """Return JSON-serializable metadata."""
+        """Return JSON-serializable metadata.
+
+        Returns
+        -------
+        dict
+            Recording units, screen dimensions, and additional metadata.
+        """
         return {
             "coords_unit": self.coords_unit,
             "time_unit": self.time_unit,
@@ -168,7 +174,23 @@ class PreProcessing:
         screen_height: int | None = None,
         **extra,
     ) -> None:
-        """Update session-level metadata used by preprocessing operations."""
+        """Update session-level metadata used by preprocessing operations.
+
+        Parameters
+        ----------
+        coords_unit : str, optional
+            Unit used for gaze coordinates.
+        time_unit : str, optional
+            Unit used for timestamps and durations.
+        pupil_unit : str, optional
+            Unit used for pupil measurements.
+        screen_width : int, optional
+            Display width in coordinate units.
+        screen_height : int, optional
+            Display height in coordinate units.
+        **extra : object
+            Additional JSON-compatible recording metadata.
+        """
         if coords_unit is not None:
             self.metadata.coords_unit = coords_unit
         if time_unit is not None:
@@ -195,6 +217,28 @@ class PreProcessing:
 
         Python's regular-expression engine is deliberately used instead of a
         dataframe-specific expression so literal/regex behavior stays explicit.
+
+        Parameters
+        ----------
+        messages_dict : dict of str to list of str
+            Phase names mapped to message tokens or regular expressions.
+        case_insensitive : bool, default True
+            Whether matching ignores letter case.
+        use_regex : bool, default True
+            Whether tokens are interpreted as regular expressions.
+        return_match_token : bool, default False
+            Whether to retain the matched token in ``user_messages``.
+
+        Returns
+        -------
+        dict of str to list of int
+            Ordered timestamps for every requested phase.
+
+        Raises
+        ------
+        ValueError
+            If required message columns are absent, a token list is empty, or
+            a regular expression is invalid.
         """
         df = self.user_messages
         self._require_columns(
@@ -293,7 +337,27 @@ class PreProcessing:
         allow_open_last: bool = True,
         require_nonoverlap: bool = True,
     ) -> None:
-        """Segment samples and events using explicit millisecond intervals."""
+        """Segment samples and events using explicit millisecond intervals.
+
+        Parameters
+        ----------
+        start_times : dict of str to list of float
+            Per-phase trial start times in milliseconds.
+        end_times : dict of str to list of float
+            Per-phase trial end times in milliseconds.
+        trial_labels : dict of str to list of str, optional
+            Labels aligned with each phase's intervals.
+        allow_open_last : bool, default True
+            Whether an unmatched final start extends to the last sample.
+        require_nonoverlap : bool, default True
+            Whether overlapping trial intervals raise an error.
+
+        Raises
+        ------
+        ValueError
+            If phase definitions are missing, inconsistent, or overlap when
+            overlap checking is enabled.
+        """
         missing_end_keys = [key for key in start_times if key not in end_times]
         if missing_end_keys:
             raise ValueError(
@@ -349,7 +413,27 @@ class PreProcessing:
         allow_open_last: bool = True,
         require_nonoverlap: bool = True,
     ) -> None:
-        """Segment tables using matched start and end messages."""
+        """Segment tables using matched start and end messages.
+
+        Parameters
+        ----------
+        start_msgs : dict of str to list of str
+            Phase names mapped to start-message patterns.
+        end_msgs : dict of str to list of str
+            Phase names mapped to end-message patterns.
+        trial_labels : dict of str to list of str, optional
+            Labels aligned with each phase's intervals.
+        case_insensitive : bool, default True
+            Whether message matching ignores letter case.
+        use_regex : bool, default True
+            Whether message tokens are regular expressions.
+        return_match_token : bool, default False
+            Whether matched tokens are retained in ``user_messages``.
+        allow_open_last : bool, default True
+            Whether an unmatched final start extends to the last sample.
+        require_nonoverlap : bool, default True
+            Whether overlapping intervals raise an error.
+        """
         matching_options = {
             "case_insensitive": case_insensitive,
             "use_regex": use_regex,
@@ -377,7 +461,32 @@ class PreProcessing:
         allow_open_last: bool = True,
         require_nonoverlap: bool = True,
     ) -> None:
-        """Segment tables using matched start messages and trial durations."""
+        """Segment tables using matched start messages and trial durations.
+
+        Parameters
+        ----------
+        start_msgs : dict of str to list of str
+            Phase names mapped to start-message patterns.
+        durations : dict of str to list of float
+            Trial durations aligned with each phase's matched starts.
+        trial_labels : dict of str to list of str, optional
+            Labels aligned with each phase's intervals.
+        case_insensitive : bool, default True
+            Whether message matching ignores letter case.
+        use_regex : bool, default True
+            Whether message tokens are regular expressions.
+        return_match_token : bool, default False
+            Whether matched tokens are retained in ``user_messages``.
+        allow_open_last : bool, default True
+            Whether an unmatched final start extends to the last sample.
+        require_nonoverlap : bool, default True
+            Whether overlapping intervals raise an error.
+
+        Raises
+        ------
+        ValueError
+            If a phase has no duration definition or too few durations.
+        """
         starts = self.get_timestamps_from_messages(
             start_msgs,
             case_insensitive=case_insensitive,
@@ -499,7 +608,24 @@ class PreProcessing:
         mark_nan_as_bad: bool = True,
         inclusive_bounds: bool = True,
     ) -> None:
-        """Mark rows with out-of-screen or missing coordinates as bad."""
+        """Mark rows with out-of-screen or missing coordinates as bad.
+
+        Parameters
+        ----------
+        screen_height : int, optional
+            Display height, overriding session metadata.
+        screen_width : int, optional
+            Display width, overriding session metadata.
+        mark_nan_as_bad : bool, default True
+            Whether null and NaN coordinates are marked bad.
+        inclusive_bounds : bool, default True
+            Whether coordinates exactly on zero or the upper bound are valid.
+
+        Raises
+        ------
+        ValueError
+            If screen dimensions are unavailable or not positive.
+        """
         height = (
             screen_height if screen_height is not None else self.metadata.screen_height
         )
@@ -555,7 +681,19 @@ class PreProcessing:
     # ---------------------- Public API: Saccade Direction --------------------- #
 
     def saccades_direction(self, tol_deg: float = 15.0) -> None:
-        """Compute saccade angles and cardinal directions."""
+        """Compute saccade angles and cardinal directions.
+
+        Parameters
+        ----------
+        tol_deg : float, default 15.0
+            Angular tolerance around each cardinal direction, in degrees.
+
+        Raises
+        ------
+        ValueError
+            If the tolerance is invalid or required numeric coordinates are
+            absent.
+        """
         if not np.isfinite(tol_deg) or tol_deg < 0 or tol_deg > 90:
             raise ValueError("tol_deg must be a finite value between 0 and 90.")
 
@@ -607,7 +745,27 @@ class PreProcessing:
         recipe_filename: str = "preprocessing_recipe.json",
         provenance_filename: str = "preprocessing_provenance.json",
     ) -> None:
-        """Run a declarative preprocessing recipe."""
+        """Run a declarative preprocessing recipe.
+
+        Parameters
+        ----------
+        functions_and_params : dict of str to dict
+            Ordered public method names and their keyword arguments.
+        log_recipe : bool, default True
+            Whether to write declaration and completion sidecars.
+        recipe_filename : str, default "preprocessing_recipe.json"
+            Filename for the declared recipe.
+        provenance_filename : str, default "preprocessing_provenance.json"
+            Filename for completed-step provenance.
+
+        Raises
+        ------
+        AttributeError
+            If a recipe names an unknown or private operation.
+        TypeError
+            If a named attribute is not callable or its parameters are not a
+            dictionary.
+        """
         if log_recipe:
             self._save_json_sidecar(
                 {
@@ -667,6 +825,19 @@ class PreProcessing:
         ``metadata_df`` must contain one consistent record per ``trial_index``.
         Exact duplicate records are accepted; conflicting duplicate values
         raise an error. Existing requested columns in samples are replaced.
+
+        Parameters
+        ----------
+        metadata_df : polars.DataFrame
+            Trial-indexed behavioral metadata.
+        columns : sequence of str
+            Metadata columns to propagate into the sample table.
+
+        Raises
+        ------
+        ValueError
+            If either table lacks ``trial_index`` or duplicate trials contain
+            conflicting values.
         """
         metadata_df = self._copy_frame(metadata_df, "metadata_df")
         if "trial_index" not in metadata_df.columns:

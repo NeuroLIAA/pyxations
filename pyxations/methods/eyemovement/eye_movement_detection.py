@@ -18,4 +18,12 @@ class EyeMovementDetection(ABC):
 
     @abstractmethod
     def detect_eye_movements(self, *args, **kwargs):
-        """Return detected eye-movement events."""
+        """Return detected eye-movement events.
+
+        Parameters
+        ----------
+        *args : object
+            Positional detector-specific configuration values.
+        **kwargs : object
+            Keyword detector-specific configuration values.
+        """

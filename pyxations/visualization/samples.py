@@ -84,7 +84,22 @@ class SampleVisualization:
         scanpath_file_name: str | Path = "scanpath",
         in_percent: bool = False,
     ) -> None:
-        """Save a scanpath and gaze-over-time plot as a PNG image."""
+        """Save a scanpath and gaze-over-time plot as a PNG image.
+
+        Parameters
+        ----------
+        display : bool, default True
+            Whether to show the figure interactively after saving it.
+        scanpath_file_name : str or pathlib.Path, default "scanpath"
+            Output path without the ``.png`` suffix.
+        in_percent : bool, default False
+            Whether gaze coordinates are fractions of the screen dimensions.
+
+        Raises
+        ------
+        ValueError
+            If the sample table contains no usable gaze samples.
+        """
         x, y = self._gaze_arrays(in_percent=in_percent)
         self._require_samples(x, y)
         timestamps = self._numeric_column("tSample")
@@ -121,7 +136,22 @@ class SampleVisualization:
         in_percent: bool = False,
         out_file: str | Path = "output.gif",
     ) -> None:
-        """Save an animated gaze trace as a GIF image."""
+        """Save an animated gaze trace as a GIF image.
+
+        Parameters
+        ----------
+        display : bool, default True
+            Whether to show the animation interactively before saving it.
+        in_percent : bool, default False
+            Whether gaze coordinates are fractions of the screen dimensions.
+        out_file : str or pathlib.Path, default "output.gif"
+            Destination GIF path.
+
+        Raises
+        ------
+        ValueError
+            If the sample table contains no usable gaze samples.
+        """
         x, y = self._gaze_arrays(in_percent=in_percent)
         self._require_samples(x, y)
 

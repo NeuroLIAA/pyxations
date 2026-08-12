@@ -55,11 +55,11 @@ from pyxations import Experiment
 exp = Experiment(dataset_path=bids_path)
 exp.load_data("eyelink")
 
-print(list(exp.subjects.keys()))   # ['0001']
+print(list(exp.subjects.keys()))  # ['0001']
 
 subject = exp.subjects["0001"]
 session = subject.sessions["second"]
-trial   = session.get_trial(0)
+trial = session.get_trial(0)
 
 print(trial.fixations().head())
 print(trial.saccades().head())
@@ -84,7 +84,8 @@ TSV.GZ/JSON outputs remain validator-compatible after plotting.
 - [Concepts](concepts.md): what the BIDS and derivatives folders actually contain, and how to pick a detection algorithm.
 - [API reference](api/index.md): every public function and class.
 
-For longer walkthroughs see the notebooks in [`notebooks/`](https://github.com/NeuroLIAA/pyxations/tree/main/notebooks):
+For longer walkthroughs see the notebooks in
+[`docs/tutorials/`](https://github.com/NeuroLIAA/pyxations/tree/main/docs/tutorials):
 
 - `eyelink_example.ipynb`: full EyeLink pipeline.
 - `tobii_example.ipynb`: Tobii tabular export to BIDS and derivatives.

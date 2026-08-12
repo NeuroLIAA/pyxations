@@ -428,9 +428,7 @@ def test_generic_quality_prints_and_trial_edge_paths(
             "Y": [1.0, None, 2.0],
         }
     )
-    trial._blink = pl.DataFrame(
-        {"tStart": [0.5], "tEnd": [1.5], "duration": [1.0]}
-    )
+    trial._blink = pl.DataFrame({"tStart": [0.5], "tEnd": [1.5], "duration": [1.0]})
     assert not trial.is_trial_bad("search", threshold=0)
 
 

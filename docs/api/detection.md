@@ -24,4 +24,4 @@ Velocity-threshold detection following Engbert and Mergenthaler.
 Adapter for REMoDNaV. Requires the optional `remodnav` extra, installed with
 `pip install 'pyxations[remodnav]'`.
 
-::: pyxations.methods.eyemovement.REMoDNaV
+::: pyxations.methods.eyemovement.remodnav_detector

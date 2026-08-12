@@ -55,7 +55,9 @@ def test_feature_dependencies_have_dedicated_extras():
 
     assert {_package_name(item) for item in extras["remodnav"]} == {"remodnav"}
     assert {_package_name(item) for item in extras["multimatch"]} == {"multimatch-gaze"}
-    assert {_package_name(item) for item in extras["video"]} == {"opencv-python"}
+    assert {_package_name(item) for item in extras["video"]} == {
+        "opencv-python-headless"
+    }
 
 
 def test_all_extra_is_union_of_feature_extras():

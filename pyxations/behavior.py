@@ -30,6 +30,24 @@ def normalize_behavioral_events(
     Mapping is intentionally independent of the source format. This lets a
     PsychoPy log, CSV, TSV, or future adapter satisfy the same experiment
     schema without embedding task semantics in the format parser.
+
+    Parameters
+    ----------
+    events : polars.DataFrame
+        Behavioral event table in its source-specific schema.
+    column_map : mapping of str to str, optional
+        Mapping from source column names to experiment-level names.
+
+    Returns
+    -------
+    polars.DataFrame
+        The original table when no mapping is supplied, otherwise a table with
+        the requested column names.
+
+    Raises
+    ------
+    ValueError
+        If a source column is absent or the mapping would create duplicates.
     """
 
     if not column_map:
@@ -59,6 +77,23 @@ def read_behavioral_events(
     The returned table retains source values and applies the same optional
     experiment-level column mapping regardless of its input format. BIDS
     timing normalization is performed later by the dataset writer.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Behavioral CSV, TSV, or PsychoPy log to read.
+    column_map : mapping of str to str, optional
+        Mapping from source column names to experiment-level names.
+
+    Returns
+    -------
+    polars.DataFrame
+        Parsed behavioral events in the source-independent tabular form.
+
+    Raises
+    ------
+    ValueError
+        If the file extension is unsupported or the column mapping is invalid.
     """
 
     path = Path(path)

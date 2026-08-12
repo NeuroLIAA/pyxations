@@ -16,11 +16,11 @@ The pipeline has three stages:
 import pyxations as pyx
 
 bids_path = pyx.dataset_to_bids(
-    target_folder_path="path/to/output",        # where the BIDS dataset will be created
-    files_folder_path="path/to/raw/files",      # folder containing raw recordings
+    target_folder_path="path/to/output",  # where the BIDS dataset will be created
+    files_folder_path="path/to/raw/files",  # folder containing raw recordings
     dataset_name="my_experiment",
-    format_name="eyelink",                      # eyelink | tobii | gaze | webgazer
-    task_name="visualsearch",                   # fallback when task- is not in filenames
+    format_name="eyelink",  # eyelink | tobii | gaze | webgazer
+    task_name="visualsearch",  # fallback when task- is not in filenames
 )
 ```
 
@@ -131,8 +131,8 @@ DataFrames rather than tying downstream code to TSV files.
 ```python
 pyx.compute_derivatives_for_dataset(
     bids_dataset_folder="path/to/output/my_experiment",
-    dataset_format="eyelink",            # "eyelink" | "tobii" | "gaze" | "webgazer"
-    detection_algorithm="remodnav",      # "remodnav" | "engbert" | "eyelink"
+    dataset_format="eyelink",  # "eyelink" | "tobii" | "gaze" | "webgazer"
+    detection_algorithm="remodnav",  # "remodnav" | "engbert" | "eyelink"
     msg_keywords=["begin", "end", "press"],
     start_msgs={"search": ["beginning_of_stimuli"]},
     end_msgs={"search": ["end_of_stimuli"]},
@@ -178,15 +178,15 @@ Once derivatives exist, the high-level `Experiment` API gives access to per-subj
 from pyxations import Experiment
 
 exp = Experiment(dataset_path="path/to/output/my_experiment")
-exp.load_data("remodnav")   # must match the detection_algorithm you computed
+exp.load_data("remodnav")  # must match the detection_algorithm you computed
 
 for subject_id, subject in exp.subjects.items():
     for session_id, session in subject.sessions.items():
-        fixations = session.fixations()   # polars.DataFrame
-        saccades  = session.saccades()    # polars.DataFrame
-        blinks    = session.blinks()      # polars.DataFrame
-        samples   = session.samples()     # polars.DataFrame (raw gaze)
-        pupil     = session.pupil_samples()  # rows with pupil measurements
+        fixations = session.fixations()  # polars.DataFrame
+        saccades = session.saccades()  # polars.DataFrame
+        blinks = session.blinks()  # polars.DataFrame
+        samples = session.samples()  # polars.DataFrame (raw gaze)
+        pupil = session.pupil_samples()  # rows with pupil measurements
 
 # Access a specific trial
 trial = exp.get_trial(subject_id="0001", session_id="second", trial_number=0)
@@ -261,7 +261,8 @@ See [`pyxations.visualization`](api/visualization.md) for the full plot catalog.
 
 ## Worked examples
 
-The repository includes focused notebooks under [`notebooks/`](https://github.com/NeuroLIAA/pyxations/tree/main/notebooks):
+The repository includes focused notebooks under
+[`docs/tutorials/`](https://github.com/NeuroLIAA/pyxations/tree/main/docs/tutorials):
 
 - `eyelink_example.ipynb`: full EyeLink pipeline on the bundled example dataset.
 - `tobii_example.ipynb`: complete workflow for a Tobii tabular export.

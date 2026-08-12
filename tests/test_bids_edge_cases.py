@@ -194,7 +194,12 @@ def test_validator_command_and_success_paths(tmp_path, monkeypatch):
         "which",
         lambda name: "C:/bin/deno" if name == "deno" else None,
     )
-    assert bids.validator_command()[:4] == ["C:/bin/deno", "run", "-ERWN", "jsr:@bids/validator@3.0.1"]
+    assert bids.validator_command()[:4] == [
+        "C:/bin/deno",
+        "run",
+        "-ERWN",
+        "jsr:@bids/validator@3.0.1",
+    ]
 
     monkeypatch.setattr(bids.shutil, "which", lambda name: None)
     assert bids.validator_command() is None
@@ -270,9 +275,9 @@ def test_webgazer_samples_and_events_share_one_numbering(tmp_path):
 def test_unsupported_gaze_exports_name_the_format_that_is_expected(tmp_path):
     """A Titta or Gorilla user should learn why their file was rejected."""
     tobii_path = tmp_path / "s01_A_task-look.txt"
-    pl.DataFrame({"Recording timestamp": [0, 1], "something_else": [1.0, 2.0]}).write_csv(
-        tobii_path, separator="\t"
-    )
+    pl.DataFrame(
+        {"Recording timestamp": [0, 1], "something_else": [1.0, 2.0]}
+    ).write_csv(tobii_path, separator="\t")
     with pytest.raises(ValueError, match="Titta"):
         bids._read_tobii(tobii_path)
 

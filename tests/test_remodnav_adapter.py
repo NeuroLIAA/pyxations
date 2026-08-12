@@ -9,7 +9,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from pyxations.methods.eyemovement import REMoDNaV as remodnav_module
+from pyxations.methods.eyemovement import remodnav_detector as remodnav_module
 
 
 class _FakeClassifier:
@@ -106,6 +106,30 @@ def test_low_sample_rate_uses_nyquist_safe_lowpass(monkeypatch, tmp_path):
         )
 
 
+def test_detector_events_are_clipped_to_the_recording_interval(monkeypatch, tmp_path):
+    """Filter padding must not create events after the final gaze sample."""
+
+    class OutOfBoundsClassifier(_FakeClassifier):
+        def __call__(self, preprocessed, classify_isp=True, sort_events=True):
+            return [(0.05, 0.50, "SACC", 1, 2, 3, 4, 0.5, 20, 10, 12)]
+
+    monkeypatch.setattr(remodnav_module, "EyegazeClassifier", OutOfBoundsClassifier)
+    samples = pl.DataFrame(
+        {
+            "tSample": np.arange(20, dtype=float) * 10,
+            "X": np.arange(20, dtype=float),
+            "Y": np.arange(20, dtype=float),
+        }
+    )
+
+    _, saccades = remodnav_module.RemodnavDetection(
+        tmp_path, samples
+    ).run_eye_movement_from_samples(100)
+
+    assert saccades.get_column("tStart").min() >= samples["tSample"].min()
+    assert saccades.get_column("tEnd").max() <= samples["tSample"].max()
+
+
 def test_remodnav_helpers_accept_supported_event_containers():
     values = (0.0, 0.1, "FIXA", 1, 2, 1.5, 2.5, 0.2, 3, 2, 2.5)
     Event = namedtuple("Event", remodnav_module._EVENT_COLUMNS)
@@ -145,9 +169,12 @@ def test_remodnav_constant_metadata_validation():
     assert math.isnan(
         remodnav_module._validate_constant(np.array([np.nan, np.nan]), "metadata")
     )
-    assert remodnav_module._validate_constant(
-        np.array([None, None], dtype=object), "metadata"
-    ) is None
+    assert (
+        remodnav_module._validate_constant(
+            np.array([None, None], dtype=object), "metadata"
+        )
+        is None
+    )
     with pytest.raises(ValueError, match="constant"):
         remodnav_module._validate_constant(np.array([1, 2]), "metadata")
 
@@ -164,9 +191,7 @@ def test_remodnav_detector_validation_and_empty_paths(tmp_path):
         {"tSample": [0.0], "Rate_recorded": [0.0], "X": [1.0], "Y": [1.0]}
     )
     with pytest.raises(ValueError, match="Rate_recorded"):
-        remodnav_module.RemodnavDetection(
-            tmp_path, invalid_rate
-        ).detect_eye_movements()
+        remodnav_module.RemodnavDetection(tmp_path, invalid_rate).detect_eye_movements()
 
     samples = pl.DataFrame({"tSample": [0.0], "X": [1.0], "Y": [1.0]})
     detector = remodnav_module.RemodnavDetection(tmp_path, samples)

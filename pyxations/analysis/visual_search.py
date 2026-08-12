@@ -2162,7 +2162,7 @@ class VisualSearchTrial(Trial):
             Height of the stimulus screen in pixels.
         screen_width : int
             Width of the stimulus screen in pixels.
-        **kwargs
+        **kwargs : object
             Extra keyword arguments forwarded to
             :meth:`~pyxations.Visualization.scanpath`, such as ``display``.
         """
@@ -2227,7 +2227,7 @@ class VisualSearchTrial(Trial):
             Background image, used only when ``video_path`` is omitted. With
             neither, the search stimulus is used when available, and a grey
             background otherwise.
-        **kwargs
+        **kwargs : object
             Extra keyword arguments forwarded to
             :meth:`~pyxations.Visualization.plot_animation`:
 

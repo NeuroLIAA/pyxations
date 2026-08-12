@@ -16,7 +16,11 @@ permissions:
 
 jobs:
   docs:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +48,7 @@ jobs:
       # revision they commented on. Drop it from this list once it merges.
       - name: Deploy
         if: >-
+          matrix.os == 'ubuntu-latest' &&
           github.event_name != 'pull_request' &&
           (github.ref == 'refs/heads/main' ||
            github.ref == 'refs/heads/reviewer-changes')

@@ -135,6 +135,32 @@ def test_scanpath_still_drops_unphased_rows_when_phases_exist(tmp_path):
     assert not (output / "scanpath_0_unphased.png").exists()
 
 
+def test_scanpath_handles_more_than_255_fixations(tmp_path):
+    """Fixation labels must not be cast through an eight-bit colour index."""
+    count = 300
+    fixations = pl.DataFrame(
+        {
+            "trial_number": [0] * count,
+            "phase": ["search"] * count,
+            "tStart": np.arange(count, dtype=float) * 10,
+            "duration": [5.0] * count,
+            "xAvg": np.linspace(0, 99, count),
+            "yAvg": np.linspace(99, 0, count),
+        }
+    )
+    output = tmp_path / "plots"
+
+    Visualization(tmp_path, "remodnav").scanpath(
+        fixations,
+        screen_height=100,
+        screen_width=100,
+        folder_path=output,
+        display=False,
+    )
+
+    assert (output / "scanpath_0_search.png").exists()
+
+
 def test_visualization_summary_plots_and_multipanel(tmp_path):
     fixations, saccades, _ = _plot_tables()
     visualization = Visualization(tmp_path, "engbert")
@@ -346,9 +372,7 @@ def test_animation_video_and_writer_failures(tmp_path, monkeypatch):
     monkeypatch.setattr(matplotlib.animation, "FuncAnimation", _FakeAnimation)
     video = tmp_path / "video.mp4"
     video.write_bytes(b"placeholder")
-    samples = pl.DataFrame(
-        {"tSample": [0.0, 100.0], "X": [1.0, 2.0], "Y": [1.0, 2.0]}
-    )
+    samples = pl.DataFrame({"tSample": [0.0, 100.0], "X": [1.0, 2.0], "Y": [1.0, 2.0]})
     visualization = Visualization(tmp_path, "remodnav")
 
     monkeypatch.setattr(
@@ -402,9 +426,7 @@ def test_animation_optional_dependency_and_html_display(tmp_path, monkeypatch):
     ipython_module.display = display_module
     monkeypatch.setitem(sys.modules, "IPython", ipython_module)
     monkeypatch.setitem(sys.modules, "IPython.display", display_module)
-    samples = pl.DataFrame(
-        {"tSample": [0.0, 100.0], "X": [1.0, 2.0], "Y": [1.0, 2.0]}
-    )
+    samples = pl.DataFrame({"tSample": [0.0, 100.0], "X": [1.0, 2.0], "Y": [1.0, 2.0]})
     visualization = Visualization(tmp_path, "remodnav")
 
     result = visualization.plot_animation(

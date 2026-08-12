@@ -70,7 +70,7 @@ def _detector_type(name):
 
     if name == "remodnav":
         try:
-            module = import_module("pyxations.methods.eyemovement.REMoDNaV")
+            module = import_module("pyxations.methods.eyemovement.remodnav_detector")
         except ImportError as exc:
             if exc.name and exc.name.startswith("remodnav"):
                 raise ImportError(
@@ -371,7 +371,23 @@ def process_bids_session(
     force_best_eye,
     **kwargs,
 ):
-    """Compute and write one derivative session from normalized raw BIDS."""
+    """Compute and write one derivative session from normalized raw BIDS.
+
+    Parameters
+    ----------
+    raw_session_path : str or pathlib.Path
+        Raw BIDS session directory to process.
+    dataset_format : {"eyelink", "gaze", "tobii", "webgazer"}
+        Source format recorded in the raw dataset.
+    detection_algorithm : {"eyelink", "engbert", "remodnav"}
+        Event source or detector used for the derivative.
+    session_folder_path : str or pathlib.Path
+        Destination derivative session directory.
+    force_best_eye : bool
+        Whether to retain only the eye with the best EyeLink validation.
+    **kwargs : object
+        Detector, trial-segmentation, quality, and behavioral options.
+    """
 
     raw = read_raw_bids_session(raw_session_path)
     session_folder_path = Path(session_folder_path)
@@ -497,6 +513,32 @@ def dataset_to_bids(
     PsychoPy logs are used when no behavioral CSV or TSV exists for the
     recording. ``behavioral_column_map`` can map fields from any behavioral
     source onto experiment-level names without changing the archived source.
+
+    Parameters
+    ----------
+    target_folder_path : str or pathlib.Path
+        Parent directory in which to create the dataset.
+    files_folder_path : str or pathlib.Path
+        Directory containing vendor recordings and associated behavior.
+    dataset_name : str
+        Output directory and BIDS dataset name.
+    session_substrings : int, default 1
+        Number of underscore-separated filename tokens used for the session.
+    format_name : {"eyelink", "gaze", "tobii", "webgazer"}
+        Vendor reader used for the source recordings.
+    task_name : str, default "eyetracking"
+        Fallback BIDS task label.
+    authors : sequence of str, optional
+        Dataset authors stored in BIDS metadata.
+    behavioral_column_map : mapping of str to str, optional
+        Mapping from source behavioral fields to experiment concepts.
+    overwrite : bool, default False
+        Whether to replace an existing non-empty output dataset.
+
+    Returns
+    -------
+    pathlib.Path
+        Root of the generated raw BIDS dataset.
     """
 
     return write_bids_dataset(
@@ -521,7 +563,30 @@ def process_session(
     overwrite,
     **kwargs,
 ):
-    """Process one raw BIDS session unless its requested output already exists."""
+    """Process one raw BIDS session unless its requested output already exists.
+
+    Parameters
+    ----------
+    raw_session_path : str or pathlib.Path
+        Raw BIDS session directory.
+    dataset_format : {"eyelink", "gaze", "tobii", "webgazer"}
+        Source format recorded in the raw dataset.
+    detection_algorithm : {"eyelink", "engbert", "remodnav"}
+        Event source or detector to use.
+    session_folder_path : str or pathlib.Path
+        Destination derivative session directory.
+    force_best_eye : bool
+        Whether to retain only the best validated EyeLink eye.
+    overwrite : bool
+        Whether to replace an existing derivative session.
+    **kwargs : object
+        Options forwarded to :func:`process_bids_session`.
+
+    Raises
+    ------
+    ValueError
+        If ``dataset_format`` is unsupported.
+    """
 
     session_folder_path = Path(session_folder_path)
     label = bids_label(detection_algorithm.lower(), fallback="pyxations")
@@ -558,6 +623,37 @@ def compute_derivatives_for_dataset(
     Processing is serial by default to avoid process-startup and serialization
     costs for small datasets. Set ``num_processes`` above one for large
     collections of independent sessions.
+
+    Parameters
+    ----------
+    bids_dataset_folder : str or pathlib.Path
+        Root of the raw BIDS dataset.
+    dataset_format : {"eyelink", "gaze", "tobii", "webgazer"}
+        Source format represented by the dataset.
+    detection_algorithm : {"eyelink", "engbert", "remodnav"}, default "remodnav"
+        Event source or detector used for every session.
+    num_processes : int, default 1
+        Number of independent session workers.
+    force_best_eye : bool, default True
+        Whether to retain only the best validated EyeLink eye.
+    overwrite : bool, default False
+        Whether to replace existing derivative sessions.
+    behavioral_columns : sequence of str, optional
+        Behavioral fields propagated into trial-level derivative tables.
+    **kwargs : object
+        Detector, segmentation, quality, and metadata options.
+
+    Returns
+    -------
+    pathlib.Path
+        Root of the generated BIDS Derivatives dataset.
+
+    Raises
+    ------
+    TypeError
+        If ``num_processes`` is not an integer.
+    ValueError
+        If ``num_processes`` is less than one.
     """
 
     bids_dataset_folder = Path(bids_dataset_folder)

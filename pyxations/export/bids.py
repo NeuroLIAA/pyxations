@@ -92,7 +92,20 @@ def initialize_bids_derivative(
     raw_dataset: str | Path,
     derivative_dataset: str | Path,
 ) -> Path:
-    """Create dataset-level metadata for a standalone BIDS Derivatives dataset."""
+    """Create dataset-level metadata for a standalone BIDS Derivatives dataset.
+
+    Parameters
+    ----------
+    raw_dataset : str or pathlib.Path
+        Source raw BIDS dataset.
+    derivative_dataset : str or pathlib.Path
+        Destination derivative dataset.
+
+    Returns
+    -------
+    pathlib.Path
+        Initialized derivative dataset root.
+    """
 
     raw_root = Path(raw_dataset)
     derivative_root = Path(derivative_dataset)
@@ -265,7 +278,27 @@ class BIDSDerivativeExport:
         *,
         detection_algorithm: str,
     ) -> tuple[Path, Path | None]:
-        """Write one processed sample stream and its event annotations."""
+        """Write one processed sample stream and its event annotations.
+
+        Parameters
+        ----------
+        session_path : str or pathlib.Path
+            Derivative session directory.
+        tables : SessionTables
+            Processed samples, events, behavior, and metadata to persist.
+        detection_algorithm : str
+            Detector label incorporated into the BIDS recording entity.
+
+        Returns
+        -------
+        tuple of pathlib.Path and pathlib.Path or None
+            Sample path and optional physiological-event path.
+
+        Raises
+        ------
+        ValueError
+            If samples lack required coordinates or valid timestamps.
+        """
 
         session_path = Path(session_path)
         sample_frame = tables.samples
@@ -605,7 +638,25 @@ class BIDSDerivativeExport:
     def read_session(
         self, session_path: str | Path, detection_algorithm: str
     ) -> SessionTables:
-        """Load BIDS derivatives into the canonical session table model."""
+        """Load BIDS derivatives into the canonical session table model.
+
+        Parameters
+        ----------
+        session_path : str or pathlib.Path
+            Derivative session directory containing ``beh``.
+        detection_algorithm : str
+            Detector label used when the derivative files were written.
+
+        Returns
+        -------
+        SessionTables
+            Reconstructed samples, events, behavior, and metadata.
+
+        Raises
+        ------
+        FileNotFoundError
+            If no matching derivative physiological recording exists.
+        """
 
         session_path = Path(session_path)
         label = bids_label(detection_algorithm.lower(), fallback="pyxations")

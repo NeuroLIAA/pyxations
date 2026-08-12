@@ -113,7 +113,29 @@ def _smooth_1d(values: np.ndarray, smoothlevel: int) -> np.ndarray:
 
 
 def vecvel(gaze_xy: np.ndarray, fs: float, smoothlevel: int = 1) -> np.ndarray:
-    """Calculate two-dimensional gaze velocity in pixels per second."""
+    """Calculate two-dimensional gaze velocity in pixels per second.
+
+    Parameters
+    ----------
+    gaze_xy : numpy.ndarray
+        Gaze coordinates with shape ``(n_samples, 2)``.
+    fs : float
+        Sampling rate in hertz.
+    smoothlevel : int, default 1
+        Smoothing-kernel level. Zero disables smoothing; levels one and two
+        use progressively wider kernels.
+
+    Returns
+    -------
+    numpy.ndarray
+        Horizontal and vertical velocities with the same shape as
+        ``gaze_xy``.
+
+    Raises
+    ------
+    ValueError
+        If the coordinates do not have two columns or ``fs`` is not positive.
+    """
     gaze_xy = np.asarray(gaze_xy, dtype=float)
     if gaze_xy.ndim != 2 or gaze_xy.shape[1] != 2:
         raise ValueError("gaze_xy must have shape (n_samples, 2).")
@@ -150,7 +172,19 @@ def _robust_std(values: np.ndarray) -> float:
 
 
 def velthresh(vxy: np.ndarray) -> tuple[float, float]:
-    """Return robust horizontal and vertical velocity thresholds."""
+    """Return robust horizontal and vertical velocity thresholds.
+
+    Parameters
+    ----------
+    vxy : numpy.ndarray
+        Horizontal and vertical velocities with shape ``(n_samples, 2)``.
+
+    Returns
+    -------
+    tuple of float
+        Robust standard deviations for the horizontal and vertical velocity
+        components.
+    """
     return _robust_std(vxy[:, 0]), _robust_std(vxy[:, 1])
 
 
@@ -182,6 +216,27 @@ def microsacc_plugin(
     Columns are onset, offset, duration in samples, average velocity, peak
     velocity, travelled distance, angle, amplitude, direction, epoch, x0, y0,
     x1, and y1.
+
+    Parameters
+    ----------
+    pos_xy : numpy.ndarray
+        Gaze coordinates with shape ``(n_samples, 2)``.
+    vel_xy : numpy.ndarray
+        Gaze velocities with shape ``(n_samples, 2)``.
+    vfac : float
+        Multiplier applied to the robust velocity thresholds.
+    mindur_samples : int
+        Minimum number of consecutive samples required for a saccade.
+    sdx : float
+        Robust horizontal velocity scale.
+    sdy : float
+        Robust vertical velocity scale.
+
+    Returns
+    -------
+    numpy.ndarray
+        One row per detected saccade and fourteen event columns. An empty
+        ``(0, 14)`` array is returned when no saccades are found.
     """
     vx, vy = vel_xy[:, 0], vel_xy[:, 1]
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -398,6 +453,45 @@ class EngbertDetection(EyeMovementDetection):
         contain left/right columns (``LX``, ``LY``, ``RX``, ``RY``) or generic
         columns (``X``, ``Y``).  Pupil measurements are summarized when a
         corresponding pupil column is available; otherwise ``pupilAvg`` is NaN.
+
+        Parameters
+        ----------
+        vfac : float, default 5.0
+            Multiplier applied to the robust velocity threshold.
+        mindur_ms : float, default 6.0
+            Minimum saccade duration in milliseconds.
+        smoothlevel : int, default 1
+            Smoothing-kernel level used before calculating velocity.
+        globalthresh : bool, default True
+            If true, estimate one threshold per eye across all chunks;
+            otherwise estimate thresholds separately for each chunk.
+        degperpixel : float, optional
+            Degrees of visual angle per pixel. When omitted, calculate it from
+            the screen geometry.
+        screen_size_cm : float, default 38.0
+            Physical screen width in centimetres.
+        screen_width_px : int, default 1920
+            Screen width in pixels.
+        screen_distance_cm : float, default 60.0
+            Viewing distance in centimetres.
+        sample_rate_fallback : float, optional
+            Sampling rate used only when it cannot be measured from timestamps
+            and is not present in ``Rate_recorded``.
+
+        Returns
+        -------
+        fixations : DataFrame-like
+            Detected fixation events, using the same dataframe library as the
+            input samples.
+        saccades : DataFrame-like
+            Detected saccade events, using the same dataframe library as the
+            input samples.
+
+        Raises
+        ------
+        ValueError
+            If a numeric configuration value is invalid or the sample rate
+            cannot be determined.
         """
         if not np.isfinite(vfac) or vfac <= 0:
             raise ValueError("vfac must be finite and greater than zero.")

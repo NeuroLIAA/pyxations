@@ -17,13 +17,37 @@ import polars as pl
 
 
 def empty_frame() -> pl.DataFrame:
-    """Return a new empty Polars frame for dataclass defaults."""
+    """Return a new empty Polars frame for dataclass defaults.
+
+    Returns
+    -------
+    polars.DataFrame
+        New schema-less empty table.
+    """
 
     return pl.DataFrame()
 
 
 def as_polars(frame: Any | None, *, name: str = "table") -> pl.DataFrame:
-    """Clone a Polars table, or create an empty one for ``None``."""
+    """Clone a Polars table, or create an empty one for ``None``.
+
+    Parameters
+    ----------
+    frame : polars.DataFrame or None
+        Table to clone. ``None`` creates a schema-less empty table.
+    name : str, default "table"
+        Human-readable value name used in type errors.
+
+    Returns
+    -------
+    polars.DataFrame
+        Independent clone of ``frame`` or a new empty table.
+
+    Raises
+    ------
+    TypeError
+        If ``frame`` is neither a Polars DataFrame nor ``None``.
+    """
 
     if frame is None:
         return pl.DataFrame()
@@ -70,7 +94,18 @@ class SessionTables:
             self.sampling_frequency = frequency
 
     def clone(self, **updates: Any) -> SessionTables:
-        """Return an independent copy, optionally replacing selected fields."""
+        """Return an independent copy, optionally replacing selected fields.
+
+        Parameters
+        ----------
+        **updates : object
+            Field values to replace in the cloned session container.
+
+        Returns
+        -------
+        SessionTables
+            Independent container whose table fields are cloned.
+        """
 
         values = {
             "samples": self.samples,
@@ -90,7 +125,18 @@ class SessionTables:
 
 
 def json_value(value: Any) -> Any:
-    """Convert scalar or nested table values to JSON-safe values."""
+    """Convert scalar or nested table values to JSON-safe values.
+
+    Parameters
+    ----------
+    value : object
+        Scalar, sequence, mapping, date, or Polars series to normalize.
+
+    Returns
+    -------
+    object
+        Recursively normalized value accepted by the standard JSON encoder.
+    """
 
     if value is None:
         return None
@@ -121,7 +167,18 @@ def json_value(value: Any) -> Any:
 
 
 def frame_payload(frame: Any | None) -> dict[str, Any]:
-    """Serialize a table into an explicitly column-ordered JSON payload."""
+    """Serialize a table into an explicitly column-ordered JSON payload.
+
+    Parameters
+    ----------
+    frame : polars.DataFrame or None
+        Table to serialize.
+
+    Returns
+    -------
+    dict
+        Payload containing ordered ``Columns`` and row ``Records``.
+    """
 
     table = as_polars(frame)
     records = [
@@ -132,7 +189,18 @@ def frame_payload(frame: Any | None) -> dict[str, Any]:
 
 
 def payload_frame(payload: Mapping[str, Any] | None) -> pl.DataFrame:
-    """Deserialize a canonical table payload."""
+    """Deserialize a canonical table payload.
+
+    Parameters
+    ----------
+    payload : mapping or None
+        Payload containing optional ``Columns`` and ``Records`` entries.
+
+    Returns
+    -------
+    polars.DataFrame
+        Reconstructed table, preserving the recorded column order.
+    """
 
     if not payload:
         return pl.DataFrame()
@@ -154,7 +222,18 @@ def _tabular_json(value: Any) -> str | None:
 
 
 def tabular_frame(frame: Any | None) -> pl.DataFrame:
-    """Return a TSV-safe frame with nested objects encoded as JSON strings."""
+    """Return a TSV-safe frame with nested objects encoded as JSON strings.
+
+    Parameters
+    ----------
+    frame : polars.DataFrame or None
+        Table to normalize for BIDS tabular output.
+
+    Returns
+    -------
+    polars.DataFrame
+        Clone with non-finite floats nulled and nested values JSON-encoded.
+    """
 
     table = as_polars(frame)
     if table.is_empty() or not table.columns:
@@ -185,7 +264,24 @@ def write_tsv(
     include_header: bool,
     compressed: bool,
 ) -> Path:
-    """Write a deterministic BIDS TSV, optionally gzip-compressed."""
+    """Write a deterministic BIDS TSV, optionally gzip-compressed.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Destination filename.
+    frame : polars.DataFrame
+        Table to serialize.
+    include_header : bool
+        Whether to write column names as the first row.
+    compressed : bool
+        Whether to create a deterministic gzip stream.
+
+    Returns
+    -------
+    pathlib.Path
+        Destination path after the file has been written.
+    """
 
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -199,11 +295,12 @@ def write_tsv(
         # produces a corrupt archive. A BytesIO has no fileno(), so the text
         # actually goes through the compressor.
         buffer = io.BytesIO()
-        with gzip.GzipFile(
-            filename="", fileobj=buffer, mode="wb", mtime=0
-        ) as gzip_stream, io.TextIOWrapper(
-            gzip_stream, encoding="utf-8", newline=""
-        ) as text_stream:
+        with (
+            gzip.GzipFile(
+                filename="", fileobj=buffer, mode="wb", mtime=0
+            ) as gzip_stream,
+            io.TextIOWrapper(gzip_stream, encoding="utf-8", newline="") as text_stream,
+        ):
             table.write_csv(
                 text_stream,
                 separator="\t",
@@ -228,7 +325,24 @@ def read_tsv(
     has_header: bool,
     schema_overrides: Mapping[str, pl.DataType] | None = None,
 ) -> pl.DataFrame:
-    """Read a BIDS TSV using Polars with stable null handling."""
+    """Read a BIDS TSV using Polars with stable null handling.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Plain or gzip-compressed TSV file.
+    columns : sequence of str, optional
+        Column names for a headerless table.
+    has_header : bool
+        Whether the first row contains column names.
+    schema_overrides : mapping, optional
+        Polars data types to impose on selected columns.
+
+    Returns
+    -------
+    polars.DataFrame
+        Parsed table with BIDS ``n/a`` values represented as nulls.
+    """
 
     options: dict[str, Any] = {
         "separator": "\t",

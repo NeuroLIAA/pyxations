@@ -110,8 +110,8 @@ bids_path = pyx.dataset_to_bids(
 
 # 2) Compute derivatives using REMoDNaV
 msg_keywords = ["begin", "end", "press"]
-start_msgs   = {"search": ["beginning_of_stimuli"]}
-end_msgs     = {"search": ["end_of_stimuli"]}
+start_msgs = {"search": ["beginning_of_stimuli"]}
+end_msgs = {"search": ["end_of_stimuli"]}
 
 pyx.compute_derivatives_for_dataset(
     bids_path,

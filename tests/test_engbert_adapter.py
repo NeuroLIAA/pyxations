@@ -177,9 +177,7 @@ def test_engbert_chunking_and_fixation_helpers():
     with pytest.raises(ValueError, match="positive"):
         engbert_module._compute_px2deg(0, 60, 1920)
 
-    filled = engbert_module._forward_backward_fill(
-        np.array([np.nan, 2.0, np.nan, 4.0])
-    )
+    filled = engbert_module._forward_backward_fill(np.array([np.nan, 2.0, np.nan, 4.0]))
     np.testing.assert_array_equal(filled, [2.0, 2.0, 2.0, 4.0])
     assert np.isnan(
         engbert_module._forward_backward_fill(np.array([np.nan, np.nan]))
@@ -196,13 +194,9 @@ def test_engbert_chunking_and_fixation_helpers():
     with pytest.raises(ValueError, match="fallback"):
         engbert_module._split_into_chunks(np.array([0.0, 1.0]), None)
     with pytest.raises(ValueError, match="same number"):
-        engbert_module._split_into_chunks(
-            np.array([0.0, 1.0]), np.array([100.0])
-        )
+        engbert_module._split_into_chunks(np.array([0.0, 1.0]), np.array([100.0]))
     with pytest.raises(ValueError, match="greater than zero"):
-        engbert_module._split_into_chunks(
-            np.array([0.0, 1.0]), np.array([0.0, 0.0])
-        )
+        engbert_module._split_into_chunks(np.array([0.0, 1.0]), np.array([0.0, 0.0]))
 
     chunks, rates = engbert_module._split_into_chunks(
         np.array([0.0, 10.0, 40.0, 50.0]),
@@ -276,9 +270,7 @@ def test_engbert_detector_empty_missing_and_local_threshold_paths(tmp_path):
     with pytest.raises(ValueError, match="No supported gaze"):
         engbert_module.EngbertDetection(
             tmp_path,
-            pl.DataFrame(
-                {"tSample": [0.0, 10.0], "Rate_recorded": [100.0, 100.0]}
-            ),
+            pl.DataFrame({"tSample": [0.0, 10.0], "Rate_recorded": [100.0, 100.0]}),
         ).detect_eye_movements()
 
     samples = pl.DataFrame(
