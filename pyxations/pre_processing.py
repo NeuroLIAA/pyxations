@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
+from ._version import __version__
+
 Number = int | float
 PathLike = str | Path
 DataFrame = pl.DataFrame
@@ -78,7 +80,7 @@ class PreProcessing:
     Methods preserve Polars schemas throughout the preprocessing pipeline.
     """
 
-    VERSION = "0.3.0"
+    VERSION = __version__
 
     def __init__(
         self,

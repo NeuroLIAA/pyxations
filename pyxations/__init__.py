@@ -9,6 +9,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
+from ._version import __version__
 from .analysis.generic import Experiment
 from .analysis.visual_search import VisualSearchExperiment
 from .behavior import read_behavioral_events
@@ -24,6 +25,7 @@ from .visualization.visualization import Visualization
 
 __all__ = [
     "BIDSDerivativeExport",
+    "__version__",
     "BIDSValidationError",
     "EngbertDetection",
     "Experiment",
