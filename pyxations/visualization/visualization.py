@@ -1,18 +1,59 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
-import matplotlib.colors as mplcolors
-import polars as pl
-from pyxations.bids_formatting import EYE_MOVEMENT_DETECTION_DICT
-from pathlib import Path
+import warnings
 from collections import OrderedDict
+from importlib import import_module
+from pathlib import Path
 
-class Visualization():
-    def __init__(self, derivatives_folder_path,events_detection_algorithm):
+import matplotlib.colors as mplcolors
+import matplotlib.image as mpimg
+import matplotlib.pyplot as plt
+import numpy as np
+import polars as pl
+
+MAX_CACHED_IMAGES = 8
+
+
+def _load_cv2():
+    """Load optional OpenCV support with an actionable error."""
+
+    try:
+        return import_module("cv2")
+    except ImportError as exc:
+        raise ImportError(
+            "OpenCV video support is optional. Install it with "
+            "`pip install 'pyxations[video]'`."
+        ) from exc
+
+
+class Visualization:
+    """Plotting utilities for detected eye movements.
+
+    Figures are written under ``derivatives_folder_path`` in a subdirectory
+    named after the detection algorithm, so results from different detectors
+    stay side by side without overwriting each other. The derivative dataset's
+    ``.bidsignore`` excludes ``figures/``, so plotting never invalidates the
+    dataset.
+
+    Parameters
+    ----------
+    derivatives_folder_path : str or pathlib.Path
+        Directory where figures are written.
+    events_detection_algorithm : str
+        Name of the detection algorithm, used as the subdirectory name. Must be
+        a bare name, not a path.
+
+    Raises
+    ------
+    ValueError
+        If ``events_detection_algorithm`` is empty or contains path
+        separators.
+    """
+
+    def __init__(self, derivatives_folder_path, events_detection_algorithm):
         self.derivatives_folder_path = Path(derivatives_folder_path)
-        if events_detection_algorithm not in EYE_MOVEMENT_DETECTION_DICT and events_detection_algorithm != 'eyelink':
-            raise ValueError(f"Detection algorithm {events_detection_algorithm} not found.")
-        self.events_detection_folder = Path(events_detection_algorithm+'_events')
+        algorithm = str(events_detection_algorithm).strip()
+        if not algorithm or Path(algorithm).name != algorithm:
+            raise ValueError("events_detection_algorithm must be a non-empty name")
+        self.events_detection_folder = Path(algorithm)
 
     def scanpath(
         self,
@@ -30,27 +71,27 @@ class Visualization():
         """
         Fast scan‑path visualiser.
 
-        • **Vectorised**: no per‑row Python loops  
-        • **Single pass** phase grouping  
-        • Uses `BrokenBarHCollection` for fixation spans  
-        • Optional asynchronous PNG write via ThreadPoolExecutor (drop‑in‑ready, see comment)
+        • **Vectorised**: no per‑row Python loops
+        • **Single pass** phase grouping
+        • Uses `BrokenBarHCollection` for fixation spans
+        • Each requested PNG is written once
 
         Parameters
         ----------
-        fixations
+        fixations : polars.DataFrame
             Polars DataFrame with at least `tStart`, `duration`, `xAvg`, `yAvg`, `phase`.
-        screen_height, screen_width
+        screen_height, screen_width : int
             Stimulus resolution in pixels.
-        folder_path
+        folder_path : str or pathlib.Path, optional
             Directory where 1 PNG per phase will be stored.  If *None*, nothing is saved.
-        tmin, tmax
+        tmin, tmax : int, optional
             Time window in **ms**.  If both `None`, the whole trial is plotted.
-        saccades
+        saccades : polars.DataFrame, optional
             Polars DataFrame with `tStart`, `phase`, …  (optional).
-        samples
+        samples : polars.DataFrame, optional
             Polars DataFrame with gaze traces (`tSample`, `LX`, `LY`, `RX`, `RY` or
             `X`, `Y`) (optional).
-        phase_data
+        phase_data : dict, optional
             Per‑phase extras::
 
                 {
@@ -62,10 +103,28 @@ class Visualization():
                     ...
                 }
 
-        display
+        display : bool, default True
             If *False* the figure canvas is never shown (faster for batch jobs).
-        """
 
+        Notes
+        -----
+        One figure is produced per named trial phase. Fixations that fall
+        outside every phase are skipped. If no fixation carries a phase name at
+        all, which happens when the recording was never segmented, they are all
+        drawn as a single unnamed phase and a :class:`UserWarning` is issued.
+        """
+        if fixations.is_empty():
+            return
+        required = {"trial_number", "phase", "tStart", "duration", "xAvg", "yAvg"}
+        missing = sorted(required - set(fixations.columns))
+        if missing:
+            raise ValueError(
+                "Fixations are missing required columns: " + ", ".join(missing)
+            )
+        if (tmin is None) != (tmax is None):
+            raise ValueError("tmin and tmax must be provided together")
+        if folder_path is not None:
+            Path(folder_path).mkdir(parents=True, exist_ok=True)
 
         # ------------- small helpers ------------------------------------------------
         def _make_axes(plot_samples: bool):
@@ -100,7 +159,7 @@ class Visualization():
             _img_cache[path] = img
 
             # If cache too big, drop least recently used item
-            if len(_img_cache) > _MAX_CACHE_ITEMS:
+            if len(_img_cache) > MAX_CACHED_IMAGES:
                 _img_cache.popitem(last=False)  # pops the oldest inserted item
 
             return img
@@ -109,9 +168,13 @@ class Visualization():
         plot_saccades = saccades is not None
         plot_samples = samples is not None
         _img_cache = OrderedDict()
-        _MAX_CACHE_ITEMS = 8  # or 5, 10, etc. Tune as you like.
 
         trial_idx = fixations["trial_number"][0]
+        if (
+            isinstance(trial_idx, (float, np.floating))
+            and float(trial_idx).is_integer()
+        ):
+            trial_idx = int(trial_idx)
 
         # ---- time filter ----------------------------------------------------------
         if tmin is not None and tmax is not None:
@@ -121,12 +184,54 @@ class Visualization():
             if plot_samples:
                 samples = samples.filter(pl.col("tSample").is_between(tmin, tmax))
 
-        # remove empty phase markings
-        fixations = fixations.filter(pl.col("phase") != "")
+        # Rows outside any named phase carry an empty ``phase``. Dropping them
+        # is right for a segmented recording, where they fall between trials.
+        # But a recording with no named phase at all -- any format whose source
+        # carries no synchronisation messages, such as a plain Tobii or
+        # GazePoint export -- would then lose every row and plot nothing, with
+        # no clue as to why. Keep those rows as a single unnamed phase instead,
+        # and say what happened.
+        if fixations.get_column("phase").fill_null("").eq("").all():
+            warnings.warn(
+                "No named trial phase was found, so every fixation is plotted "
+                "as a single unnamed phase. Pass start_msgs and end_msgs to "
+                "compute_derivatives_for_dataset to segment the recording into "
+                "named phases.",
+                UserWarning,
+                stacklevel=2,
+            )
+        else:
+            fixations = fixations.filter(pl.col("phase") != "")
+            if plot_saccades:
+                saccades = saccades.filter(pl.col("phase") != "")
+            if plot_samples:
+                samples = samples.filter(pl.col("phase") != "")
+
+        # Rows the preprocessing step flagged as bad hold gaze that fell off
+        # the screen or was never tracked. Drawing them stretches the scanpath
+        # towards coordinates the participant never looked at, and joins them
+        # with lines that cross the whole stimulus.
+        def _drop_bad(frame: pl.DataFrame) -> pl.DataFrame:
+            if frame is None or "bad" not in frame.columns:
+                return frame
+            return frame.filter(
+                ~pl.col("bad").cast(pl.Boolean, strict=False).fill_null(False)
+            )
+
+        fixations = _drop_bad(fixations)
         if plot_saccades:
-            saccades = saccades.filter(pl.col("phase") != "")
+            saccades = _drop_bad(saccades)
         if plot_samples:
-            samples = samples.filter(pl.col("phase") != "")
+            samples = _drop_bad(samples)
+        if fixations.is_empty():
+            warnings.warn(
+                "Every fixation was flagged as bad, so there is nothing to "
+                "plot. Check the screen size passed to "
+                "compute_derivatives_for_dataset.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return
 
         # ---- split once by phase --------------------------------------------------
         fix_by_phase = fixations.partition_by("phase", as_dict=True)
@@ -141,23 +246,27 @@ class Visualization():
         cmap = plt.cm.rainbow
 
         # ---- build & draw ---------------------------------------------------------
-        # optional async saver (uncomment if you save hundreds of files)
-        from concurrent.futures import ThreadPoolExecutor
-        saver = ThreadPoolExecutor(max_workers=4) if folder_path else None
-
+        interactive_before = plt.isinteractive()
         if not display:
             plt.ioff()
 
         for phase, phase_fix in fix_by_phase.items():
             if phase_fix.is_empty():
                 continue
+            phase_name = phase[0] if isinstance(phase, tuple) else phase
 
             # ---------- vectors (zero‑copy) -----------------
             fx, fy, fdur = phase_fix.select(["xAvg", "yAvg", "duration"]).to_numpy().T
             n_fix = fx.size
             fix_idx = np.arange(1, n_fix + 1)
 
-            norm = mplcolors.BoundaryNorm(np.arange(1, n_fix + 2), cmap.N)
+            # One colour band per fixation is only possible while the colormap
+            # has enough of them. Long recordings hold thousands of fixations,
+            # so fall back to a continuous scale instead of raising.
+            if n_fix < cmap.N:
+                norm = mplcolors.BoundaryNorm(np.arange(1, n_fix + 2), cmap.N)
+            else:
+                norm = mplcolors.Normalize(vmin=1, vmax=max(n_fix, 2))
 
             # saccades
             sac_t = (
@@ -170,7 +279,7 @@ class Visualization():
             if plot_samples and phase in samp_by_phase and samp_by_phase[phase].height:
                 samp_phase = samp_by_phase[phase]
                 t0 = samp_phase["tSample"][0]
-                ts = (samp_phase["tSample"].to_numpy() - t0) 
+                ts = samp_phase["tSample"].to_numpy() - t0
                 get = samp_phase.get_column
                 lx = get("LX").to_numpy() if "LX" in samp_phase.columns else None
                 ly = get("LY").to_numpy() if "LY" in samp_phase.columns else None
@@ -203,16 +312,25 @@ class Visualization():
             ).set_label("# of fixation")
 
             # ---------- stimulus imagery / bbox ------------
-            if phase_data and phase[0] in phase_data:
-                pdict = phase_data[phase[0]]
+            if phase_data and phase_name in phase_data:
+                pdict = phase_data[phase_name]
                 coords = pdict.get("img_plot_coords") or []
-                bbox = pdict.get('bbox',None) 
+                bbox = pdict.get("bbox", None)
                 for img_path, box in zip(pdict.get("img_paths", []), coords):
-
-                    ax_main.imshow(_maybe_cache_img(img_path), extent=[box[0], box[2], box[3], box[1]], zorder=0)
+                    ax_main.imshow(
+                        _maybe_cache_img(img_path),
+                        extent=[box[0], box[2], box[3], box[1]],
+                        zorder=0,
+                    )
                 if bbox is not None:
                     x1, y1, x2, y2 = bbox
-                    ax_main.plot([x1, x2, x2, x1, x1], [y1, y1, y2, y2, y1], color='red', linewidth=1.5, zorder=3)
+                    ax_main.plot(
+                        [x1, x2, x2, x1, x1],
+                        [y1, y1, y2, y2, y1],
+                        color="red",
+                        linewidth=1.5,
+                        zorder=3,
+                    )
 
             # ---------- gaze traces ------------------------
             if ax_gaze is not None:
@@ -230,8 +348,10 @@ class Visualization():
                     ax_gaze.plot(ts, gy, label="Y")
 
                 # fixation spans
-                bars   = np.c_[phase_fix['tStart'].to_numpy() - t0,
-                            phase_fix['duration'].to_numpy()]
+                bars = np.c_[
+                    phase_fix["tStart"].to_numpy() - t0,
+                    phase_fix["duration"].to_numpy(),
+                ]
                 height = ax_gaze.get_ylim()[1] - ax_gaze.get_ylim()[0]
                 colors = cmap(norm(fix_idx))
 
@@ -259,7 +379,7 @@ class Visualization():
                     bbox_to_anchor=(1, 0.5),
                 )
                 ax_gaze.set_ylabel("Gaze")
-                ax_gaze.set_xlabel("Time [s]")
+                ax_gaze.set_xlabel("Time [ms]")
 
             fig.tight_layout()
 
@@ -268,139 +388,241 @@ class Visualization():
                 scan_name = f"scanpath_{trial_idx}"
                 if tmin is not None and tmax is not None:
                     scan_name += f"_{tmin}_{tmax}"
-                out = Path(folder_path) / f"{scan_name}_{phase[0]}.png"
+                out = Path(folder_path) / f"{scan_name}_{phase_name or 'unphased'}.png"
                 fig.savefig(out, dpi=150)
-                if saver:  saver.submit(fig.savefig, out, dpi=150)
 
             if display:
                 plt.show()
             plt.close(fig)
 
-        if not display:
+        if not display and interactive_before:
             plt.ion()
 
+    def fix_duration(self, fixations: pl.DataFrame, axs=None):
+        """Plot the distribution of fixation durations.
 
-    def fix_duration(self,fixations:pl.DataFrame,axs=None):
-        
-        ax = axs
-        if ax is None:
-            fig, ax = plt.subplots()
-
-        ax.hist(fixations.select(pl.col('duration')).to_numpy().ravel(), bins=100, edgecolor='black', linewidth=1.2, density=True)
-        ax.set_title('Fixation duration')
-        ax.set_xlabel('Time (ms)')
-        ax.set_ylabel('Density')
-
-
-    def sacc_amplitude(self,saccades:pl.DataFrame,axs=None):
+        Parameters
+        ----------
+        fixations : polars.DataFrame
+            Fixation table containing a ``duration`` column, in milliseconds.
+        axs : matplotlib.axes.Axes, optional
+            Axes to draw on. A new figure is created when omitted.
+        """
 
         ax = axs
         if ax is None:
-            fig, ax = plt.subplots()
+            _, ax = plt.subplots()
 
-        saccades_amp = saccades.select(pl.col('ampDeg')).to_numpy().ravel()
-        ax.hist(saccades_amp, bins=100, range=(0, 20), edgecolor='black', linewidth=1.2, density=True)
-        ax.set_title('Saccades amplitude')
-        ax.set_xlabel('Amplitude (deg)')
-        ax.set_ylabel('Density')
+        ax.hist(
+            fixations.select(pl.col("duration")).to_numpy().ravel(),
+            bins=100,
+            edgecolor="black",
+            linewidth=1.2,
+            density=True,
+        )
+        ax.set_title("Fixation duration")
+        ax.set_xlabel("Time (ms)")
+        ax.set_ylabel("Density")
 
+    def sacc_amplitude(self, saccades: pl.DataFrame, axs=None):
+        """Plot the distribution of saccade amplitudes.
 
-    def sacc_direction(self,saccades:pl.DataFrame,axs=None,figs=None):
+        Amplitudes are histogrammed over the 0-20 degree range.
+
+        Parameters
+        ----------
+        saccades : polars.DataFrame
+            Saccade table containing an ``ampDeg`` column, in degrees of visual
+            angle.
+        axs : matplotlib.axes.Axes, optional
+            Axes to draw on. A new figure is created when omitted.
+        """
 
         ax = axs
         if ax is None:
-            fig = plt.figure()
+            _, ax = plt.subplots()
+
+        saccades_amp = saccades.select(pl.col("ampDeg")).to_numpy().ravel()
+        ax.hist(
+            saccades_amp,
+            bins=100,
+            range=(0, 20),
+            edgecolor="black",
+            linewidth=1.2,
+            density=True,
+        )
+        ax.set_title("Saccades amplitude")
+        ax.set_xlabel("Amplitude (deg)")
+        ax.set_ylabel("Density")
+
+    def sacc_direction(self, saccades: pl.DataFrame, axs=None, figs=None):
+        """Plot saccade directions as a polar histogram.
+
+        Requires the direction columns produced by
+        :meth:`~pyxations.PreProcessing.saccades_direction`.
+
+        Parameters
+        ----------
+        saccades : polars.DataFrame
+            Saccade table containing the ``deg`` and ``dir`` columns.
+        axs : matplotlib.axes.Axes, optional
+            Axes to replace with a polar subplot. A new polar figure is created
+            when omitted.
+        figs : matplotlib.figure.Figure, optional
+            Figure in which the polar subplot is created. Required when ``axs``
+            is given, since polar axes cannot be added to existing Cartesian
+            ones.
+
+        Raises
+        ------
+        ValueError
+            If the ``deg`` or ``dir`` columns are missing, meaning saccade
+            directions were not computed yet.
+        """
+
+        ax = axs
+        if ax is None:
+            plt.figure()
             ax = plt.subplot(polar=True)
         else:
             ax.set_axis_off()
-            ax = figs.add_subplot(2, 2, 3, projection='polar')
-        if 'deg' not in saccades.columns or 'dir' not in saccades.columns:
-            raise ValueError('Compute saccades direction first by using saccades_direction function from the PreProcessing module.')
+            ax = figs.add_subplot(2, 2, 3, projection="polar")
+        if "deg" not in saccades.columns or "dir" not in saccades.columns:
+            raise ValueError(
+                "Compute saccades direction first by using saccades_direction function from the PreProcessing module."
+            )
+        if saccades.is_empty():
+            ax.set_title("Saccades direction")
+            ax.set_yticklabels([])
+            return
         # Convert from deg to rad
-        saccades_rad = saccades.select(pl.col('deg')).to_numpy().ravel() * np.pi / 180
+        saccades_rad = saccades.select(pl.col("deg")).to_numpy().ravel() * np.pi / 180
 
         n_bins = 24
         ang_hist, bin_edges = np.histogram(saccades_rad, bins=24, density=True)
-        bin_centers = [np.mean((bin_edges[i], bin_edges[i+1])) for i in range(len(bin_edges) - 1)]
+        bin_centers = [
+            np.mean((bin_edges[i], bin_edges[i + 1])) for i in range(len(bin_edges) - 1)
+        ]
 
-        bars = ax.bar(bin_centers, ang_hist, width=2*np.pi/n_bins, bottom=0.0, alpha=0.4, edgecolor='black')
-        ax.set_title('Saccades direction')
+        bars = ax.bar(
+            bin_centers,
+            ang_hist,
+            width=2 * np.pi / n_bins,
+            bottom=0.0,
+            alpha=0.4,
+            edgecolor="black",
+        )
+        ax.set_title("Saccades direction")
         ax.set_yticklabels([])
 
-        for r, bar in zip(ang_hist, bars):
-            bar.set_facecolor(plt.cm.Blues(r / np.max(ang_hist)))
+        maximum = np.max(ang_hist)
+        for radius, bar in zip(ang_hist, bars):
+            bar.set_facecolor(plt.cm.Blues(radius / maximum if maximum else 0))
 
+    def sacc_main_sequence(self, saccades: pl.DataFrame, axs=None, hline=None):
+        """Plot the saccadic main sequence: peak velocity against amplitude.
 
-    def sacc_main_sequence(self,saccades:pl.DataFrame,axs=None, hline=None):
+        Drawn as a 2D histogram on logarithmic axes. Saccades with
+        non-finite or non-positive amplitude or peak velocity are excluded,
+        since they cannot be placed on a log scale.
+
+        Parameters
+        ----------
+        saccades : polars.DataFrame
+            Saccade table containing ``ampDeg`` and ``vPeak`` columns.
+        axs : matplotlib.axes.Axes, optional
+            Axes to draw on. A new figure is created when omitted.
+        hline : float, optional
+            Peak-velocity value at which to draw a labelled horizontal
+            reference line, useful for marking a detection threshold.
+        """
 
         ax = axs
         if ax is None:
-            fig, ax = plt.subplots()
+            _, ax = plt.subplots()
         # Logarithmic bins
         XL = np.log10(25)  # Adjusted to fit the xlim
         YL = np.log10(1000)  # Adjusted to fit the ylim
 
-        saccades_peak_vel = saccades.select(pl.col('vPeak')).to_numpy().ravel()
-        saccades_amp = saccades.select(pl.col('ampDeg')).to_numpy().ravel()
+        valid = saccades.filter(
+            pl.col("vPeak").cast(pl.Float64, strict=False).is_finite()
+            & pl.col("ampDeg").cast(pl.Float64, strict=False).is_finite()
+            & (pl.col("vPeak") > 0)
+            & (pl.col("ampDeg") > 0)
+        )
+        saccades_peak_vel = valid.select(pl.col("vPeak")).to_numpy().ravel()
+        saccades_amp = valid.select(pl.col("ampDeg")).to_numpy().ravel()
 
         # Create a 2D histogram with logarithmic bins
-        ax.hist2d(saccades_amp, saccades_peak_vel, bins=[np.logspace(-1, XL, 50), np.logspace(0, YL, 50)])
+        ax.hist2d(
+            saccades_amp,
+            saccades_peak_vel,
+            bins=[np.logspace(-1, XL, 50), np.logspace(0, YL, 50)],
+        )
 
         if hline:
-            ax.hlines(y=hline, xmin=ax.get_xlim()[0], xmax=ax.get_xlim()[1], colors='grey', linestyles='--', label=hline)
+            ax.hlines(
+                y=hline,
+                xmin=ax.get_xlim()[0],
+                xmax=ax.get_xlim()[1],
+                colors="grey",
+                linestyles="--",
+                label=hline,
+            )
             ax.legend()
-        ax.set_yscale('log')
-        ax.set_xscale('log')
-        ax.set_title('Main sequence')
-        ax.set_xlabel('Amplitude (deg)')
-        ax.set_ylabel('Peak velocity (deg)')
-         # Set the limits of the axes
+        ax.set_yscale("log")
+        ax.set_xscale("log")
+        ax.set_title("Main sequence")
+        ax.set_xlabel("Amplitude (deg)")
+        ax.set_ylabel("Peak velocity (deg)")
+        # Set the limits of the axes
         ax.set_xlim(0.1, 25)
         ax.set_ylim(10, 1000)
-        ax.set_aspect('equal')
-
+        ax.set_aspect("equal")
 
     def plot_multipanel(
-            self,
-            fixations: pl.DataFrame,
-            saccades: pl.DataFrame,
-            display: bool = True
-        ) -> None:
-        """
-        Create a 2×2 multi‑panel diagnostic plot for every non‑empty
-        phase label and save it as PNG in
-        <derivatives_folder_path>/<events_detection_folder>/plots/.
+        self, fixations: pl.DataFrame, saccades: pl.DataFrame, display: bool = True
+    ) -> None:
+        """Create and save a diagnostic plot for every non-empty phase.
+
+        Each 2-by-2 figure contains fixation-duration, saccade-amplitude,
+        saccade-direction and main-sequence panels and is saved below the
+        configured derivatives and detector directories.
+
+        Parameters
+        ----------
+        fixations : polars.DataFrame
+            Fixation events containing ``trial_number`` and ``phase``.
+        saccades : polars.DataFrame
+            Saccade events containing ``trial_number`` and ``phase``.
+        display : bool, default True
+            Whether to show each figure interactively in addition to saving it.
         """
         # ── paths & matplotlib style ────────────────────────────────
-        folder_path: Path = (
-            self.derivatives_folder_path
-            / self.events_detection_folder
-            / "plots"
-        )
+        folder_path: Path = self.derivatives_folder_path / self.events_detection_folder
         folder_path.mkdir(parents=True, exist_ok=True)
         plt.rcParams.update({"font.size": 12})
 
         # ── drop practice / invalid trials ─────────────────────────
         fixations = fixations.filter(pl.col("trial_number") != -1)
-        saccades  = saccades.filter(pl.col("trial_number") != -1)
+        saccades = saccades.filter(pl.col("trial_number") != -1)
 
         # ── collect valid phase labels (skip empty string) ─────────
         phases = (
-            fixations
-            .select(pl.col("phase").filter(pl.col("phase") != ""))
-            .unique()           # unique values in this Series
+            fixations.select(pl.col("phase").filter(pl.col("phase") != ""))
+            .unique()  # unique values in this Series
             .to_series()
-            .to_list()          # plain Python list of strings
+            .to_list()  # plain Python list of strings
         )
 
         # ── one figure per phase ───────────────────────────────────
         for phase in phases:
-            fix_phase   = fixations.filter(pl.col("phase") == phase)
-            sacc_phase  = saccades.filter(pl.col("phase") == phase)
+            fix_phase = fixations.filter(pl.col("phase") == phase)
+            sacc_phase = saccades.filter(pl.col("phase") == phase)
 
             fig, axs = plt.subplots(2, 2, figsize=(12, 7))
 
-            self.fix_duration(fix_phase , axs=axs[0, 0])
+            self.fix_duration(fix_phase, axs=axs[0, 0])
             self.sacc_main_sequence(sacc_phase, axs=axs[1, 1])
             self.sacc_direction(sacc_phase, axs=axs[1, 0], figs=fig)
             self.sacc_amplitude(sacc_phase, axs=axs[0, 1])
@@ -410,7 +632,7 @@ class Visualization():
             if display:
                 plt.show()
             plt.close()
-    
+
     def plot_animation(
         self,
         samples: pl.DataFrame,
@@ -438,40 +660,40 @@ class Visualization():
 
         Parameters
         ----------
-        samples
+        samples : polars.DataFrame
             Polars DataFrame with gaze samples. Must contain 'tSample' and gaze
             position columns ('X', 'Y' or 'LX', 'LY', 'RX', 'RY').
-        screen_height, screen_width
+        screen_height, screen_width : int
             Stimulus resolution in pixels.
-        video_path
+        video_path : str or pathlib.Path, optional
             Path to a video file. If provided, gaze is overlaid on video frames.
-        background_image_path
+        background_image_path : str or pathlib.Path, optional
             Path to a background image. Only used when video_path is None.
             If both are None, a grey background is used.
-        folder_path
+        folder_path : str or pathlib.Path, optional
             Directory where the animation will be saved. If None, nothing is saved.
             The file format depends on `output_format`.
-        tmin, tmax
+        tmin, tmax : int, optional
             Time window in **ms**. If both None, the whole trial is plotted.
-        seconds_to_show
+        seconds_to_show : float, optional
             Limit the animation to the first N seconds. If None, shows all available data.
-        scale_factor
+        scale_factor : float, default 0.5
             Resolution scaling factor (1.0 = original, 0.5 = half resolution).
-        gaze_radius
+        gaze_radius : int, default 10
             Radius of the gaze point circle in pixels (before scaling).
-        gaze_color
+        gaze_color : tuple of int, default (255, 0, 0)
             RGB tuple for gaze point color.
-        fps
+        fps : float, optional
             Frames per second for the animation. If None:
             - With video: uses the video's native FPS
             - Without video: defaults to 60 FPS
-        output_format
+        output_format : {"matplotlib", "html", "mp4", "gif"}, default "matplotlib"
             Output format for saved animations:
-            - "html": Interactive HTML file (default, works in browsers)
+            - "matplotlib": Show in matplotlib GUI window (default, blocking)
+            - "html": Interactive HTML file (works in browsers)
             - "mp4": Video file (requires ffmpeg)
             - "gif": Animated GIF file (requires pillow)
-            - "matplotlib": Show in matplotlib GUI window (blocking)
-        display
+        display : bool, default True
             If True and output_format is "html", returns an HTML object for notebooks.
             If output_format is "matplotlib", this is ignored (always shows window).
             If False, only saves to file (if folder_path is provided).
@@ -481,21 +703,26 @@ class Visualization():
         IPython.display.HTML or None
             Returns HTML animation if display=True and output_format="html", otherwise None.
         """
-        try:
-            import cv2
-            from matplotlib.animation import FuncAnimation
-            import matplotlib as mpl
-            mpl.rcParams['animation.embed_limit'] = 100
-        except ImportError as e:
-            raise ImportError(
-                f"Missing required dependency for animation: {e}. "
-                "Please install cv2 (opencv-python)."
-            )
+        cv2 = _load_cv2()
+
+        import matplotlib as mpl
+        from matplotlib.animation import FuncAnimation
+
+        mpl.rcParams["animation.embed_limit"] = 100
+
+        if scale_factor <= 0:
+            raise ValueError("scale_factor must be greater than zero")
+        if fps is not None and fps <= 0:
+            raise ValueError("fps must be greater than zero")
+        if (tmin is None) != (tmax is None):
+            raise ValueError("tmin and tmax must be provided together")
 
         # Validate output_format
         valid_formats = ["html", "mp4", "gif", "matplotlib"]
         if output_format not in valid_formats:
-            raise ValueError(f"output_format must be one of {valid_formats}, got '{output_format}'")
+            raise ValueError(
+                f"output_format must be one of {valid_formats}, got '{output_format}'"
+            )
 
         # ---- Determine gaze columns ----
         if "X" in samples.columns and "Y" in samples.columns:
@@ -505,7 +732,9 @@ class Visualization():
         elif "RX" in samples.columns and "RY" in samples.columns:
             x_col, y_col = "RX", "RY"
         else:
-            raise ValueError("Samples DataFrame must contain gaze columns (X, Y) or (LX, LY) or (RX, RY)")
+            raise ValueError(
+                "Samples DataFrame must contain gaze columns (X, Y) or (LX, LY) or (RX, RY)"
+            )
 
         # ---- Time filter ----
         if tmin is not None and tmax is not None:
@@ -515,13 +744,23 @@ class Visualization():
             raise ValueError("No samples available after time filtering")
 
         # ---- Drop NaN gaze values ----
-        samples = samples.filter(pl.col(x_col).is_not_null() & pl.col(y_col).is_not_null())
+        samples = samples.filter(
+            pl.col(x_col).is_not_null() & pl.col(y_col).is_not_null()
+        )
+        samples = samples.filter(
+            pl.col(x_col).cast(pl.Float64, strict=False).is_finite()
+            & pl.col(y_col).cast(pl.Float64, strict=False).is_finite()
+        )
+        if samples.is_empty():
+            raise ValueError("No finite gaze samples available")
 
         # ---- Calculate scaled dimensions ----
         scaled_width = int(screen_width * scale_factor)
         scaled_height = int(screen_height * scale_factor)
 
-        trial_idx = samples["trial_number"][0] if "trial_number" in samples.columns else 0
+        trial_idx = (
+            samples["trial_number"][0] if "trial_number" in samples.columns else 0
+        )
 
         # ================= WITH VIDEO =================
         if video_path is not None:
@@ -532,16 +771,12 @@ class Visualization():
             cap = cv2.VideoCapture(str(video_path))
             video_fps = cap.get(cv2.CAP_PROP_FPS)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            video_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
             if fps is None:
                 fps = video_fps
 
             # Calculate time to frame mapping
             t_start = samples["tSample"].min()
             t_end = samples["tSample"].max()
-            trial_duration = t_end - t_start
 
             # Create frame-to-time mapping
             frame_edges = np.linspace(t_start, t_end, total_frames + 1)
@@ -553,7 +788,7 @@ class Visualization():
 
             for x, y, t in samples_np:
                 # Find the closest frame
-                frame_idx = np.searchsorted(frame_times, t, side='right') - 1
+                frame_idx = np.searchsorted(frame_times, t, side="right") - 1
                 frame_idx = max(0, min(frame_idx, total_frames - 1))
                 gaze_by_frame[frame_idx].append((x, y))
 
@@ -567,7 +802,7 @@ class Visualization():
 
             # Create figure
             fig, ax = plt.subplots(figsize=(10 * scale_factor, 6 * scale_factor))
-            ax.axis('off')
+            ax.axis("off")
 
             # Initialize with first frame
             ret, frame = cap.read()
@@ -575,7 +810,9 @@ class Visualization():
                 cap.release()
                 raise RuntimeError("Could not read first frame from video")
 
-            frame_resized = cv2.resize(frame, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
+            frame_resized = cv2.resize(
+                frame, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA
+            )
             frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
             im = ax.imshow(frame_rgb)
 
@@ -584,7 +821,9 @@ class Visualization():
                 if not ret:
                     return [im]
 
-                frame_resized = cv2.resize(frame, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
+                frame_resized = cv2.resize(
+                    frame, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA
+                )
                 frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
 
                 # Draw gaze points for this frame
@@ -593,13 +832,25 @@ class Visualization():
                     scaled_y = int(gy * scale_factor)
                     if 0 <= scaled_x < scaled_width and 0 <= scaled_y < scaled_height:
                         radius = max(3, int(gaze_radius * scale_factor))
-                        cv2.circle(frame_rgb, (scaled_x, scaled_y), radius=radius, color=gaze_color, thickness=-1)
+                        cv2.circle(
+                            frame_rgb,
+                            (scaled_x, scaled_y),
+                            radius=radius,
+                            color=gaze_color,
+                            thickness=-1,
+                        )
 
                 im.set_array(frame_rgb)
                 return [im]
 
-            anim = FuncAnimation(fig, update_frame_video, frames=frames_to_show,
-                                 interval=1000/fps, blit=True, repeat=True)
+            anim = FuncAnimation(
+                fig,
+                update_frame_video,
+                frames=frames_to_show,
+                interval=1000 / fps,
+                blit=True,
+                repeat=True,
+            )
 
         # ================= WITHOUT VIDEO =================
         else:
@@ -615,7 +866,9 @@ class Visualization():
                 if bg_img.dtype == np.float64:
                     bg_img = (bg_img * 255).clip(0, 255).astype(np.uint8)
                 # Resize background to match screen dimensions then scale
-                bg_img = cv2.resize(bg_img, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
+                bg_img = cv2.resize(
+                    bg_img, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA
+                )
             else:
                 # Grey background
                 bg_img = np.ones((scaled_height, scaled_width, 3), dtype=np.uint8) * 128
@@ -633,8 +886,7 @@ class Visualization():
 
             # Calculate total frames based on duration and fps
             total_frames = int((trial_duration / 1000) * fps)
-            if total_frames < 1:
-                total_frames = 1
+            total_frames = max(total_frames, 1)
 
             # Create time bins for each animation frame
             frame_times = np.linspace(t_start, t_end, total_frames + 1)
@@ -644,13 +896,13 @@ class Visualization():
             gaze_by_frame = {i: [] for i in range(total_frames)}
 
             for x, y, t in samples_np:
-                frame_idx = np.searchsorted(frame_times, t, side='right') - 1
+                frame_idx = np.searchsorted(frame_times, t, side="right") - 1
                 frame_idx = max(0, min(frame_idx, total_frames - 1))
                 gaze_by_frame[frame_idx].append((x, y))
 
             # Create figure
             fig, ax = plt.subplots(figsize=(10 * scale_factor, 6 * scale_factor))
-            ax.axis('off')
+            ax.axis("off")
 
             # Initialize with background
             im = ax.imshow(bg_img.copy())
@@ -665,18 +917,35 @@ class Visualization():
                     scaled_y = int(gy * scale_factor)
                     if 0 <= scaled_x < scaled_width and 0 <= scaled_y < scaled_height:
                         radius = max(3, int(gaze_radius * scale_factor))
-                        cv2.circle(frame_rgb, (scaled_x, scaled_y), radius=radius, color=gaze_color, thickness=-1)
+                        cv2.circle(
+                            frame_rgb,
+                            (scaled_x, scaled_y),
+                            radius=radius,
+                            color=gaze_color,
+                            thickness=-1,
+                        )
 
                 im.set_array(frame_rgb)
                 return [im]
 
-            anim = FuncAnimation(fig, update_frame_no_video, frames=total_frames,
-                                 interval=1000/fps, blit=True, repeat=True)
+            anim = FuncAnimation(
+                fig,
+                update_frame_no_video,
+                frames=total_frames,
+                interval=1000 / fps,
+                blit=True,
+                repeat=True,
+            )
 
         # ================= SAVE / DISPLAY =================
         result = None
         trial_idx_val = trial_idx
-        
+        if (
+            isinstance(trial_idx_val, (float, np.floating))
+            and float(trial_idx_val).is_integer()
+        ):
+            trial_idx_val = int(trial_idx_val)
+
         # Build output filename
         anim_name = f"animation_{trial_idx_val}"
         if tmin is not None and tmax is not None:
@@ -697,9 +966,9 @@ class Visualization():
                 folder_path.mkdir(parents=True, exist_ok=True)
                 out_path = folder_path / f"{anim_name}.mp4"
                 try:
-                    anim.save(str(out_path), writer='ffmpeg', fps=fps)
+                    anim.save(str(out_path), writer="ffmpeg", fps=fps)
                     print(f"Animation saved to: {out_path}")
-                except Exception as e:
+                except (OSError, RuntimeError, ValueError) as e:
                     raise RuntimeError(
                         f"Failed to save MP4. Make sure ffmpeg is installed. Error: {e}"
                     )
@@ -711,9 +980,9 @@ class Visualization():
                 folder_path.mkdir(parents=True, exist_ok=True)
                 out_path = folder_path / f"{anim_name}.gif"
                 try:
-                    anim.save(str(out_path), writer='pillow', fps=fps)
+                    anim.save(str(out_path), writer="pillow", fps=fps)
                     print(f"Animation saved to: {out_path}")
-                except Exception as e:
+                except (OSError, RuntimeError, ValueError) as e:
                     raise RuntimeError(
                         f"Failed to save GIF. Make sure pillow is installed. Error: {e}"
                     )
@@ -724,17 +993,20 @@ class Visualization():
                 folder_path = Path(folder_path)
                 folder_path.mkdir(parents=True, exist_ok=True)
                 out_path = folder_path / f"{anim_name}.html"
-                with open(out_path, 'w') as f:
+                with open(out_path, "w") as f:
                     f.write(anim.to_jshtml())
                 print(f"Animation saved to: {out_path}")
 
             if display:
                 try:
                     from IPython.display import HTML
+
                     plt.close(fig)
                     result = HTML(anim.to_jshtml())
                 except ImportError:
-                    print("IPython not available. Use output_format='matplotlib' for GUI display.")
+                    print(
+                        "IPython not available. Use output_format='matplotlib' for GUI display."
+                    )
                     plt.close(fig)
             else:
                 plt.close(fig)

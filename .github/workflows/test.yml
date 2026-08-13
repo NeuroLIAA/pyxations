@@ -2,18 +2,25 @@ name: tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, reviewer-changes]
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11"]
+        # macos-15 is Apple Silicon; macos-15-intel retains x86_64 coverage.
+        os: [ubuntu-latest, windows-latest, macos-15, macos-15-intel]
+        python-version: ["3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
@@ -24,12 +31,31 @@ jobs:
 
       - uses: astral-sh/setup-uv@v6
 
-      - run: uv pip install --system .
+      - run: uv sync --locked --extra dev
 
-      - run: |
-          curl -L -o /usr/local/bin/edf2asc https://github.com/ihrke/pypillometry/raw/refs/heads/master/external/edf2asc-linux
-          chmod +x /usr/local/bin/edf2asc
+      - name: Install Deno
+        run: npm install --global deno@2.5.6
 
-      - run: uv pip install --system pytest
+      - name: Install the official BIDS Validator
+        run: deno install -ERWN -g -n bids-validator jsr:@bids/validator@3.0.1
 
-      - run: pytest -vv -ra
+      - name: Run tests
+        if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.11'
+        run: uv run --locked pytest -vv -ra
+
+      - name: Run tests with coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        run: >-
+          uv run --locked pytest -vv -ra
+          --cov=pyxations
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-fail-under=95
+
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          use_oidc: true
+          fail_ci_if_error: true

@@ -1,24 +1,34 @@
-import os
-import unittest
+import pytest
+
 from pyxations import Experiment
-from pathlib import Path
-
-current_path = Path(__file__).resolve()
-data_folder = os.path.join(current_path.parent, 'data')
-
-class TestScanpaths(unittest.TestCase):
-    def test_scanpaths(self):
-        
-        # Create an experiment
-        exp = Experiment(os.path.join(data_folder, "example_dataset"))
-        exp.load_data("eyelink")
-        exp.subjects['0001'].get_trial(session_id='second', trial_number=0).plot_scanpath(1080, 1920, display=False)
-
-        # Assert that the scanpath file exists
-        path_to_derivatives = os.path.join(data_folder, "example_dataset_derivatives")
-        self.assertTrue(os.path.exists(os.path.join(path_to_derivatives,'sub-0001','ses-second','eyelink_events','plots', "scanpath_0_search.png")))
+from pyxations.visualization.visualization import Visualization
 
 
+def test_visualization_accepts_optional_detector_names(tmp_path):
+    visualization = Visualization(tmp_path, "remodnav")
 
-if __name__ == "__main__":
-    unittest.main()
+    assert visualization.events_detection_folder.name == "remodnav"
+
+
+@pytest.mark.parametrize("name", ["", "../outside"])
+def test_visualization_rejects_invalid_detector_names(tmp_path, name):
+    with pytest.raises(ValueError):
+        Visualization(tmp_path, name)
+
+
+def test_scanpath_is_written_to_ignored_figures_directory(generated_datasets):
+    case = generated_datasets["eyelink"]
+    experiment = Experiment(case["raw"])
+    experiment.load_data(case["algorithm"])
+
+    experiment.get_trial("0001", "second", 0).plot_scanpath(1080, 1920, display=False)
+
+    figure = (
+        case["derivatives"]
+        / "figures"
+        / "sub-0001"
+        / "ses-second"
+        / "eyelink"
+        / "scanpath_0_search.png"
+    )
+    assert figure.is_file()
