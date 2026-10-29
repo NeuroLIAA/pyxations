@@ -1,0 +1,45 @@
+cff-version: 1.2.0
+message: "If you use Pyxations in your work, please cite the paper below."
+title: "Pyxations: organizing, parsing, and analysing eye-movement data using Python"
+type: software
+authors:
+  - family-names: Ruarte
+    given-names: Gonzalo
+    orcid: "https://orcid.org/0009-0000-2013-782X"
+    affiliation: "Laboratorio de Inteligencia Artificial Aplicada, Universidad de Buenos Aires - CONICET"
+  - family-names: Juantorena
+    given-names: Gustavo
+    orcid: "https://orcid.org/0000-0001-8248-7630"
+    affiliation: "Laboratorio de Inteligencia Artificial Aplicada, Universidad de Buenos Aires - CONICET"
+  - family-names: González
+    given-names: Joaquín
+    orcid: "https://orcid.org/0009-0009-0473-6545"
+    affiliation: "Laboratorio de Inteligencia Artificial Aplicada, Universidad de Buenos Aires - CONICET"
+  - family-names: Kamienkowski
+    given-names: Juan Esteban
+    orcid: "https://orcid.org/0000-0002-5725-6539"
+    affiliation: "Laboratorio de Inteligencia Artificial Aplicada, Universidad de Buenos Aires - CONICET"
+version: 0.4.0
+doi: 10.5281/zenodo.23771267
+license: MIT
+repository-code: "https://github.com/NeuroLIAA/pyxations"
+url: "https://neuroliaa.github.io/pyxations"
+preferred-citation:
+  type: article
+  title: "Pyxations: organizing, parsing, and analysing eye-movement data using Python"
+  authors:
+    - family-names: Ruarte
+      given-names: Gonzalo
+      orcid: "https://orcid.org/0009-0000-2013-782X"
+    - family-names: Juantorena
+      given-names: Gustavo
+      orcid: "https://orcid.org/0000-0001-8248-7630"
+    - family-names: González
+      given-names: Joaquín
+      orcid: "https://orcid.org/0009-0009-0473-6545"
+    - family-names: Kamienkowski
+      given-names: Juan Esteban
+      orcid: "https://orcid.org/0000-0002-5725-6539"
+  journal: "Journal of Open Source Software"
+  year: 2026
+  doi: 10.21105/joss.10899

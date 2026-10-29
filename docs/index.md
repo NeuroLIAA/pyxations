@@ -69,4 +69,18 @@ See [Usage](usage.md) for an end-to-end walkthrough.
 
 ## Citation
 
-If you use Pyxations in academic work, please cite the accompanying paper (see `paper.md` in the [repository](https://github.com/NeuroLIAA/pyxations)).
+If you use Pyxations in your work, please cite the paper:
+
+> Ruarte, G., Juantorena, G., González, J., & Kamienkowski, J. E. (2026). Pyxations: organizing, parsing, and analysing eye-movement data using Python. *Journal of Open Source Software*. [https://doi.org/10.21105/joss.10899](https://doi.org/10.21105/joss.10899)
+
+```bibtex
+@article{Ruarte2026Pyxations,
+  author  = {Ruarte, Gonzalo and Juantorena, Gustavo and Gonz{\'a}lez, Joaqu{\'\i}n and Kamienkowski, Juan Esteban},
+  title   = {Pyxations: organizing, parsing, and analysing eye-movement data using Python},
+  journal = {Journal of Open Source Software},
+  year    = {2026},
+  doi     = {10.21105/joss.10899}
+}
+```
+
+The archived source code of each release is available on Zenodo; version 0.4.0 is [10.5281/zenodo.23771267](https://doi.org/10.5281/zenodo.23771267).
