@@ -34,3 +34,6 @@ dist/
 
 # mkdocs-jupyter caches executed notebooks here
 .cache/
+
+# Local JOSS paper build (openjournals/inara)
+/paper.pdf
