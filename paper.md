@@ -3,12 +3,16 @@ title: "Pyxations: organizing, parsing, and analysing eye-movement data using Py
 tags: [Python, eye tracking, data analysis, gaze, neuroscience]
 authors:
   - name: "Gonzalo Ruarte"
+    orcid: 0009-0000-2013-782X
     affiliation: 1
   - name: "Gustavo Juantorena"
+    orcid: 0000-0001-8248-7630
     affiliation: 1
   - name: "Joaquín González"
+    orcid: 0009-0009-0473-6545
     affiliation: "1, 3"
   - name: "Juan Esteban Kamienkowski"
+    orcid: 0000-0002-5725-6539
     affiliation: "1, 2"
 
 affiliations:
@@ -29,7 +33,7 @@ Pyxations is a Python-based toolbox designed to unify the organization, parsing,
 
 # Statement of Need
 
-Looking at someone’s eyes, searching for keys, and reading are active processes in which eye movements play a crucial role [@rayner1998; @wade2005; @land2009looking; @holmqvist2011eye]. Eye-tracking recordings can describe not only fixations and saccades, but also smooth pursuit, microsaccades, vergence, blinks, and changes in pupil size. Blink timing and pupil dynamics can be scientifically informative in their own right and should therefore be retained even when an analysis primarily concerns gaze position [@zhang2026pupeyes]. Common remote laboratory eye-trackers use one or more cameras, typically with infrared illumination, to image the pupil and corneal reflection; pupil--corneal-reflection methods then estimate where the eyes are directed. Webcam-based systems generally operate without controlled infrared illumination and instead estimate gaze from eye and face images using computer-vision or machine-learning techniques [@JuantorenaAntisaccade]. Continuous gaze and pupil signals may subsequently be classified into eye-movement events. Commercial systems such as EyeLink provide vendor-reported event classifications through a built-in parser [@srresearch2021eyelink], whereas open algorithms include the methods of Engbert and Mergenthaler [@engbert2006microsaccades] and REMoDNaV [@dar2021remodnav].
+Looking at someone’s eyes, searching for keys, or reading are active processes in which eye movements play a crucial role [@rayner1998; @wade2005; @land2009looking; @holmqvist2011eye]. Eye-tracking recordings can describe not only fixations and saccades, but also smooth pursuit, microsaccades, vergence, blinks, and changes in pupil size. Blink timing and pupil dynamics can be scientifically informative in their own right and should therefore be retained even when an analysis primarily concerns gaze position [@zhang2026pupeyes]. Common remote laboratory eye-trackers use one or more cameras, typically with infrared illumination, to image the pupil and corneal reflection; pupil--corneal-reflection methods then estimate where the eyes are directed. Webcam-based systems generally operate without controlled infrared illumination and instead estimate gaze from eye and face images using computer-vision or machine-learning techniques [@JuantorenaAntisaccade]. Continuous gaze and pupil signals may subsequently be classified into eye-movement events. Commercial systems such as EyeLink provide vendor-reported event classifications through a built-in parser [@srresearch2021eyelink], whereas open algorithms include the methods of Engbert and Mergenthaler [-@engbert2006microsaccades] and REMoDNaV [@dar2021remodnav].
 
 The Brain Imaging Data Structure (BIDS) and the Eye-Tracking-BIDS extension now specify how sample-level gaze position, pupil recordings, and their metadata should be represented [@gorgolewski2016bids; @szinte2026eyetrackingbids]. However, converting heterogeneous vendor recordings into this representation and continuing from standardized samples to reproducible preprocessing, event detection, and analysis still requires substantial format-specific orchestration. Differences among experimental paradigms, devices, calibration procedures, and event-detection algorithms make it difficult to move from raw recordings to comparable results. Pyxations addresses this implementation gap while retaining the original vendor files for provenance.
 
@@ -43,7 +47,7 @@ SPEED (LabSoC Standardized Processing and Extraction of Eye-tracking Data) also 
 
 PupEyes provides a dedicated pupil-preprocessing and quality-control workflow, including deblinking, artifact rejection, smoothing, interpolation, baseline correction, and interactive diagnostic visualizations [@zhang2026pupeyes]. Pyxations does not duplicate this specialized pupillometry pipeline. Instead, it preserves pupil measurements and blink events when they are available, exposes them through `pupil_samples()` and `blinks()` at each level of its experiment hierarchy, and provides standardized tabular data that can be converted for use by downstream analysis packages.
 
-Therefore, Pyxations was designed as a reproducible and extensible framework that unifies these complementary strengths while addressing their limitations. It is a Python-based toolbox designed to unify the organization, parsing, and analysis of eye-movement data. It supports multiple common recording formats and detection algorithms, and offers integrated tools for preprocessing, visualization, and downstream analysis. Its conversion layer writes per-eye BIDS physiological recordings and retains vendor originals under `sourcedata`; its processing layer writes processed samples and eye-movement annotations to a linked dataset following the general BIDS Derivatives conventions, facilitating reproducibility and comparison across tasks, devices, and studies.
+Therefore, Pyxations was designed as a reproducible and extensible framework that unifies these complementary strengths while addressing the limitations of these other software packages.
 
 # Research Impact Statement
 
