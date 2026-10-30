@@ -37,6 +37,8 @@ Looking at someone’s eyes, searching for keys, or reading are active processes
 
 The Brain Imaging Data Structure (BIDS) and the Eye-Tracking-BIDS extension now specify how sample-level gaze position, pupil recordings, and their metadata should be represented [@gorgolewski2016bids; @szinte2026eyetrackingbids]. However, converting heterogeneous vendor recordings into this representation and continuing from standardized samples to reproducible preprocessing, event detection, and analysis still requires substantial format-specific orchestration. Differences among experimental paradigms, devices, calibration procedures, and event-detection algorithms make it difficult to move from raw recordings to comparable results. Pyxations addresses this implementation gap while retaining the original vendor files for provenance.
 
+# State of the field
+
 In recent years, several open-source toolboxes have been developed to support eye-tracking data processing, including PyMovements [@krakowczyk2023pymovements], PyTrack [@ghose2020pytrack], SPEED [@lozzi2025speed], and PupEyes [@zhang2026pupeyes]. Each offers valuable functionality within the growing ecosystem of open tools for gaze analysis. Below we summarize their key features and how Pyxations extends or complements them.
 
 PyMovements provides a modular Python interface for loading datasets, preprocessing gaze data, detecting oculomotor events, computing data-quality measures, and rendering plots. Its dataset definitions and configurable paths support both public and local datasets. Pyxations has a different emphasis: it converts supported vendor exports into paired raw and derivative BIDS datasets and carries that organization through preprocessing and hierarchical analysis.
@@ -47,7 +49,7 @@ SPEED (LabSoC Standardized Processing and Extraction of Eye-tracking Data) also 
 
 PupEyes provides a dedicated pupil-preprocessing and quality-control workflow, including deblinking, artifact rejection, smoothing, interpolation, baseline correction, and interactive diagnostic visualizations [@zhang2026pupeyes]. Pyxations does not duplicate this specialized pupillometry pipeline. Instead, it preserves pupil measurements and blink events when they are available, exposes them through `pupil_samples()` and `blinks()` at each level of its experiment hierarchy, and provides standardized tabular data that can be converted for use by downstream analysis packages.
 
-Therefore, Pyxations was designed as a reproducible and extensible framework that unifies these complementary strengths while addressing the limitations of these other software packages.
+We developed Pyxations to consolidate the preprocessing of eye-tracking data from different devices and experiments into a single pipeline. Within this pipeline, researchers can choose among supported eye-movement detection algorithms and use the detected events for different analyses. Our motivation for developing a separate package was to bring these steps together in one reusable workflow, reducing the need for separate processing code for each device, experiment, or analysis.
 
 # Research Impact Statement
 
