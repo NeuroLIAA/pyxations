@@ -29,7 +29,7 @@ bibliography: paper.bib
 
 # Summary
 
-Pyxations is a Python-based toolbox designed to unify the organization, parsing, and analysis of eye-movement data. It supports multiple common recording formats and detection algorithms, and offers integrated tools for preprocessing, visualization, and downstream analysis. Pyxations converts sample-level recordings from its supported eye trackers to the eye-tracking physiological format defined by BIDS and writes processed samples and detected eye movements to a linked, validator-tested BIDS Derivatives dataset using the general derivatives conventions and physiological recording file types. By standardizing these steps, Pyxations facilitates reproducibility and makes it easier to compare results across tasks, devices, and studies.
+Pyxations is a Python-based toolbox designed to unify the organization, parsing, and analysis of eye-movement data. It supports multiple common recording formats and detection algorithms, and offers integrated tools for preprocessing, visualization, and downstream analysis. Pyxations converts sample-level recordings from its supported eye trackers to the eye-tracking physiological format defined by the Brain Imaging Data Structure (BIDS) and writes processed samples and detected eye movements to a linked, validator-tested BIDS Derivatives dataset using the general derivatives conventions and physiological recording file types. By standardizing these steps, Pyxations facilitates reproducibility and makes it easier to compare results across tasks, devices, and studies.
 
 # Statement of Need
 
